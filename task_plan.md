@@ -35,22 +35,27 @@
 
 **目标**: 扩展渲染能力 + 集成 Tauri 桌面应用
 
-**状态**: IN PROGRESS
+**状态**: IN PROGRESS (命令行功能完成，待集成 Tauri)
 
-**当前任务**: T-007 (Mermaid 流程图)
+**当前任务**: T-012 (集成 Tauri 桌面 exe)
 
 ### Tasks
 
 | ID | 任务 | 状态 | 依赖 | 备注 |
 |----|------|------|------|------|
-| T-007 | Mermaid 流程图渲染 | ⏳ Pending | - | 需要嵌入 Mermaid.js |
-| T-008 | Mermaid 时序图渲染 | ⏳ Pending | T-007 | 复用 T-007 基础 |
-| T-009 | 本地图片加载 | ⏳ Pending | - | 相对路径解析 |
-| T-010 | 网络图片加载 | ⏳ Pending | - | URL 图片 + 错误处理 |
-| T-011 | 图片放大查看 | ⏳ Pending | T-009, T-010 | 点击放大 + 缩放 |
-| T-012 | 集成 Tauri (桌面 exe) | ⏳ Pending | - | GUI 窗口基础 |
+| T-007 | Mermaid 流程图渲染 | ✅ Done | - | 13 种图表类型 |
+| T-008 | Mermaid 时序图渲染 | ✅ Done | T-007 | 复用 T-007 基础 |
+| T-009 | 本地图片加载 | ✅ Done | - | 相对路径 + 占位符 |
+| T-010 | 网络图片加载 | ✅ Done | - | lazy loading |
+| T-011 | 图片放大查看 | ✅ Done | T-009, T-010 | Lightbox + 缩放 |
+| T-012 | 集成 Tauri (桌面 exe) | ⏳ Pending | - | 方案已完成，待实施 |
 | T-013 | 侧边目录 TOC | ⏳ Pending | T-012 | 需要 GUI |
 | T-014 | 源码模式切换 | ⏳ Pending | T-012 | Ctrl+E 切换 |
+
+**关键产出**:
+- Mermaid.js 集成 (流程图、时序图等 13 种)
+- 图片处理 (本地/网络 + Lightbox 放大)
+- Tauri 集成方案文档 (`docs/tauri-integration-plan.md`)
 
 **验收标准**:
 - Mermaid: 流程图 + 时序图正确渲染为 SVG
@@ -119,11 +124,15 @@
 
 ## Next Steps
 
-**当前建议**: 启动 Phase 2，从 T-007 (Mermaid 流程图) 开始
+**当前建议**: 集成 Tauri (T-012)，将命令行工具变成桌面应用
 
 **预计工作量**:
-- T-007~011 (图表+图片): 命令行模式，可并行开发
-- T-012 (Tauri): 关键节点，完成后解锁 T-013~022
+- T-012 (Tauri 集成): 需要安装 Tauri CLI + 配置项目结构
+- T-013~014: 依赖 T-012 完成
+
+**Tauri 准备工作**:
+1. 安装 Tauri CLI: `npm install -g @tauri-apps/cli@latest`
+2. 参考: `docs/tauri-integration-plan.md`
 
 ---
 
@@ -132,8 +141,8 @@
 | Phase | 进度 | 任务完成 |
 |-------|------|----------|
 | Phase 1 | 100% | 6/6 ✅ |
-| Phase 2 | 0% | 0/8 ⏳ |
+| Phase 2 | 75% | 6/8 🔄 |
 | Phase 3 | 0% | 0/5 ⏸️ |
 | Phase 4 | 0% | 0/3 ⏸️ |
 
-**总体进度**: 6/22 = 27%
+**总体进度**: 12/22 = 55%
