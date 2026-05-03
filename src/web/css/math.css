@@ -1,0 +1,277 @@
+/* Math Formula Styles - KaTeX Enhancement */
+
+/* Inline Math */
+.katex-inline,
+.katex {
+  font-size: 1.1em;
+}
+
+/* Display Math */
+.katex-display {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--color-accent);
+}
+
+/* Center display math */
+.katex-display > .katex {
+  text-align: center;
+}
+
+/* Math Block Container */
+.math-block {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-lg);
+  background: linear-gradient(
+    135deg,
+    var(--color-bg-secondary) 0%,
+    var(--color-bg-tertiary) 100%
+  );
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  overflow-x: auto;
+}
+
+.math-block .katex-display {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+/* Numbered Equations */
+.equation-container {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+}
+
+.equation-container .katex-display {
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.equation-number {
+  flex-shrink: 0;
+  margin-left: var(--spacing-md);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+}
+
+/* Math in Tables */
+td .katex,
+th .katex {
+  font-size: 0.95em;
+}
+
+/* Multiline Equations */
+.multline-container {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.multline-container .katex-display {
+  margin: var(--spacing-sm) 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+/* Aligned Equations */
+.align-container {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-md) var(--spacing-lg);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+
+.align-container .katex-display {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+/* Math Error Styling */
+.katex-error {
+  color: var(--color-error);
+  background: rgba(239, 68, 68, 0.1);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+}
+
+/* Math Annotation (source view) */
+.math-source {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-tertiary);
+  background: var(--color-bg-tertiary);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.math-source:hover {
+  background: var(--color-accent-light);
+  color: var(--color-accent);
+}
+
+/* Copy Button for Math */
+.math-copy {
+  position: absolute;
+  top: var(--spacing-xs);
+  right: var(--spacing-xs);
+  padding: var(--spacing-xs);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--transition-fast);
+}
+
+.math-block:hover .math-copy {
+  opacity: 1;
+}
+
+.math-copy:hover {
+  color: var(--color-accent);
+  background: var(--color-bg-secondary);
+}
+
+/* Math Delimiter Indicators */
+.math-delimiter {
+  display: inline-block;
+  padding: 0 var(--spacing-xs);
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+}
+
+/* Highlight on Hover */
+.math-highlight .katex-display:hover {
+  background: var(--color-accent-light);
+  transition: background var(--transition-fast);
+}
+
+/* Responsive Math */
+@media (max-width: 768px) {
+  .katex-display {
+    font-size: 0.9em;
+    padding: var(--spacing-sm);
+  }
+
+  .math-block {
+    padding: var(--spacing-md);
+    margin-left: calc(var(--content-padding) * -1);
+    margin-right: calc(var(--content-padding) * -1);
+    border-radius: 0;
+  }
+}
+
+/* Scrollbar for Math */
+.katex-display::-webkit-scrollbar,
+.math-block::-webkit-scrollbar {
+  height: 6px;
+}
+
+.katex-display::-webkit-scrollbar-track,
+.math-block::-webkit-scrollbar-track {
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.katex-display::-webkit-scrollbar-thumb,
+.math-block::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.katex-display::-webkit-scrollbar-thumb:hover,
+.math-block::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-muted);
+}
+
+/* Print Styles */
+@media print {
+  .katex-display,
+  .math-block {
+    background: transparent !important;
+    box-shadow: none !important;
+    border: 1px solid #ddd !important;
+  }
+
+  .math-copy,
+  .math-delimiter {
+    display: none !important;
+  }
+}
+
+/* Dark Theme Adjustments */
+@media (prefers-color-scheme: dark) {
+  .katex {
+    color: var(--color-text-primary);
+  }
+
+  .katex-display {
+    background: var(--color-bg-secondary);
+    border-left-color: var(--color-accent);
+  }
+
+  .math-block {
+    background: linear-gradient(
+      135deg,
+      var(--color-bg-secondary) 0%,
+      rgba(30, 41, 59, 0.8) 100%
+    );
+  }
+}
+
+/* Math Animation */
+@keyframes mathRender {
+  from {
+    opacity: 0.5;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.math-rendering {
+  animation: mathRender 0.3s ease;
+}
+
+/* SVG Math Support */
+.math-svg {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.math-svg svg {
+  max-width: 100%;
+  height: auto;
+}
