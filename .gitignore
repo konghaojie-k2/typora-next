@@ -1,0 +1,16 @@
+# Rust
+/target/
+
+# IDE
+/.idea/
+/.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.exe
+*.dll
+*.so
