@@ -1,0 +1,21 @@
+{
+  "last_session": "2026-05-03T14:00",
+  "project_phase": "Phase 2: P1 Extended Features",
+  "progress": "27%",
+  "pending_tasks": [
+    {"task": "T-007: Mermaid 流程图渲染", "priority": "high"},
+    {"task": "T-008: Mermaid 时序图渲染", "priority": "medium"},
+    {"task": "T-009: 本地图片加载", "priority": "medium"},
+    {"task": "T-012: 集成 Tauri (桌面 exe)", "priority": "high"}
+  ],
+  "decisions": [
+    {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
+    {"date": "2026-05-03", "decision": "使用 KaTeX", "reason": "渲染速度快 10x"},
+    {"date": "2026-05-03", "decision": "P0后集成Tauri", "reason": "先验证核心渲染能力"}
+  ],
+  "findings": [
+    "pulldown-cmark 支持 GFM 扩展（表格、任务列表、删除线）",
+    "数学公式需要预处理保护，避免被 markdown 解析器误解析"
+  ],
+  "next_suggested": "早省：启动 Phase 2，从 T-007 Mermaid 流程图开始"
+}
