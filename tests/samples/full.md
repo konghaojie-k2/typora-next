@@ -67,6 +67,12 @@ Reference-style link to [GitHub][github].
 
 ![Sample Image](https://via.placeholder.com/150 "Placeholder")
 
+### Additional Image Tests
+
+![Medium Image](https://via.placeholder.com/200x100 "Medium sized")
+
+![Missing Local](./nonexistent.png "This image does not exist")
+
 ---
 
 ## 5. Blockquotes

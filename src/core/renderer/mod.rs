@@ -183,6 +183,113 @@ img {
     max-width: 100%;
     box-sizing: content-box;
     background-color: #fff;
+    cursor: zoom-in;
+    transition: transform var(--transition-fast);
+}
+
+img:hover {
+    transform: scale(1.02);
+}
+
+/* Image Placeholder - for missing/broken images */
+img[data-error="true"],
+img.image-error {
+    min-width: 100px;
+    min-height: 100px;
+    background: var(--color-bg-tertiary);
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    position: relative;
+    cursor: default;
+}
+
+img[data-error="true"]::before,
+img.image-error::before {
+    content: "⚠";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -60%);
+    font-size: 2em;
+    color: var(--color-text-muted);
+}
+
+img[data-error="true"]::after,
+img.image-error::after {
+    content: attr(alt) " (Image not found)";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, 40%);
+    font-size: 0.8em;
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+/* Image Lightbox */
+.image-lightbox {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.9);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+    cursor: zoom-out;
+    animation: lightbox-fade-in 0.2s ease;
+}
+
+@keyframes lightbox-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+.image-lightbox img {
+    max-width: 90%;
+    max-height: 90%;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);
+    transition: transform 0.3s ease;
+    cursor: default;
+}
+
+/* Lightbox Controls */
+.lightbox-controls {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: var(--spacing-sm);
+    z-index: 1001;
+}
+
+.lightbox-btn {
+    padding: var(--spacing-sm) var(--spacing-md);
+    background: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: var(--radius-md);
+    color: white;
+    font-size: var(--font-size-sm);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.lightbox-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.lightbox-zoom-info {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.7);
+    font-size: var(--font-size-sm);
+    z-index: 1001;
 }
 "#;
 
@@ -481,6 +588,11 @@ const PRISM_INIT_JS: &str = r#"
     codeBlocks.forEach(codeBlock => {
       const pre = codeBlock.parentElement;
       if (!pre || pre.classList.contains(CONFIG.codeBlockClass)) return;
+
+      // Skip mermaid code blocks - they are handled by Mermaid.js
+      const language = getLanguageFromClass(codeBlock.className);
+      if (language === 'mermaid') return;
+
       enhanceCodeBlock(pre, codeBlock);
     });
   }
@@ -489,6 +601,9 @@ const PRISM_INIT_JS: &str = r#"
     pre.classList.add(CONFIG.codeBlockClass);
 
     const language = getLanguageFromClass(codeBlock.className);
+
+    // Skip mermaid blocks
+    if (language === 'mermaid') return;
 
     if (CONFIG.showLanguageLabel && language) {
       pre.setAttribute('data-language', language);
@@ -573,6 +688,236 @@ const PRISM_INIT_JS: &str = r#"
 })();
 "#;
 
+/// Image handling script for lazy loading, error handling, and lightbox
+const IMAGE_INIT_JS: &str = r#"
+(function() {
+  'use strict';
+
+  // Image configuration
+  const IMAGE_CONFIG = {
+    enableLightbox: true,
+    enableLazyLoading: true,
+    showZoomControls: true,
+    minZoomLevel: 0.5,
+    maxZoomLevel: 3,
+    zoomStep: 0.25
+  };
+
+  // Current zoom level for lightbox
+  let currentZoom = 1;
+
+  function initImages() {
+    const images = document.querySelectorAll('img');
+
+    images.forEach(img => {
+      // Skip images already in lightbox
+      if (img.closest('.image-lightbox')) return;
+
+      // Add lazy loading for better performance
+      if (IMAGE_CONFIG.enableLazyLoading && !img.hasAttribute('loading')) {
+        img.setAttribute('loading', 'lazy');
+      }
+
+      // Handle image loading errors
+      if (!img.hasAttribute('data-error-handled')) {
+        img.setAttribute('data-error-handled', 'true');
+
+        img.addEventListener('error', function() {
+          this.setAttribute('data-error', 'true');
+          this.classList.add('image-error');
+          this.style.minWidth = '100px';
+          this.style.minHeight = '100px';
+          this.alt = this.alt || 'Image';
+        });
+
+        // Handle successful load
+        img.addEventListener('load', function() {
+          this.removeAttribute('data-error');
+          this.classList.remove('image-error');
+        });
+      }
+
+      // Add click handler for lightbox
+      if (IMAGE_CONFIG.enableLightbox && !img.hasAttribute('data-lightbox-handled')) {
+        img.setAttribute('data-lightbox-handled', 'true');
+        img.style.cursor = 'zoom-in';
+
+        img.addEventListener('click', function(e) {
+          // Don't open lightbox for error images
+          if (this.hasAttribute('data-error') || this.classList.contains('image-error')) {
+            return;
+          }
+          e.preventDefault();
+          e.stopPropagation();
+          openLightbox(this);
+        });
+      }
+    });
+  }
+
+  function openLightbox(img) {
+    currentZoom = 1;
+
+    // Create lightbox container
+    const lightbox = document.createElement('div');
+    lightbox.className = 'image-lightbox';
+    lightbox.setAttribute('role', 'dialog');
+    lightbox.setAttribute('aria-label', 'Image viewer');
+
+    // Create the image element
+    const lightboxImg = document.createElement('img');
+    lightboxImg.src = img.src;
+    lightboxImg.alt = img.alt || '';
+    lightboxImg.style.transform = `scale(${currentZoom})`;
+
+    // Create zoom info display
+    const zoomInfo = document.createElement('div');
+    zoomInfo.className = 'lightbox-zoom-info';
+    zoomInfo.textContent = `Zoom: ${Math.round(currentZoom * 100)}%`;
+
+    // Create controls container
+    const controls = document.createElement('div');
+    controls.className = 'lightbox-controls';
+
+    // Zoom in button
+    const zoomInBtn = document.createElement('button');
+    zoomInBtn.className = 'lightbox-btn';
+    zoomInBtn.textContent = '+ Zoom In';
+    zoomInBtn.setAttribute('aria-label', 'Zoom in');
+    zoomInBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      zoomImage(lightboxImg, zoomInfo, IMAGE_CONFIG.zoomStep);
+    });
+
+    // Zoom out button
+    const zoomOutBtn = document.createElement('button');
+    zoomOutBtn.className = 'lightbox-btn';
+    zoomOutBtn.textContent = '- Zoom Out';
+    zoomOutBtn.setAttribute('aria-label', 'Zoom out');
+    zoomOutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      zoomImage(lightboxImg, zoomInfo, -IMAGE_CONFIG.zoomStep);
+    });
+
+    // Reset button
+    const resetBtn = document.createElement('button');
+    resetBtn.className = 'lightbox-btn';
+    resetBtn.textContent = 'Reset';
+    resetBtn.setAttribute('aria-label', 'Reset zoom');
+    resetBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      currentZoom = 1;
+      lightboxImg.style.transform = `scale(${currentZoom})`;
+      zoomInfo.textContent = `Zoom: ${Math.round(currentZoom * 100)}%`;
+    });
+
+    // Close button
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'lightbox-btn';
+    closeBtn.textContent = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close lightbox');
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeLightbox(lightbox);
+    });
+
+    // Assemble controls
+    if (IMAGE_CONFIG.showZoomControls) {
+      controls.appendChild(zoomInBtn);
+      controls.appendChild(zoomOutBtn);
+      controls.appendChild(resetBtn);
+    }
+    controls.appendChild(closeBtn);
+
+    // Assemble lightbox
+    lightbox.appendChild(lightboxImg);
+    lightbox.appendChild(zoomInfo);
+    lightbox.appendChild(controls);
+
+    // Click on background to close
+    lightbox.addEventListener('click', function(e) {
+      if (e.target === lightbox) {
+        closeLightbox(lightbox);
+      }
+    });
+
+    // Keyboard handling
+    const handleKeydown = (e) => {
+      switch(e.key) {
+        case 'Escape':
+          closeLightbox(lightbox);
+          break;
+        case '+':
+        case '=':
+          e.preventDefault();
+          zoomImage(lightboxImg, zoomInfo, IMAGE_CONFIG.zoomStep);
+          break;
+        case '-':
+          e.preventDefault();
+          zoomImage(lightboxImg, zoomInfo, -IMAGE_CONFIG.zoomStep);
+          break;
+        case '0':
+          e.preventDefault();
+          currentZoom = 1;
+          lightboxImg.style.transform = `scale(${currentZoom})`;
+          zoomInfo.textContent = `Zoom: ${Math.round(currentZoom * 100)}%`;
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeydown);
+
+    // Store cleanup function
+    lightbox.dataset.cleanup = 'true';
+    lightbox._handleKeydown = handleKeydown;
+
+    // Add to DOM
+    document.body.appendChild(lightbox);
+    document.body.style.overflow = 'hidden';
+  }
+
+  function zoomImage(img, zoomInfo, delta) {
+    currentZoom = Math.max(
+      IMAGE_CONFIG.minZoomLevel,
+      Math.min(IMAGE_CONFIG.maxZoomLevel, currentZoom + delta)
+    );
+    img.style.transform = `scale(${currentZoom})`;
+    zoomInfo.textContent = `Zoom: ${Math.round(currentZoom * 100)}%`;
+  }
+
+  function closeLightbox(lightbox) {
+    // Remove keyboard listener
+    if (lightbox._handleKeydown) {
+      document.removeEventListener('keydown', lightbox._handleKeydown);
+    }
+
+    // Remove lightbox with fade animation
+    lightbox.style.opacity = '0';
+    setTimeout(() => {
+      if (lightbox.parentNode) {
+        lightbox.parentNode.removeChild(lightbox);
+      }
+      document.body.style.overflow = '';
+    }, 200);
+  }
+
+  // Initialize when DOM is ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initImages);
+  } else {
+    initImages();
+  }
+
+  // Re-run image init after dynamic content changes
+  window.ImageInit = {
+    initImages,
+    openLightbox,
+    closeLightbox,
+    IMAGE_CONFIG
+  };
+})();
+"#;
+
 /// Prism.js CDN links for HTML document
 const PRISM_CDN_CSS: &str = r#"
   <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
@@ -614,6 +959,7 @@ pub fn render_html_document(events: &[Event<'_>]) -> String {
 {}
     <script>
 {}
+{}
     </script>
 </body>
 </html>"#,
@@ -622,7 +968,8 @@ pub fn render_html_document(events: &[Event<'_>]) -> String {
         CODE_CSS,
         body_html,
         PRISM_CDN_JS,
-        PRISM_INIT_JS
+        PRISM_INIT_JS,
+        IMAGE_INIT_JS
     )
 }
 
@@ -790,6 +1137,98 @@ const KATEX_INIT_JS: &str = r#"
 })();
 "#;
 
+/// Mermaid CSS styles
+const MERMAID_CSS: &str = r#"
+/* Mermaid Diagram Styles */
+.mermaid {
+  margin: var(--spacing-lg) 0;
+  padding: var(--spacing-md);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  overflow-x: auto;
+  font-family: var(--font-main);
+}
+
+.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Dark theme adjustments for Mermaid */
+@media (prefers-color-scheme: dark) {
+  .mermaid {
+    background: var(--color-bg-tertiary);
+  }
+}
+
+/* Print styles */
+@media print {
+  .mermaid {
+    background: transparent !important;
+    border: 1px solid #ddd;
+  }
+}
+"#;
+
+/// Mermaid CDN script
+const MERMAID_CDN_JS: &str = r#"
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+"#;
+
+/// Mermaid initialization script
+const MERMAID_INIT_JS: &str = r#"
+(function() {
+  'use strict';
+
+  function initMermaid() {
+    if (typeof mermaid === 'undefined') {
+      console.warn('Mermaid.js not loaded');
+      return;
+    }
+
+    // Detect theme preference
+    const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: isDark ? 'dark' : 'default',
+      securityLevel: 'loose',
+      flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis'
+      },
+      sequence: {
+        useMaxWidth: true,
+        diagramMarginX: 50,
+        diagramMarginY: 10,
+        actorMargin: 50,
+        width: 150,
+        height: 65,
+        boxMargin: 10,
+        boxTextMargin: 5,
+        noteMargin: 10,
+        messageMargin: 35,
+        mirrorActors: true
+      },
+      gantt: {
+        useMaxWidth: true
+      },
+      pie: {
+        useMaxWidth: true
+      }
+    });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initMermaid);
+  } else {
+    initMermaid();
+  }
+})();
+"#;
+
 /// Pre-process text to protect math blocks from markdown parsing
 ///
 /// Returns (protected_text, math_blocks) where math_blocks is a vector
@@ -866,6 +1305,50 @@ pub fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> S
     result
 }
 
+/// Post-process HTML to convert mermaid code blocks to proper Mermaid format
+///
+/// Converts `<pre><code class="language-mermaid">...</code></pre>`
+/// to `<pre class="mermaid">...</pre>` for Mermaid.js rendering.
+pub fn postprocess_mermaid(html: &str) -> String {
+    // Pattern to match mermaid code blocks
+    // The HTML from pulldown-cmark looks like: <pre><code class="language-mermaid">content</code></pre>
+    let mermaid_pattern_start = "<pre><code class=\"language-mermaid\">";
+    let mermaid_pattern_end = "</code></pre>";
+
+    let mut processed = String::new();
+    let mut remaining = html;
+
+    while let Some(start_idx) = remaining.find(mermaid_pattern_start) {
+        // Add content before the mermaid block
+        processed.push_str(&remaining[..start_idx]);
+
+        // Find the end of the code block
+        let after_start = &remaining[start_idx + mermaid_pattern_start.len()..];
+        if let Some(end_idx) = after_start.find(mermaid_pattern_end) {
+            // Extract the mermaid content (already HTML-escaped by pulldown-cmark)
+            let mermaid_content = &after_start[..end_idx];
+
+            // Create the new mermaid block format
+            // Mermaid expects: <pre class="mermaid">content</pre>
+            processed.push_str("<pre class=\"mermaid\">");
+            processed.push_str(mermaid_content);
+            processed.push_str("</pre>");
+
+            // Move past this block
+            remaining = &after_start[end_idx + mermaid_pattern_end.len()..];
+        } else {
+            // No closing tag found, just keep the rest
+            processed.push_str(remaining);
+            break;
+        }
+    }
+
+    // Add any remaining content
+    processed.push_str(remaining);
+
+    processed
+}
+
 /// Render markdown text with math preprocessing
 ///
 /// This function:
@@ -873,6 +1356,8 @@ pub fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> S
 /// 2. Parses the protected text as markdown
 /// 3. Renders to HTML
 /// 4. Restores math blocks with KaTeX markup
+/// 5. Converts mermaid code blocks to Mermaid format
+/// 6. Wraps in full document with KaTeX, Prism.js, and Mermaid.js
 pub fn render_markdown_with_math(text: &str) -> String {
     use crate::core::parser::parse_markdown;
 
@@ -888,7 +1373,10 @@ pub fn render_markdown_with_math(text: &str) -> String {
     // Step 4: Post-process to restore math
     let html = postprocess_math(&html, &math_blocks);
 
-    // Step 5: Wrap in full document with KaTeX and Prism.js
+    // Step 5: Post-process mermaid code blocks
+    let html = postprocess_mermaid(&html);
+
+    // Step 6: Wrap in full document with KaTeX, Prism.js, and Mermaid.js
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
@@ -902,13 +1390,17 @@ pub fn render_markdown_with_math(text: &str) -> String {
 {}
 {}
 {}
+{}
     </style>
 </head>
 <body>
 {}
 {}
 {}
+{}
     <script>
+{}
+{}
 {}
 {}
     </script>
@@ -919,10 +1411,44 @@ pub fn render_markdown_with_math(text: &str) -> String {
         BASE_CSS,
         CODE_CSS,
         KATEX_CSS,
+        MERMAID_CSS,
         html,
         PRISM_CDN_JS,
         KATEX_CDN_JS,
+        MERMAID_CDN_JS,
         PRISM_INIT_JS,
-        KATEX_INIT_JS
+        IMAGE_INIT_JS,
+        KATEX_INIT_JS,
+        MERMAID_INIT_JS
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_postprocess_mermaid_simple() {
+        let html = "<pre><code class=\"language-mermaid\">flowchart TD\nA --> B\n</code></pre>";
+        let result = postprocess_mermaid(html);
+        assert!(result.contains("<pre class=\"mermaid\">"), "Should contain mermaid class");
+        assert!(!result.contains("language-mermaid"), "Should not contain language-mermaid");
+        assert!(result.contains("flowchart TD"), "Should preserve content");
+    }
+
+    #[test]
+    fn test_postprocess_mermaid_multiple() {
+        let html = "<p>Text</p><pre><code class=\"language-mermaid\">graph TD\nA--&gt;B\n</code></pre><p>More</p><pre><code class=\"language-mermaid\">sequenceDiagram\nA->>B\n</code></pre>";
+        let result = postprocess_mermaid(html);
+        assert_eq!(result.matches("<pre class=\"mermaid\">").count(), 2, "Should have 2 mermaid blocks");
+        assert!(!result.contains("language-mermaid"), "Should not contain language-mermaid");
+    }
+
+    #[test]
+    fn test_postprocess_mermaid_no_blocks() {
+        let html = "<p>Just text</p><pre><code class=\"language-rust\">fn main() {}\n</code></pre>";
+        let result = postprocess_mermaid(html);
+        assert!(!result.contains("<pre class=\"mermaid\">"), "Should not contain mermaid class");
+        assert!(result.contains("language-rust"), "Should preserve other code blocks");
+    }
 }

@@ -38,11 +38,12 @@ fn main() {
     };
 
     // Check if math rendering is requested (via --math flag or auto-detect)
-    let use_math = args.iter().any(|arg| arg == "--math")
-        || contains_math(&markdown_content);
+    let use_extended = args.iter().any(|arg| arg == "--math")
+        || args.iter().any(|arg| arg == "--mermaid")
+        || needs_extended_rendering(&markdown_content);
 
     // Render with appropriate method
-    let html_output = if use_math {
+    let html_output = if use_extended {
         render_markdown_with_math(&markdown_content)
     } else {
         // Parse markdown to events
@@ -55,8 +56,8 @@ fn main() {
     match fs::write(output_path, html_output) {
         Ok(_) => {
             println!("Successfully rendered '{}' -> '{}'", input_path, output_path);
-            if use_math {
-                println!("Math formula rendering enabled (KaTeX)");
+            if use_extended {
+                println!("Extended rendering enabled (KaTeX math + Mermaid diagrams)");
             }
         }
         Err(e) => {
@@ -77,8 +78,18 @@ fn contains_math(content: &str) -> bool {
     has_inline || has_block
 }
 
+/// Check if content contains mermaid diagrams
+fn contains_mermaid(content: &str) -> bool {
+    content.contains("```mermaid")
+}
+
+/// Check if content needs extended rendering (math or mermaid)
+fn needs_extended_rendering(content: &str) -> bool {
+    contains_math(content) || contains_mermaid(content)
+}
+
 fn print_usage(program_name: &str) {
-    println!("Usage: {} render <input.md> <output.html> [--math]", program_name);
+    println!("Usage: {} render <input.md> <output.html> [--math] [--mermaid]", program_name);
     println!();
     println!("Commands:");
     println!("  render    Render a markdown file to HTML");
@@ -87,13 +98,20 @@ fn print_usage(program_name: &str) {
     println!("  input.md     Path to the input markdown file");
     println!("  output.html  Path to the output HTML file");
     println!("  --math       Force enable math formula rendering (auto-detected by default)");
+    println!("  --mermaid    Force enable mermaid diagram rendering (auto-detected by default)");
     println!();
     println!("Features:");
     println!("  - Full GFM markdown support (tables, strikethrough, task lists)");
     println!("  - Syntax highlighting with Prism.js");
     println!("  - Math formula rendering with KaTeX (auto-detected)");
+    println!("  - Mermaid diagrams: flowcharts, sequence diagrams, etc. (auto-detected)");
+    println!("  - Image support: local/URL images with lazy loading");
+    println!("  - Image lightbox: click to zoom, keyboard controls (+/-/0/ESC)");
+    println!("  - Error placeholder for missing/broken images");
     println!();
     println!("Examples:");
     println!("  {} render input.md output.html", program_name);
     println!("  {} render math.md math.html --math", program_name);
+    println!("  {} render mermaid.md mermaid.html", program_name);
+    println!("  {} render images.md images.html", program_name);
 }
