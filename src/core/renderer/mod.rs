@@ -1328,10 +1328,18 @@ pub fn postprocess_mermaid(html: &str) -> String {
             // Extract the mermaid content (already HTML-escaped by pulldown-cmark)
             let mermaid_content = &after_start[..end_idx];
 
+            // **IMPORTANT**: Mermaid needs raw unescaped content, not HTML entities
+            // Decode HTML entities: &gt; → >, &lt; → <, &amp; → &
+            let decoded_content = mermaid_content
+                .replace("&gt;", ">")
+                .replace("&lt;", "<")
+                .replace("&amp;", "&")
+                .replace("&quot;", "\"");
+
             // Create the new mermaid block format
             // Mermaid expects: <pre class="mermaid">content</pre>
             processed.push_str("<pre class=\"mermaid\">");
-            processed.push_str(mermaid_content);
+            processed.push_str(&decoded_content);
             processed.push_str("</pre>");
 
             // Move past this block
