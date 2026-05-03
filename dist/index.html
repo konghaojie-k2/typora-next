@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Typora Next</title>
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+  <!-- Prism.js for code highlighting -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+  <!-- Main styles -->
+  <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- TOC Sidebar -->
+    <aside class="toc-sidebar" id="tocSidebar">
+      <div class="toc-header">
+        <h3>目录</h3>
+        <button class="toc-toggle" id="tocToggle" title="Toggle TOC">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12h18M3 6h18M3 18h18"/>
+          </svg>
+        </button>
+      </div>
+      <nav class="toc-tree" id="tocTree">
+        <p class="toc-empty">打开文件以显示目录</p>
+      </nav>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="content-area" id="contentArea">
+      <!-- Toolbar -->
+      <header class="toolbar">
+        <div class="toolbar-left">
+          <button class="btn-icon" id="openFileBtn" title="Open File (Ctrl+O)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+              <polyline points="13 2 13 9 20 9"/>
+            </svg>
+          </button>
+          <span class="filename" id="filename">未打开文件</span>
+        </div>
+        <div class="toolbar-right">
+          <button class="btn-toggle" id="sourceToggle">
+            <span class="toggle-label">源码</span>
+            <span class="toggle-hint">(Ctrl+E)</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Markdown Content -->
+      <article class="markdown-body" id="markdownBody">
+        <div class="welcome-message">
+          <h1>Typora Next</h1>
+          <p>一个现代化的 Markdown 编辑器</p>
+          <p>按 <kbd>Ctrl+O</kbd> 打开文件，或拖拽文件到此处</p>
+        </div>
+      </article>
+
+      <!-- Source Code View (hidden by default) -->
+      <div class="source-view" id="sourceView" style="display: none;">
+        <pre class="source-code" id="sourceCode"></pre>
+      </div>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="scripts/main.js"></script>
+</body>
+</html>
