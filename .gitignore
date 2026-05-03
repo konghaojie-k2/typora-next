@@ -1,6 +1,9 @@
 # Rust
 /target/
 
+# Test output
+/output/
+
 # IDE
 /.idea/
 /.vscode/

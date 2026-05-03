@@ -14,6 +14,7 @@ pub fn parse_markdown(text: &str) -> Vec<Event<'_>> {
 }
 
 /// Parse with math/diagram extensions (custom handling)
+#[allow(dead_code)]
 pub fn parse_with_extensions(text: &str) -> Vec<Event<'_>> {
     // TODO: Pre-process for $$ math blocks and mermaid diagrams
     parse_markdown(text)

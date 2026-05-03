@@ -1,12 +1,14 @@
 //! Editor state management for WYSIWYG mode
 
 /// Editor cursor position and selection state
+#[allow(dead_code)]
 pub struct EditorState {
     cursor_position: usize,
     selection: Option<(usize, usize)>,
     viewport_scroll: f64,
 }
 
+#[allow(dead_code)]
 impl EditorState {
     pub fn new() -> Self {
         Self {
@@ -28,6 +30,7 @@ impl EditorState {
     }
 }
 
+#[allow(dead_code)]
 pub enum LineContext {
     Normal,
     ListItem { depth: usize },
