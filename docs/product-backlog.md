@@ -312,8 +312,24 @@
 
 | PBI | 状态 | 完成日期 |
 |-----|------|----------|
-| PBI-001 | Todo | - |
-| PBI-002 | Todo | - |
-| ... | ... | ... |
-
-（状态：Todo / In Progress / Done）
+| PBI-001 | Done | 2026-05-03 |
+| PBI-002 | Done | 2026-05-03 |
+| PBI-003 | Done | 2026-05-03 |
+| PBI-004 | Done | 2026-05-03 |
+| PBI-005 | Done | 2026-05-03 |
+| PBI-006 | Done | 2026-05-03 |
+| PBI-007 | Todo | - |
+| PBI-008 | Todo | - |
+| PBI-009 | Todo | - |
+| PBI-010 | Todo | - |
+| PBI-011 | Todo | - |
+| PBI-012 | Todo | - |
+| PBI-013 | Todo | - |
+| PBI-014 | Todo | - |
+| PBI-015 | Todo | - |
+| PBI-016 | Todo | - |
+| PBI-017 | Todo | - |
+| PBI-018 | Todo | - |
+| PBI-019 | Todo | - |
+| PBI-020 | Todo | - |
+| PBI-021 | Todo | - |
