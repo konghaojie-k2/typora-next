@@ -19,6 +19,15 @@ pub struct TocItem {
     slug: String,
 }
 
+/// Directory entry for file tree
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DirEntry {
+    name: String,
+    path: String,
+    is_dir: bool,
+    children: Option<Vec<DirEntry>>,
+}
+
 /// Open a file dialog and return selected file content
 #[tauri::command]
 async fn open_file_dialog(app: tauri::AppHandle) -> Result<FileResult, String> {
@@ -100,6 +109,101 @@ fn render_markdown_body(text: &str) -> String {
 #[tauri::command]
 fn get_toc(content: &str) -> Vec<TocItem> {
     extract_toc(content)
+}
+
+/// Open a folder dialog and return selected folder path
+#[tauri::command]
+async fn open_folder_dialog(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let folder_path = app.dialog()
+        .file()
+        .blocking_pick_folder();
+
+    match folder_path {
+        Some(path) => {
+            let path_ref = path.as_path().unwrap_or(&std::path::Path::new(""));
+            Ok(path_ref.display().to_string())
+        }
+        None => Err("No folder selected".to_string()),
+    }
+}
+
+/// List directory contents recursively (dirs + .md files)
+#[tauri::command]
+fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
+    let path_buf = PathBuf::from(&path);
+    if !path_buf.exists() {
+        return Err(format!("Directory not found: {}", path));
+    }
+    if !path_buf.is_dir() {
+        return Err(format!("Not a directory: {}", path));
+    }
+
+    let entries = read_dir_recursive(&path_buf)
+        .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+    Ok(entries)
+}
+
+fn read_dir_recursive(path: &std::path::Path) -> Result<Vec<DirEntry>, std::io::Error> {
+    let mut entries = Vec::new();
+    let mut dir_entries = Vec::new();
+
+    for entry_result in fs::read_dir(path)? {
+        let entry = entry_result?;
+        let metadata = entry.metadata()?;
+        let file_type = metadata.file_type();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let child_path = entry.path().display().to_string();
+
+        // Skip hidden files and directories
+        if name.starts_with('.') {
+            continue;
+        }
+
+        if file_type.is_dir() {
+            dir_entries.push((name, child_path));
+        } else if file_type.is_file() {
+            // Only include markdown files
+            if name.ends_with(".md") || name.ends_with(".markdown") {
+                entries.push(DirEntry {
+                    name,
+                    path: child_path,
+                    is_dir: false,
+                    children: None,
+                });
+            }
+        }
+    }
+
+    // Sort directories alphabetically and process them
+    dir_entries.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    for (name, child_path) in dir_entries {
+        let children = match read_dir_recursive(std::path::Path::new(&child_path)) {
+            Ok(c) if !c.is_empty() => Some(c),
+            _ => None,
+        };
+        entries.push(DirEntry {
+            name,
+            path: child_path,
+            is_dir: true,
+            children,
+        });
+    }
+
+    // Sort files alphabetically (already sorted since we appended dirs first)
+    // Actually, we need to sort the combined list
+    entries.sort_by(|a, b| {
+        // Directories first, then files
+        match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        }
+    });
+
+    Ok(entries)
 }
 
 /// Convert mermaid code blocks to proper format
@@ -194,7 +298,10 @@ pub fn run() {
             }
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![open_file_dialog, open_file, render_markdown, get_toc])
+        .invoke_handler(tauri::generate_handler![
+            open_file_dialog, open_file, render_markdown, get_toc,
+            open_folder_dialog, list_directory
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

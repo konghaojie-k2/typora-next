@@ -27,6 +27,8 @@
     baseDir: '',
     sourceMode: false,
     tocCollapsed: false,
+    fileTreeCollapsed: false,
+    currentFolder: null,
     headings: []
   };
 
@@ -37,6 +39,11 @@
     tocSidebar: document.getElementById('tocSidebar'),
     tocTree: document.getElementById('tocTree'),
     tocToggle: document.getElementById('tocToggle'),
+    fileTreeSidebar: document.getElementById('fileTreeSidebar'),
+    fileTree: document.getElementById('fileTree'),
+    fileTreeToggle: document.getElementById('fileTreeToggle'),
+    openFolderBtn: document.getElementById('openFolderBtn'),
+    openFolderToolbarBtn: document.getElementById('openFolderToolbarBtn'),
     contentArea: document.getElementById('contentArea'),
     markdownBody: document.getElementById('markdownBody'),
     sourceView: document.getElementById('sourceView'),
@@ -88,6 +95,16 @@
         return Promise.resolve(renderMarkdownMock(args.content));
       case 'get_toc':
         return Promise.resolve([]);
+      case 'open_folder_dialog':
+        return Promise.resolve('/mock/project');
+      case 'list_directory':
+        return Promise.resolve([
+          { name: 'docs', path: '/mock/project/docs', is_dir: true, children: [
+            { name: 'readme.md', path: '/mock/project/docs/readme.md', is_dir: false, children: null }
+          ]},
+          { name: 'src', path: '/mock/project/src', is_dir: true, children: null },
+          { name: 'main.md', path: '/mock/project/main.md', is_dir: false, children: null }
+        ]);
       default:
         return Promise.resolve(null);
     }
@@ -262,6 +279,151 @@
   function toggleTOC() {
     state.tocCollapsed = !state.tocCollapsed;
     elements.tocSidebar.classList.toggle('collapsed', state.tocCollapsed);
+  }
+
+  // ============================================
+  // File Tree
+  // ============================================
+  async function openFolder() {
+    try {
+      const folderPath = await invoke('open_folder_dialog');
+      if (folderPath) {
+        state.currentFolder = folderPath;
+        await loadFileTree(folderPath);
+      }
+    } catch (err) {
+      if (err !== 'No folder selected') {
+        console.error('Failed to open folder:', err);
+        showError('无法打开文件夹: ' + err);
+      }
+    }
+  }
+
+  async function loadFileTree(folderPath) {
+    try {
+      const entries = await invoke('list_directory', { path: folderPath });
+      renderFileTree(entries);
+    } catch (err) {
+      console.error('Failed to load file tree:', err);
+      showError('无法加载文件树: ' + err);
+    }
+  }
+
+  function renderFileTree(entries, container = null, depth = 0) {
+    const target = container || elements.fileTree;
+
+    if (!entries || entries.length === 0) {
+      if (!container) {
+        target.innerHTML = '<p class="file-tree-empty">此文件夹为空</p>';
+      }
+      return;
+    }
+
+    if (!container) {
+      target.innerHTML = '';
+    }
+
+    const ul = document.createElement('ul');
+    ul.className = 'file-tree-list';
+    ul.style.margin = '0';
+    ul.style.padding = '0';
+
+    const basePadding = 12;
+    const indent = 16;
+
+    entries.forEach(entry => {
+      const li = document.createElement('li');
+      li.style.listStyle = 'none';
+
+      const item = document.createElement('div');
+      item.className = 'file-tree-item' + (entry.is_dir ? ' is-dir' : ' is-file');
+      item.dataset.path = entry.path;
+      item.dataset.isDir = entry.is_dir;
+
+      const itemPadding = basePadding + (depth * indent);
+      item.style.paddingLeft = `${itemPadding}px`;
+
+      let iconHtml = '';
+      if (entry.is_dir) {
+        const hasChildren = entry.children && entry.children.length > 0;
+        iconHtml = hasChildren
+          ? '<span class="tree-chevron">▶</span>'
+          : '<span class="tree-chevron" style="visibility:hidden">▶</span>';
+        iconHtml += '<span class="tree-icon">📁</span>';
+      } else {
+        iconHtml = '<span class="tree-icon">📄</span>';
+      }
+
+      item.innerHTML = iconHtml + `<span class="tree-label">${escapeHtml(entry.name)}</span>`;
+
+      item.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (entry.is_dir) {
+          toggleDir(item);
+        } else {
+          openTreeFile(entry.path);
+        }
+      });
+
+      li.appendChild(item);
+
+      if (entry.is_dir && entry.children && entry.children.length > 0) {
+        const childrenContainer = document.createElement('div');
+        childrenContainer.className = 'file-tree-children';
+        renderFileTree(entry.children, childrenContainer, depth + 1);
+        li.appendChild(childrenContainer);
+      }
+
+      ul.appendChild(li);
+    });
+
+    target.appendChild(ul);
+  }
+
+  function toggleDir(item) {
+    const li = item.closest('li');
+    if (!li) return;
+    const children = li.querySelector('.file-tree-children');
+    const chevron = item.querySelector('.tree-chevron');
+
+    if (children) {
+      const isExpanded = children.classList.toggle('expanded');
+      if (chevron) {
+        chevron.textContent = isExpanded ? '▼' : '▶';
+      }
+    }
+  }
+
+  async function openTreeFile(filePath) {
+    try {
+      const result = await invoke('open_file', { path: filePath });
+      if (result && result.content) {
+        state.currentFile = result.path;
+        state.currentContent = result.content;
+        state.baseDir = result.base_dir || '';
+
+        elements.filename.textContent = getFileName(result.path);
+        elements.filename.title = result.path;
+
+        await renderMarkdown(result.content, result.base_dir);
+
+        const welcome = elements.markdownBody.querySelector('.welcome-message');
+        if (welcome) welcome.remove();
+
+        // Update active state in file tree
+        elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
+          item.classList.toggle('active', item.dataset.path === filePath);
+        });
+      }
+    } catch (err) {
+      console.error('Failed to open file from tree:', err);
+      showError('无法打开文件: ' + err);
+    }
+  }
+
+  function toggleFileTree() {
+    state.fileTreeCollapsed = !state.fileTreeCollapsed;
+    elements.fileTreeSidebar.classList.toggle('collapsed', state.fileTreeCollapsed);
   }
 
   // ============================================
@@ -572,9 +734,15 @@
   function setupKeyboardShortcuts() {
     document.addEventListener('keydown', (e) => {
       // Ctrl+O: Open file
-      if (e.ctrlKey && e.key === 'o') {
+      if (e.ctrlKey && e.key === 'o' && !e.shiftKey) {
         e.preventDefault();
         openFile();
+      }
+
+      // Ctrl+Shift+O: Open folder
+      if (e.ctrlKey && e.shiftKey && e.key === 'O') {
+        e.preventDefault();
+        openFolder();
       }
 
       // Ctrl+E: Toggle source mode
@@ -715,6 +883,9 @@
     elements.openFileBtn.addEventListener('click', openFile);
     elements.sourceToggle.addEventListener('click', toggleSourceMode);
     elements.tocToggle.addEventListener('click', toggleTOC);
+    elements.fileTreeToggle.addEventListener('click', toggleFileTree);
+    elements.openFolderBtn.addEventListener('click', openFolder);
+    elements.openFolderToolbarBtn.addEventListener('click', openFolder);
   }
 
   // ============================================
@@ -741,9 +912,11 @@
   window.TyporaNext = {
     state,
     openFile,
+    openFolder,
     renderMarkdown,
     toggleSourceMode,
     toggleTOC,
+    toggleFileTree,
     buildTOC,
     invoke
   };

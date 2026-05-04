@@ -1,15 +1,13 @@
 {
-  "last_session": "2026-05-03T22:14",
-  "project_phase": "Phase 2 完成，准备 Phase 3 项目管理功能",
+  "last_session": "2026-05-04T13:24",
+  "project_phase": "Phase 3: 项目文件树 (T-015)",
   "progress": "64%",
   "pending_tasks": [
     {"task": "T-015: 项目文件树", "priority": "high"},
     {"task": "T-016: 文件搜索过滤", "priority": "medium"},
     {"task": "T-017: 多标签 Tab", "priority": "high"},
     {"task": "T-018: PDF 导出", "priority": "medium"},
-    {"task": "T-019: Word 导出（精美模式）", "priority": "low"},
-    {"task": "提交今日 12 个未暂存文件", "priority": "high"},
-    {"task": "Tauri 应用冒烟测试（.md 打开 + 源码切换 + TOC）", "priority": "high"}
+    {"task": "T-019: Word 导出（精美模式）", "priority": "low"}
   ],
   "decisions": [
     {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
@@ -29,5 +27,5 @@
     "Prism 高亮要跳过 language-mermaid，否则会和 Mermaid 渲染冲突；pre 上加 data-language 属性供 CSS 显示语言徽标",
     "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）"
   ],
-  "next_suggested": "明日早省：决定 Phase 3 起点（T-015 项目文件树 vs T-017 多标签 Tab），先把今天 12 个未提交文件按主题拆分提交"
+  "next_suggested": "T-015: 项目文件树 — Rust 侧添加文件遍历命令，前端添加侧边栏目录树 UI"
 }

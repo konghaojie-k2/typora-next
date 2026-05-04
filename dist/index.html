@@ -13,6 +13,29 @@
 </head>
 <body>
   <div class="app-container">
+    <!-- File Tree Sidebar -->
+    <aside class="file-tree-sidebar" id="fileTreeSidebar">
+      <div class="file-tree-header">
+        <h3>文件</h3>
+        <button class="file-tree-toggle" id="fileTreeToggle" title="Toggle File Tree">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 12h18M3 6h18M3 18h18"/>
+          </svg>
+        </button>
+      </div>
+      <div class="file-tree-toolbar">
+        <button class="file-tree-btn" id="openFolderBtn" title="Open Folder (Ctrl+Shift+O)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+          打开文件夹
+        </button>
+      </div>
+      <nav class="file-tree" id="fileTree">
+        <p class="file-tree-empty">打开文件夹以显示文件树</p>
+      </nav>
+    </aside>
+
     <!-- TOC Sidebar -->
     <aside class="toc-sidebar" id="tocSidebar">
       <div class="toc-header">
@@ -37,6 +60,11 @@
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
               <polyline points="13 2 13 9 20 9"/>
+            </svg>
+          </button>
+          <button class="btn-icon" id="openFolderToolbarBtn" title="Open Folder (Ctrl+Shift+O)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </button>
           <span class="filename" id="filename">未打开文件</span>
