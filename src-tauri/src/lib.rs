@@ -8,6 +8,7 @@ use tauri::Manager;
 pub struct FileResult {
     path: String,
     content: String,
+    base_dir: String,  // Directory of the file, for resolving relative paths
 }
 
 /// Table of Contents item
@@ -30,11 +31,17 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Result<FileResult, String> {
 
     match file_path {
         Some(path) => {
-            let content = fs::read_to_string(&path)
+            let path_ref = path.as_path().unwrap_or(&std::path::Path::new(""));
+            let path_str = path_ref.display().to_string();
+            let base_dir = path_ref.parent()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let content = fs::read_to_string(path_ref)
                 .map_err(|e| format!("Failed to read file: {}", e))?;
             Ok(FileResult {
-                path: path.to_string(),
+                path: path_str,
                 content,
+                base_dir,
             })
         }
         None => Err("No file selected".to_string()),
@@ -51,9 +58,14 @@ async fn open_file(path: PathBuf) -> Result<FileResult, String> {
     let content = fs::read_to_string(&path)
         .map_err(|e| format!("Failed to read file: {}", e))?;
 
+    let base_dir = path.parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_default();
+
     Ok(FileResult {
-        path: path.to_string(),
+        path: path.display().to_string(),
         content,
+        base_dir,
     })
 }
 
@@ -167,8 +179,8 @@ fn generate_slug(text: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .plugin(tauri_plugin_dialog::Builder::new().build())
-        .plugin(tauri_plugin_fs::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -177,7 +189,6 @@ pub fn run() {
                         .build(),
                 )?;
 
-                // Open devtools in debug mode
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
