@@ -25,8 +25,8 @@
     tabs: [],           // {path, content, baseDir, name}
     activeTab: -1,      // index of active tab
     sourceMode: false,
-    tocCollapsed: false,
-    fileTreeCollapsed: false,
+    sidebarCollapsed: false,
+    sidebarActiveTab: 'files',   // 'files' | 'toc'
     currentFolder: null,
     headings: []
   };
@@ -35,12 +35,15 @@
   // DOM Elements
   // ============================================
   const elements = {
-    tocSidebar: document.getElementById('tocSidebar'),
+    sidebar: document.getElementById('sidebar'),
+    sidebarToggle: document.getElementById('sidebarToggle'),
+    tabFiles: document.getElementById('tabFiles'),
+    tabToc: document.getElementById('tabToc'),
+    filesPanel: document.getElementById('filesPanel'),
+    tocPanel: document.getElementById('tocPanel'),
     tocTree: document.getElementById('tocTree'),
-    tocToggle: document.getElementById('tocToggle'),
-    fileTreeSidebar: document.getElementById('fileTreeSidebar'),
     fileTree: document.getElementById('fileTree'),
-    fileTreeToggle: document.getElementById('fileTreeToggle'),
+    sidebarMinimap: document.getElementById('sidebarMinimap'),
     openFolderBtn: document.getElementById('openFolderBtn'),
     openFolderToolbarBtn: document.getElementById('openFolderToolbarBtn'),
     fileTreeSearch: document.getElementById('fileTreeSearch'),
@@ -327,6 +330,72 @@
         }
       });
     });
+
+    buildMinimap();
+  }
+
+  function buildMinimap() {
+    if (!elements.sidebarMinimap) return;
+
+    if (!state.headings.length) {
+      elements.sidebarMinimap.innerHTML = '';
+      return;
+    }
+
+    const docHeight = elements.markdownBody.scrollHeight;
+    const minimapHeight = elements.sidebarMinimap.clientHeight || 400;
+    const MIN_GAP = 3; // px
+
+    let html = '';
+    let lastBottom = -MIN_GAP;
+
+    state.headings.forEach(h => {
+      const pct = docHeight > 0 ? h.element.offsetTop / docHeight : 0;
+      let top = Math.round(pct * minimapHeight);
+      // Prevent overlapping
+      if (top < lastBottom + MIN_GAP) {
+        top = lastBottom + MIN_GAP;
+      }
+      lastBottom = top + 4; // approximate item height
+      html += `<div class="minimap-item" data-level="${h.level}" data-id="${h.id}" title="${escapeHtml(h.text)}" style="top:${top}px"></div>`;
+    });
+
+    elements.sidebarMinimap.innerHTML = html;
+
+    let tooltip = document.getElementById('minimap-tooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('div');
+      tooltip.id = 'minimap-tooltip';
+      tooltip.className = 'minimap-tooltip';
+      document.body.appendChild(tooltip);
+    }
+
+    elements.sidebarMinimap.querySelectorAll('.minimap-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const target = document.getElementById(item.dataset.id);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          updateActiveTOCItem(item.dataset.id);
+        }
+      });
+
+      item.addEventListener('mouseenter', () => {
+        tooltip.textContent = item.getAttribute('title');
+        tooltip.classList.add('visible');
+        positionMinimapTooltip(tooltip, item);
+      });
+
+      item.addEventListener('mouseleave', () => {
+        tooltip.classList.remove('visible');
+      });
+    });
+  }
+
+  function positionMinimapTooltip(tooltip, item) {
+    const rect = item.getBoundingClientRect();
+    tooltip.style.left = (rect.right + 8) + 'px';
+    tooltip.style.top = (rect.top + rect.height / 2) + 'px';
+    tooltip.style.transform = 'translateY(-50%)';
   }
 
   function updateActiveTOCItem(activeId) {
@@ -371,9 +440,17 @@
     }
   }
 
-  function toggleTOC() {
-    state.tocCollapsed = !state.tocCollapsed;
-    elements.tocSidebar.classList.toggle('collapsed', state.tocCollapsed);
+  function toggleSidebar() {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    elements.sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+  }
+
+  function switchSidebarTab(tab) {
+    state.sidebarActiveTab = tab;
+    elements.tabFiles.classList.toggle('active', tab === 'files');
+    elements.tabToc.classList.toggle('active', tab === 'toc');
+    elements.filesPanel.classList.toggle('active', tab === 'files');
+    elements.tocPanel.classList.toggle('active', tab === 'toc');
   }
 
   // ============================================
@@ -499,11 +576,6 @@
       console.error('Failed to open file from tree:', err);
       showError('无法打开文件: ' + err);
     }
-  }
-
-  function toggleFileTree() {
-    state.fileTreeCollapsed = !state.fileTreeCollapsed;
-    elements.fileTreeSidebar.classList.toggle('collapsed', state.fileTreeCollapsed);
   }
 
   // ============================================
@@ -884,10 +956,28 @@
   }
 
   // ============================================
+  // Toast Notification
+  // ============================================
+  function showToast(message, duration = 3000) {
+    let toast = document.getElementById('app-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'app-toast';
+      toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--color-bg-secondary);color:var(--color-text-primary);padding:10px 20px;border-radius:var(--radius-md);border:1px solid var(--color-border);box-shadow:var(--shadow-lg);font-size:var(--font-size-sm);z-index:9999;opacity:0;transition:opacity 300ms;pointer-events:none;white-space:nowrap;';
+      document.body.appendChild(toast);
+    }
+    toast.textContent = message;
+    toast.style.opacity = '1';
+    clearTimeout(toast._timer);
+    toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, duration);
+  }
+
+  // ============================================
   // PDF Export
   // ============================================
   function exportToPDF() {
-    window.print();
+    showToast('请在打印对话框中选择「打印为 PDF」并设置保存位置', 5000);
+    setTimeout(() => window.print(), 300);
   }
 
   // ============================================
@@ -923,10 +1013,10 @@
         }
       }
 
-      // Ctrl+T: Toggle TOC
+      // Ctrl+T: Toggle sidebar
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
-        toggleTOC();
+        toggleSidebar();
       }
 
       // Ctrl+P: Export to PDF
@@ -1082,8 +1172,9 @@
   function bindEvents() {
     elements.openFileBtn.addEventListener('click', openFile);
     elements.sourceToggle.addEventListener('click', toggleSourceMode);
-    elements.tocToggle.addEventListener('click', toggleTOC);
-    elements.fileTreeToggle.addEventListener('click', toggleFileTree);
+    elements.sidebarToggle.addEventListener('click', toggleSidebar);
+    elements.tabFiles.addEventListener('click', () => switchSidebarTab('files'));
+    elements.tabToc.addEventListener('click', () => switchSidebarTab('toc'));
     elements.openFolderBtn.addEventListener('click', openFolder);
     elements.openFolderToolbarBtn.addEventListener('click', openFolder);
     elements.exportPdfBtn.addEventListener('click', exportToPDF);
@@ -1127,8 +1218,8 @@
     closeTab,
     renderMarkdown,
     toggleSourceMode,
-    toggleTOC,
-    toggleFileTree,
+    toggleSidebar,
+    switchSidebarTab,
     buildTOC,
     filterFileTree,
     invoke

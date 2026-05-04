@@ -86,4 +86,39 @@
 - `dist/styles/main.css`
 - `task_plan.md`
 
+### 中省
+
+**时间**: 20:50
+
+**完成操作**:
+- T-021: 主题系统（浅色/深色切换）
+- CSS: 5 处 `@media (prefers-color-scheme: dark)` 改为 `[data-theme="dark"]` 手动覆盖 + 系统回退
+- HTML: toolbar 添加太阳/月亮图标切换按钮
+- JS: 主题初始化、切换、localStorage 持久化、Mermaid 重渲染
+- 快捷键: Ctrl+Shift+L 切换主题
+- 编译验证通过（1m 47s）
+- 提交: 11a6684
+
+**涉及文件**:
+- `dist/index.html`
+- `dist/scripts/main.js`
+- `dist/styles/main.css`
+- `task_plan.md`
+
+### 中省
+
+**时间**: 21:30
+
+**完成操作**:
+- 侧边栏合并优化：文件树 + TOC 合并为 Tab 切换 sidebar
+- 折叠时一起折叠，不再独立控制
+- 新增 Minimap 导航：sidebar 折叠为 40px 竖条时，按文档纵向百分比显示 heading 缩略图
+- hover 显示标题 tooltip（fixed 定位避免 overflow 裁剪），点击跳转
+- PDF 导出优化：添加 toast 提示「请选择打印为 PDF」
+
+**涉及文件**:
+- `dist/index.html`
+- `dist/scripts/main.js`
+- `dist/styles/main.css`
+
 ---

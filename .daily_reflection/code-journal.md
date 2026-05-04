@@ -70,6 +70,43 @@
 
 ---
 
+---
+
+## 2026-05-04
+
+### 晚省
+- **时间**: 18:32
+- **总览**: 基础功能全部完成，进入差异化功能准备阶段
+
+**今日完成**:
+- ✅ T-015: 项目文件树 sidebar（Rust 递归遍历 + 前端渲染）
+- ✅ T-016: 文件搜索过滤（实时过滤，自动展开匹配目录）
+- ✅ T-017: 多标签 Tab（add/switch/close，状态管理重构）
+- ✅ T-018: PDF 导出（打印样式 + toast 提示）
+- ✅ T-021: 主题系统（CSS 变量 + data-theme + localStorage）
+- ✅ 侧边栏合并优化（文件树/目录 Tab 切换，统一折叠）
+- ✅ Minimap 导航（折叠后 heading 缩略图，百分比定位）
+
+**今日提交**（4 个）:
+| Hash | 内容 |
+|------|------|
+| cfc9723 | T-015: Project file tree sidebar |
+| d50fd21 | T-017: Multi-tab support |
+| af0f432 | T-016, T-018: File search + PDF export |
+| 11a6684 | T-021: Theme system |
+
+**未提交修改**: sidebar 合并 + Minimap + PDF toast（3 文件）
+
+**新发现**:
+1. Tauri 2.11 没有 `print_to_pdf` API，只能用 `window.print()` + 系统打印对话框
+2. CSS `overflow: hidden` 会裁剪 `position: absolute` 的 tooltip，需改用 `position: fixed`
+3. Minimap 按文档纵向百分比定位，比固定间距更能反映真实文档结构
+
+**明日建议**:
+- 提交当前未暂存的 sidebar 优化修改
+- 开始差异化功能：T-019 Word 导出 或 T-020 AI 修复 Mermaid
+- 考虑 T-022 文件刷新提示（低优先级）
+
 ## 发现记录
 
 1. pulldown-cmark 支持 GFM 扩展，无需额外处理表格/任务列表

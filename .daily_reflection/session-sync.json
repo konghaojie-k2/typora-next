@@ -1,5 +1,5 @@
 {
-  "last_session": "2026-05-04T20:50",
+  "last_session": "2026-05-04T18:32",
   "project_phase": "Phase 3/4: 基础功能已完成，剩余差异化功能",
   "progress": "86%",
   "pending_tasks": [
@@ -15,7 +15,9 @@
     {"date": "2026-05-04", "decision": "GNU 工具链 + MinGW PATH 编译", "reason": "用户没有安装 VS，bash 环境稳定可用"},
     {"date": "2026-05-04", "decision": "创建 /typora-build skill", "reason": "固化编译流程，避免每次手动配置环境"},
     {"date": "2026-05-04", "decision": "Agent Team 并行开发 T-016 + T-018", "reason": "两个任务无代码冲突，并行提效"},
-    {"date": "2026-05-04", "decision": "主题系统采用 CSS 变量 + data-theme 属性", "reason": "兼容系统偏好，支持手动切换，localStorage 持久化"}
+    {"date": "2026-05-04", "decision": "主题系统采用 CSS 变量 + data-theme 属性", "reason": "兼容系统偏好，支持手动切换，localStorage 持久化"},
+    {"date": "2026-05-04", "decision": "Tauri 2.11 无 print_to_pdf，用 window.print() + toast 提示", "reason": "原生 API 不支持，避免引入重型依赖"},
+    {"date": "2026-05-04", "decision": "侧边栏合并为 Tab 切换 + Minimap", "reason": "减少横向空间占用，折叠后提供文档导航概览"}
   ],
   "findings": [
     "pulldown-cmark 支持 GFM 扩展（表格、任务列表、删除线）",
@@ -30,7 +32,10 @@
     "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）",
     "多标签 Tab 状态管理：state.tabs[] + state.activeTab，关闭时调整 activeTab 索引避免越界",
     "Agent Team 并行开发需明确边界：Agent A 修改文件树区域，Agent B 修改 toolbar/打印区域，避免 main.js 冲突",
-    "主题系统实现：5 处 @media (prefers-color-scheme: dark) 改为 :root:not([data-theme]) 回退 + [data-theme=\"dark\"] 手动覆盖"
+    "主题系统实现：5 处 @media (prefers-color-scheme: dark) 改为 :root:not([data-theme]) 回退 + [data-theme=\"dark\"] 手动覆盖",
+    "Tauri 2.11 没有 print_to_pdf API，只能用 window.print() 触发系统打印对话框",
+    "CSS overflow: hidden 会裁剪 absolute 定位的子元素，tooltip 需用 fixed 定位",
+    "Minimap 按文档纵向百分比（offsetTop / scrollHeight）定位，比固定间距更能反映真实结构"
   ],
-  "next_suggested": "基础功能全部完成（T-015~T-021）。建议：1) 暂存当前修改；2) 开始差异化功能 T-019 Word 导出或 T-020 AI 修复 Mermaid；3) 或做一轮完整的冒烟测试。"
+  "next_suggested": "基础功能全部完成（T-015~T-021）。建议：1) 提交当前未暂存的 sidebar 优化修改；2) 开始差异化功能 T-019 Word 导出或 T-020 AI 修复 Mermaid；3) 或做一轮完整冒烟测试。"
 }

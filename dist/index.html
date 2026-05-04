@@ -13,45 +13,45 @@
 </head>
 <body>
   <div class="app-container">
-    <!-- File Tree Sidebar -->
-    <aside class="file-tree-sidebar" id="fileTreeSidebar">
-      <div class="file-tree-header">
-        <h3>文件</h3>
-        <button class="file-tree-toggle" id="fileTreeToggle" title="Toggle File Tree">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M3 12h18M3 6h18M3 18h18"/>
-          </svg>
-        </button>
-      </div>
-      <div class="file-tree-toolbar">
-        <button class="file-tree-btn" id="openFolderBtn" title="Open Folder (Ctrl+Shift+O)">
+    <!-- Sidebar with File Tree / TOC Tabs -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-tabs">
+        <button class="sidebar-tab active" data-tab="files" id="tabFiles">文件</button>
+        <button class="sidebar-tab" data-tab="toc" id="tabToc">目录</button>
+        <button class="sidebar-toggle" id="sidebarToggle" title="折叠侧边栏 (Ctrl+T)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-          </svg>
-          打开文件夹
-        </button>
-      </div>
-      <div class="file-tree-search">
-        <input type="text" id="fileTreeSearch" placeholder="搜索文件...">
-      </div>
-      <nav class="file-tree" id="fileTree">
-        <p class="file-tree-empty">打开文件夹以显示文件树</p>
-      </nav>
-    </aside>
-
-    <!-- TOC Sidebar -->
-    <aside class="toc-sidebar" id="tocSidebar">
-      <div class="toc-header">
-        <h3>目录</h3>
-        <button class="toc-toggle" id="tocToggle" title="Toggle TOC">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 12h18M3 6h18M3 18h18"/>
           </svg>
         </button>
       </div>
-      <nav class="toc-tree" id="tocTree">
-        <p class="toc-empty">打开文件以显示目录</p>
-      </nav>
+
+      <!-- Files Panel -->
+      <div class="sidebar-panel active" id="filesPanel">
+        <div class="file-tree-toolbar">
+          <button class="file-tree-btn" id="openFolderBtn" title="Open Folder (Ctrl+Shift+O)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+            打开文件夹
+          </button>
+        </div>
+        <div class="file-tree-search">
+          <input type="text" id="fileTreeSearch" placeholder="搜索文件...">
+        </div>
+        <nav class="file-tree" id="fileTree">
+          <p class="file-tree-empty">打开文件夹以显示文件树</p>
+        </nav>
+      </div>
+
+      <!-- TOC Panel -->
+      <div class="sidebar-panel" id="tocPanel">
+        <nav class="toc-tree" id="tocTree">
+          <p class="toc-empty">打开文件以显示目录</p>
+        </nav>
+      </div>
+
+      <!-- Minimap (visible when collapsed) -->
+      <div class="sidebar-minimap" id="sidebarMinimap"></div>
     </aside>
 
     <!-- Main Content Area -->
