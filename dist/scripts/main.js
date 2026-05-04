@@ -22,9 +22,8 @@
   // State Management
   // ============================================
   const state = {
-    currentFile: null,
-    currentContent: '',
-    baseDir: '',
+    tabs: [],           // {path, content, baseDir, name}
+    activeTab: -1,      // index of active tab
     sourceMode: false,
     tocCollapsed: false,
     fileTreeCollapsed: false,
@@ -48,7 +47,8 @@
     markdownBody: document.getElementById('markdownBody'),
     sourceView: document.getElementById('sourceView'),
     sourceCode: document.getElementById('sourceCode'),
-    filename: document.getElementById('filename'),
+    tabsBar: document.getElementById('tabsBar'),
+    tabsList: document.getElementById('tabsList'),
     openFileBtn: document.getElementById('openFileBtn'),
     sourceToggle: document.getElementById('sourceToggle')
   };
@@ -131,28 +131,118 @@
     try {
       const result = await invoke('open_file_dialog');
       if (result && result.content) {
-        state.currentFile = result.path;
-        state.currentContent = result.content;
-        state.baseDir = result.base_dir || '';
-
-        // Update filename display
-        elements.filename.textContent = getFileName(result.path);
-        elements.filename.title = result.path;
-
-        // Render markdown
-        await renderMarkdown(result.content, result.base_dir);
-
-        // Hide welcome message
-        const welcome = elements.markdownBody.querySelector('.welcome-message');
-        if (welcome) welcome.remove();
+        addTab(result.path, result.content, result.base_dir || '');
       }
     } catch (err) {
-      // User cancelled dialog or error occurred
       if (err !== 'No file selected') {
         console.error('Failed to open file:', err);
         showError('无法打开文件: ' + err);
       }
     }
+  }
+
+  // ============================================
+  // Tab Management
+  // ============================================
+  function addTab(path, content, baseDir) {
+    const existingIndex = state.tabs.findIndex(t => t.path === path);
+    if (existingIndex >= 0) {
+      // Tab already open, switch to it
+      switchTab(existingIndex);
+      return;
+    }
+
+    const tab = {
+      path,
+      content,
+      baseDir,
+      name: getFileName(path)
+    };
+
+    state.tabs.push(tab);
+    state.activeTab = state.tabs.length - 1;
+    renderTabs();
+    loadTabContent(state.activeTab);
+  }
+
+  function switchTab(index) {
+    if (index < 0 || index >= state.tabs.length) return;
+    state.activeTab = index;
+    renderTabs();
+    loadTabContent(index);
+  }
+
+  function closeTab(index) {
+    if (index < 0 || index >= state.tabs.length) return;
+
+    state.tabs.splice(index, 1);
+
+    if (state.tabs.length === 0) {
+      state.activeTab = -1;
+      renderTabs();
+      showWelcome();
+    } else {
+      // Adjust active tab
+      if (index <= state.activeTab) {
+        state.activeTab = Math.max(0, state.activeTab - 1);
+      }
+      renderTabs();
+      loadTabContent(state.activeTab);
+    }
+  }
+
+  function renderTabs() {
+    elements.tabsList.innerHTML = '';
+
+    state.tabs.forEach((tab, index) => {
+      const tabEl = document.createElement('div');
+      tabEl.className = 'tab-item' + (index === state.activeTab ? ' active' : '');
+
+      const label = document.createElement('span');
+      label.className = 'tab-label';
+      label.textContent = tab.name;
+      label.title = tab.path;
+
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'tab-close';
+      closeBtn.innerHTML = '×';
+      closeBtn.title = '关闭';
+
+      closeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeTab(index);
+      });
+
+      tabEl.appendChild(label);
+      tabEl.appendChild(closeBtn);
+
+      tabEl.addEventListener('click', () => switchTab(index));
+
+      elements.tabsList.appendChild(tabEl);
+    });
+  }
+
+  function loadTabContent(index) {
+    if (index < 0 || index >= state.tabs.length) return;
+    const tab = state.tabs[index];
+    renderMarkdown(tab.content, tab.baseDir);
+
+    // Update file tree active state
+    elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
+      item.classList.toggle('active', item.dataset.path === tab.path);
+    });
+  }
+
+  function showWelcome() {
+    elements.markdownBody.innerHTML = `
+      <div class="welcome-message">
+        <h1>Typora Next</h1>
+        <p>一个现代化的 Markdown 编辑器</p>
+        <p>按 <kbd>Ctrl+O</kbd> 打开文件，或拖拽文件到此处</p>
+      </div>
+    `;
+    elements.sourceCode.textContent = '';
+    elements.tocTree.innerHTML = '<p class="toc-empty">打开文件以显示目录</p>';
   }
 
   async function renderMarkdown(content, baseDir = '') {
@@ -398,22 +488,7 @@
     try {
       const result = await invoke('open_file', { path: filePath });
       if (result && result.content) {
-        state.currentFile = result.path;
-        state.currentContent = result.content;
-        state.baseDir = result.base_dir || '';
-
-        elements.filename.textContent = getFileName(result.path);
-        elements.filename.title = result.path;
-
-        await renderMarkdown(result.content, result.base_dir);
-
-        const welcome = elements.markdownBody.querySelector('.welcome-message');
-        if (welcome) welcome.remove();
-
-        // Update active state in file tree
-        elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
-          item.classList.toggle('active', item.dataset.path === filePath);
-        });
+        addTab(result.path, result.content, result.base_dir || '');
       }
     } catch (err) {
       console.error('Failed to open file from tree:', err);
@@ -785,19 +860,9 @@
       if (files.length > 0) {
         const file = files[0];
         if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-          // Read file content
           const content = await readFile(file);
           if (content) {
-            state.currentFile = file.name;
-            state.currentContent = content;
-
-            elements.filename.textContent = file.name;
-
-            // Hide welcome message
-            const welcome = elements.markdownBody.querySelector('.welcome-message');
-            if (welcome) welcome.remove();
-
-            await renderMarkdown(content);
+            addTab(file.name, content, '');
           }
         } else {
           showError('请打开 Markdown 文件 (.md 或 .markdown)');
@@ -913,6 +978,9 @@
     state,
     openFile,
     openFolder,
+    addTab,
+    switchTab,
+    closeTab,
     renderMarkdown,
     toggleSourceMode,
     toggleTOC,

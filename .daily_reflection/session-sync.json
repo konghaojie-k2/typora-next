@@ -1,11 +1,9 @@
 {
-  "last_session": "2026-05-04T13:24",
-  "project_phase": "Phase 3: 项目文件树 (T-015)",
-  "progress": "64%",
+  "last_session": "2026-05-04T15:10",
+  "project_phase": "Phase 3: T-016 文件搜索过滤",
+  "progress": "73%",
   "pending_tasks": [
-    {"task": "T-015: 项目文件树", "priority": "high"},
     {"task": "T-016: 文件搜索过滤", "priority": "medium"},
-    {"task": "T-017: 多标签 Tab", "priority": "high"},
     {"task": "T-018: PDF 导出", "priority": "medium"},
     {"task": "T-019: Word 导出（精美模式）", "priority": "low"}
   ],
@@ -13,7 +11,9 @@
     {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
     {"date": "2026-05-03", "decision": "使用 KaTeX", "reason": "渲染速度快 10x"},
     {"date": "2026-05-03", "decision": "P0 后集成 Tauri", "reason": "先验证核心渲染能力"},
-    {"date": "2026-05-03", "decision": "用 junction point 解决路径空格", "reason": "GNU toolchain 的 dlltool.exe 不支持含空格路径"}
+    {"date": "2026-05-03", "decision": "用 junction point 解决路径空格", "reason": "GNU toolchain 的 dlltool.exe 不支持含空格路径"},
+    {"date": "2026-05-04", "decision": "GNU 工具链 + MinGW PATH 编译", "reason": "用户没有安装 VS，bash 环境稳定可用"},
+    {"date": "2026-05-04", "decision": "创建 /typora-build skill", "reason": "固化编译流程，避免每次手动配置环境"}
   ],
   "findings": [
     "pulldown-cmark 支持 GFM 扩展（表格、任务列表、删除线）",
@@ -25,7 +25,8 @@
     "相对路径的 ../ 必须用 segment-based 方式处理（split + pop），不能简单字符串拼接，否则路径错位",
     "Prism 全本地化（dist/vendor/prism/）+ prism-autoloader 按需加载语言，避免 CDN 依赖；autoloader 必须设 data-autoloader-path 才能在 Tauri webview 找到本地包",
     "Prism 高亮要跳过 language-mermaid，否则会和 Mermaid 渲染冲突；pre 上加 data-language 属性供 CSS 显示语言徽标",
-    "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）"
+    "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）",
+    "多标签 Tab 状态管理：state.tabs[] + state.activeTab，关闭时调整 activeTab 索引避免越界"
   ],
-  "next_suggested": "T-015: 项目文件树 — Rust 侧添加文件遍历命令，前端添加侧边栏目录树 UI"
+  "next_suggested": "T-016: 文件搜索过滤 — 在文件树 sidebar 上方加搜索框，实时过滤目录树"
 }

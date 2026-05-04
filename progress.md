@@ -49,4 +49,24 @@
 - `dist/styles/main.css`
 - `task_plan.md`
 
+### 中省
+
+**时间**: 15:10
+
+**完成操作**:
+- T-017: 多标签 Tab 功能实现
+- HTML 添加 `tabs-bar` + `tabs-list` 容器（toolbar 下方）
+- CSS 添加 tab 样式（激活态下划线、关闭按钮 hover 变红、文件截断）
+- JS 重构文件管理：`state.tabs[]` + `state.activeTab` 替代单文件状态
+- 实现 `addTab()`（去重切换）、`switchTab()`、`closeTab()`、`renderTabs()`、`showWelcome()`
+- 集成：openFile / openTreeFile / dragDrop 均支持多标签打开
+- 编译验证通过（56s，增量编译）
+- 更新 task_plan.md: T-015 → Done, T-017 → Done
+
+**涉及文件**:
+- `dist/index.html`
+- `dist/scripts/main.js`
+- `dist/styles/main.css`
+- `task_plan.md`
+
 ---
