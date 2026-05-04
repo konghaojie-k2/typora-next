@@ -44,18 +44,49 @@ src/
 
 ## Development Commands
 
-```bash
-# Add Tauri CLI (first time)
-cargo install tauri-cli
+### 重要：路径空格问题
 
-# Development (hot reload)
+项目路径 `C:\CODE\open Typora` 有空格，GNU toolchain 的 `dlltool.exe` 无法处理。
+
+**解决方案**：创建 junction point
+```powershell
+New-Item -ItemType Junction -Path 'C:\CODE\typora-next' -Target 'C:\CODE\open Typora'
+```
+
+### 编译命令
+
+```powershell
+# 设置 PATH 包含 MinGW 的 dlltool
+$env:PATH = 'C:\Users\17625\scoop\apps\mingw\15.2.0-rt_v13-rev0\bin;' + $env:PATH
+
+# 从 junction 路径编译
+cd C:\CODE\typora-next\src-tauri
+cargo build --release
+```
+
+编译输出位置：
+- `src-tauri/target/release/app.exe` - 桌面应用
+- `src-tauri/target/release/WebView2Loader.dll` - WebView 运行时
+
+### 运行应用
+
+```powershell
+# 从 release 目录启动（需要 DLL 在同目录）
+cd C:\CODE\open Typora\src-tauri\target\release
+.\app.exe
+```
+
+### 其他命令
+
+```bash
+# Development (hot reload) - 需要 npm
 cargo tauri dev
 
-# Build release
+# Build installer (MSI/NSIS)
 cargo tauri build
 
-# Run without Tauri (test renderer only)
-cargo run
+# CLI only (无 GUI)
+cargo run -- render input.md output.html
 ```
 
 ## MVP Features

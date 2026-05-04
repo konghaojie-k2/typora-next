@@ -31,13 +31,13 @@
 
 ---
 
-## Phase 2: P1 Extended Features 🔄 IN PROGRESS
+## Phase 2: P1 Extended Features ✅ COMPLETE
 
 **目标**: 扩展渲染能力 + 集成 Tauri 桌面应用
 
-**状态**: IN PROGRESS (命令行功能完成，待集成 Tauri)
+**状态**: COMPLETE
 
-**当前任务**: T-012 (集成 Tauri 桌面 exe)
+**完成日期**: 2026-05-03
 
 ### Tasks
 
@@ -48,9 +48,9 @@
 | T-009 | 本地图片加载 | ✅ Done | - | 相对路径 + 占位符 |
 | T-010 | 网络图片加载 | ✅ Done | - | lazy loading |
 | T-011 | 图片放大查看 | ✅ Done | T-009, T-010 | Lightbox + 缩放 |
-| T-012 | 集成 Tauri (桌面 exe) | ⏳ Pending | - | 方案已完成，待实施 |
-| T-013 | 侧边目录 TOC | ⏳ Pending | T-012 | 需要 GUI |
-| T-014 | 源码模式切换 | ⏳ Pending | T-012 | Ctrl+E 切换 |
+| T-012 | 集成 Tauri (桌面 exe) | ✅ Done | - | GNU toolchain + junction |
+| T-013 | 侧边目录 TOC | ✅ Done | T-012 | 前端 buildTOC() |
+| T-014 | 源码模式切换 | ✅ Done | T-012 | Ctrl+E + toggleSourceMode() |
 
 **关键产出**:
 - Mermaid.js 集成 (流程图、时序图等 13 种)
@@ -124,15 +124,16 @@
 
 ## Next Steps
 
-**当前建议**: 集成 Tauri (T-012)，将命令行工具变成桌面应用
+**当前建议**: 开始 Phase 3 项目管理功能
 
 **预计工作量**:
-- T-012 (Tauri 集成): 需要安装 Tauri CLI + 配置项目结构
-- T-013~014: 依赖 T-012 完成
+- T-015 (项目文件树): 需要文件夹选择 + 侧边栏文件树 UI
+- T-016 (文件搜索): 基于文件树的搜索过滤
+- T-017 (多标签 Tab): Tab UI + 文件切换逻辑
+- T-018 (PDF 导出): 需要打印/导出功能
+- T-019 (Word 导出): 需要转换库（如 pandoc）
 
-**Tauri 准备工作**:
-1. 安装 Tauri CLI: `npm install -g @tauri-apps/cli@latest`
-2. 参考: `docs/tauri-integration-plan.md`
+**Phase 3 前置条件**: Phase 2 已完成 ✅
 
 ---
 
@@ -141,8 +142,8 @@
 | Phase | 进度 | 任务完成 |
 |-------|------|----------|
 | Phase 1 | 100% | 6/6 ✅ |
-| Phase 2 | 75% | 6/8 🔄 |
+| Phase 2 | 100% | 8/8 ✅ |
 | Phase 3 | 0% | 0/5 ⏸️ |
 | Phase 4 | 0% | 0/3 ⏸️ |
 
-**总体进度**: 12/22 = 55%
+**总体进度**: 14/22 = 64%

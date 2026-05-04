@@ -1,21 +1,33 @@
 {
-  "last_session": "2026-05-03T14:00",
-  "project_phase": "Phase 2: P1 Extended Features",
-  "progress": "27%",
+  "last_session": "2026-05-03T22:14",
+  "project_phase": "Phase 2 完成，准备 Phase 3 项目管理功能",
+  "progress": "64%",
   "pending_tasks": [
-    {"task": "T-007: Mermaid 流程图渲染", "priority": "high"},
-    {"task": "T-008: Mermaid 时序图渲染", "priority": "medium"},
-    {"task": "T-009: 本地图片加载", "priority": "medium"},
-    {"task": "T-012: 集成 Tauri (桌面 exe)", "priority": "high"}
+    {"task": "T-015: 项目文件树", "priority": "high"},
+    {"task": "T-016: 文件搜索过滤", "priority": "medium"},
+    {"task": "T-017: 多标签 Tab", "priority": "high"},
+    {"task": "T-018: PDF 导出", "priority": "medium"},
+    {"task": "T-019: Word 导出（精美模式）", "priority": "low"},
+    {"task": "提交今日 12 个未暂存文件", "priority": "high"},
+    {"task": "Tauri 应用冒烟测试（.md 打开 + 源码切换 + TOC）", "priority": "high"}
   ],
   "decisions": [
     {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
     {"date": "2026-05-03", "decision": "使用 KaTeX", "reason": "渲染速度快 10x"},
-    {"date": "2026-05-03", "decision": "P0后集成Tauri", "reason": "先验证核心渲染能力"}
+    {"date": "2026-05-03", "decision": "P0 后集成 Tauri", "reason": "先验证核心渲染能力"},
+    {"date": "2026-05-03", "decision": "用 junction point 解决路径空格", "reason": "GNU toolchain 的 dlltool.exe 不支持含空格路径"}
   ],
   "findings": [
     "pulldown-cmark 支持 GFM 扩展（表格、任务列表、删除线）",
-    "数学公式需要预处理保护，避免被 markdown 解析器误解析"
+    "数学公式需要预处理保护，避免被 markdown 解析器误解析",
+    "Tauri Windows 路径空格用 junction point 绕过 dlltool.exe 限制",
+    "Mermaid 在 pulldown-cmark 流水线中需 HTML 实体解码才能渲染",
+    "13 种 Mermaid 图表类型可统一集成，不必逐类处理",
+    "本地图片加载方案：tauri.conf.json 开 assetProtocol(scope:**) + capabilities 开 fs:scope + Rust open_file 返回 base_dir + 前端 convertFileSrc() 转安全 URL",
+    "相对路径的 ../ 必须用 segment-based 方式处理（split + pop），不能简单字符串拼接，否则路径错位",
+    "Prism 全本地化（dist/vendor/prism/）+ prism-autoloader 按需加载语言，避免 CDN 依赖；autoloader 必须设 data-autoloader-path 才能在 Tauri webview 找到本地包",
+    "Prism 高亮要跳过 language-mermaid，否则会和 Mermaid 渲染冲突；pre 上加 data-language 属性供 CSS 显示语言徽标",
+    "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）"
   ],
-  "next_suggested": "早省：启动 Phase 2，从 T-007 Mermaid 流程图开始"
+  "next_suggested": "明日早省：决定 Phase 3 起点（T-015 项目文件树 vs T-017 多标签 Tab），先把今天 12 个未提交文件按主题拆分提交"
 }
