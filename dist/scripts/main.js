@@ -52,7 +52,10 @@
     tabsList: document.getElementById('tabsList'),
     openFileBtn: document.getElementById('openFileBtn'),
     sourceToggle: document.getElementById('sourceToggle'),
-    exportPdfBtn: document.getElementById('exportPdfBtn')
+    exportPdfBtn: document.getElementById('exportPdfBtn'),
+    themeToggle: document.getElementById('themeToggle'),
+    themeIconLight: document.getElementById('themeIconLight'),
+    themeIconDark: document.getElementById('themeIconDark')
   };
 
   // ============================================
@@ -881,6 +884,13 @@
   }
 
   // ============================================
+  // PDF Export
+  // ============================================
+  function exportToPDF() {
+    window.print();
+  }
+
+  // ============================================
   // Keyboard Shortcuts
   // ============================================
   function setupKeyboardShortcuts() {
@@ -917,6 +927,18 @@
       if (e.ctrlKey && e.key === 't') {
         e.preventDefault();
         toggleTOC();
+      }
+
+      // Ctrl+P: Export to PDF
+      if (e.ctrlKey && e.key === 'p') {
+        e.preventDefault();
+        exportToPDF();
+      }
+
+      // Ctrl+Shift+L: Toggle theme
+      if (e.ctrlKey && e.shiftKey && e.key === 'L') {
+        e.preventDefault();
+        toggleTheme();
       }
     });
   }
@@ -1003,17 +1025,53 @@
   }
 
   // ============================================
-  // Theme Detection
+  // Theme Management
   // ============================================
+  function initTheme() {
+    const saved = localStorage.getItem('typora-theme');
+    if (saved === 'dark' || saved === 'light') {
+      applyTheme(saved);
+    } else {
+      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      applyTheme(prefersDark ? 'dark' : 'light');
+    }
+  }
+
+  function applyTheme(theme) {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.setAttribute('data-theme', 'dark');
+    } else {
+      root.removeAttribute('data-theme');
+    }
+    updateThemeIcon(theme);
+    reinitMermaid(theme);
+    localStorage.setItem('typora-theme', theme);
+  }
+
+  function toggleTheme() {
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    applyTheme(isDark ? 'light' : 'dark');
+  }
+
+  function updateThemeIcon(theme) {
+    if (elements.themeIconLight && elements.themeIconDark) {
+      elements.themeIconLight.style.display = theme === 'dark' ? 'none' : 'block';
+      elements.themeIconDark.style.display = theme === 'dark' ? 'block' : 'none';
+    }
+  }
+
+  function reinitMermaid(theme) {
+    if (typeof mermaid !== 'undefined') {
+      mermaid.initialize({ theme: theme === 'dark' ? CONFIG.mermaidTheme.dark : CONFIG.mermaidTheme.light });
+      mermaid.run();
+    }
+  }
+
   function setupThemeDetection() {
-    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-    mediaQuery.addEventListener('change', () => {
-      // Re-render mermaid diagrams with new theme
-      if (typeof mermaid !== 'undefined') {
-        mermaid.initialize({
-          theme: mediaQuery.matches ? CONFIG.mermaidTheme.dark : CONFIG.mermaidTheme.light
-        });
-        mermaid.run();
+    window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+      if (!localStorage.getItem('typora-theme')) {
+        applyTheme(e.matches ? 'dark' : 'light');
       }
     });
   }
@@ -1028,6 +1086,8 @@
     elements.fileTreeToggle.addEventListener('click', toggleFileTree);
     elements.openFolderBtn.addEventListener('click', openFolder);
     elements.openFolderToolbarBtn.addEventListener('click', openFolder);
+    elements.exportPdfBtn.addEventListener('click', exportToPDF);
+    elements.themeToggle.addEventListener('click', toggleTheme);
 
     if (elements.fileTreeSearch) {
       elements.fileTreeSearch.addEventListener('input', (e) => {
@@ -1040,6 +1100,7 @@
   // Initialization
   // ============================================
   function init() {
+    initTheme();
     bindEvents();
     setupKeyboardShortcuts();
     setupDragDrop();

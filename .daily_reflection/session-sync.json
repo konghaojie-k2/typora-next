@@ -1,11 +1,11 @@
 {
-  "last_session": "2026-05-04T15:10",
-  "project_phase": "Phase 3: T-016 文件搜索过滤",
-  "progress": "73%",
+  "last_session": "2026-05-04T20:50",
+  "project_phase": "Phase 3/4: 基础功能已完成，剩余差异化功能",
+  "progress": "86%",
   "pending_tasks": [
-    {"task": "T-016: 文件搜索过滤", "priority": "medium"},
-    {"task": "T-018: PDF 导出", "priority": "medium"},
-    {"task": "T-019: Word 导出（精美模式）", "priority": "low"}
+    {"task": "T-019: Word 导出（精美模式）", "priority": "low"},
+    {"task": "T-020: AI 修复 Mermaid", "priority": "low"},
+    {"task": "T-022: 文件刷新提示", "priority": "low"}
   ],
   "decisions": [
     {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
@@ -13,7 +13,9 @@
     {"date": "2026-05-03", "decision": "P0 后集成 Tauri", "reason": "先验证核心渲染能力"},
     {"date": "2026-05-03", "decision": "用 junction point 解决路径空格", "reason": "GNU toolchain 的 dlltool.exe 不支持含空格路径"},
     {"date": "2026-05-04", "decision": "GNU 工具链 + MinGW PATH 编译", "reason": "用户没有安装 VS，bash 环境稳定可用"},
-    {"date": "2026-05-04", "decision": "创建 /typora-build skill", "reason": "固化编译流程，避免每次手动配置环境"}
+    {"date": "2026-05-04", "decision": "创建 /typora-build skill", "reason": "固化编译流程，避免每次手动配置环境"},
+    {"date": "2026-05-04", "decision": "Agent Team 并行开发 T-016 + T-018", "reason": "两个任务无代码冲突，并行提效"},
+    {"date": "2026-05-04", "decision": "主题系统采用 CSS 变量 + data-theme 属性", "reason": "兼容系统偏好，支持手动切换，localStorage 持久化"}
   ],
   "findings": [
     "pulldown-cmark 支持 GFM 扩展（表格、任务列表、删除线）",
@@ -26,7 +28,9 @@
     "Prism 全本地化（dist/vendor/prism/）+ prism-autoloader 按需加载语言，避免 CDN 依赖；autoloader 必须设 data-autoloader-path 才能在 Tauri webview 找到本地包",
     "Prism 高亮要跳过 language-mermaid，否则会和 Mermaid 渲染冲突；pre 上加 data-language 属性供 CSS 显示语言徽标",
     "assetProtocol.scope:** 当前过宽，生产建议限定到打开文件的目录（安全风险）",
-    "多标签 Tab 状态管理：state.tabs[] + state.activeTab，关闭时调整 activeTab 索引避免越界"
+    "多标签 Tab 状态管理：state.tabs[] + state.activeTab，关闭时调整 activeTab 索引避免越界",
+    "Agent Team 并行开发需明确边界：Agent A 修改文件树区域，Agent B 修改 toolbar/打印区域，避免 main.js 冲突",
+    "主题系统实现：5 处 @media (prefers-color-scheme: dark) 改为 :root:not([data-theme]) 回退 + [data-theme=\"dark\"] 手动覆盖"
   ],
-  "next_suggested": "T-016: 文件搜索过滤 — 在文件树 sidebar 上方加搜索框，实时过滤目录树"
+  "next_suggested": "基础功能全部完成（T-015~T-021）。建议：1) 暂存当前修改；2) 开始差异化功能 T-019 Word 导出或 T-020 AI 修复 Mermaid；3) 或做一轮完整的冒烟测试。"
 }

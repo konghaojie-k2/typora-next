@@ -69,4 +69,21 @@
 - `dist/styles/main.css`
 - `task_plan.md`
 
+### 中省
+
+**时间**: 15:35
+
+**完成操作**:
+- Agent Team 并行开发 T-016 + T-018
+- T-016: 文件搜索过滤 — 文件树上方搜索框，实时过滤，不区分大小写，自动展开匹配目录
+- T-018: PDF 导出 — toolbar 导出按钮（Ctrl+P），打印样式优化（隐藏 sidebars/tabs/toolbar，保留颜色）
+- 编译验证通过（56s，无冲突）
+- 更新 task_plan.md: T-016 → Done, T-018 → Done
+
+**涉及文件**:
+- `dist/index.html`
+- `dist/scripts/main.js`
+- `dist/styles/main.css`
+- `task_plan.md`
+
 ---
