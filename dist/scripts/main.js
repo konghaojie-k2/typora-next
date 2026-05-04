@@ -24,6 +24,7 @@
   const state = {
     currentFile: null,
     currentContent: '',
+    baseDir: '',
     sourceMode: false,
     tocCollapsed: false,
     headings: []
@@ -50,12 +51,22 @@
   // ============================================
   async function invoke(command, args = {}) {
     // Check if running in Tauri environment
+    console.log('[DEBUG] Checking Tauri environment:', !!window.__TAURI__, window.__TAURI__ ? 'AVAILABLE' : 'NOT AVAILABLE');
+
     if (window.__TAURI__) {
+      console.log('[DEBUG] Invoking Tauri command:', command, args);
       const { invoke: tauriInvoke } = window.__TAURI__.core;
-      return await tauriInvoke(command, args);
+      try {
+        const result = await tauriInvoke(command, args);
+        console.log('[DEBUG] Tauri result:', result);
+        return result;
+      } catch (err) {
+        console.error('[DEBUG] Tauri error:', err);
+        throw err;
+      }
     } else {
       // Fallback for web preview (mock responses)
-      console.warn('Tauri not available, using mock data');
+      console.warn('[DEBUG] Tauri not available, using mock data');
       return mockInvoke(command, args);
     }
   }
@@ -105,13 +116,14 @@
       if (result && result.content) {
         state.currentFile = result.path;
         state.currentContent = result.content;
+        state.baseDir = result.base_dir || '';
 
         // Update filename display
         elements.filename.textContent = getFileName(result.path);
         elements.filename.title = result.path;
 
         // Render markdown
-        await renderMarkdown(result.content);
+        await renderMarkdown(result.content, result.base_dir);
 
         // Hide welcome message
         const welcome = elements.markdownBody.querySelector('.welcome-message');
@@ -126,10 +138,15 @@
     }
   }
 
-  async function renderMarkdown(content) {
+  async function renderMarkdown(content, baseDir = '') {
     try {
       const html = await invoke('render_markdown', { content });
       elements.markdownBody.innerHTML = html;
+
+      // Resolve relative image paths based on file directory
+      if (baseDir) {
+        resolveImagePaths(baseDir);
+      }
 
       // Initialize code highlighting
       initCodeHighlighting();
@@ -142,6 +159,9 @@
 
       // Initialize image handling
       initImageHandling();
+
+      // Initialize GFM Alerts styling
+      initGFMAlerts();
 
       // Extract and build TOC
       buildTOC();
@@ -374,6 +394,104 @@
         });
       }
     });
+  }
+
+  // ============================================
+  // Resolve Image Paths
+  // ============================================
+  function resolveImagePaths(baseDir) {
+    const images = elements.markdownBody.querySelectorAll('img');
+    const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
+
+    images.forEach(img => {
+      const src = img.getAttribute('src');
+      if (src && !src.startsWith('http') && !src.startsWith('data:') && !src.startsWith('file:') && !src.startsWith('asset:')) {
+        // Convert relative path to absolute path using segment-based approach
+        let absolutePath = src;
+
+        // Normalize paths relative to baseDir
+        if (src.startsWith('./')) {
+          absolutePath = baseDir + '/' + src.substring(2);
+        } else if (src.startsWith('../')) {
+          // Split baseDir into segments and navigate up
+          let segments = baseDir.split(/[\\/]+/).filter(s => s.length > 0);
+          let relPath = src;
+
+          // Count and remove '../' prefixes
+          while (relPath.startsWith('../')) {
+            if (segments.length > 0) {
+              segments.pop();
+            }
+            relPath = relPath.substring(3);
+          }
+
+          absolutePath = segments.join('/') + '/' + relPath;
+        } else if (!src.startsWith('/')) {
+          // Path without ./ prefix, relative to baseDir
+          absolutePath = baseDir + '/' + src;
+        }
+
+        // Normalize backslashes
+        absolutePath = absolutePath.replace(/\\/g, '/');
+
+        // Use Tauri's convertFileSrc to get a webview-safe URL
+        if (convertFileSrc) {
+          const safeUrl = convertFileSrc(absolutePath);
+          img.setAttribute('src', safeUrl);
+          console.log('[DEBUG] Resolved image:', src, '->', safeUrl);
+        } else {
+          console.error('[ERROR] Tauri convertFileSrc not available');
+        }
+      }
+    });
+  }
+
+  // ============================================
+  // GFM Alerts Styling
+  // ============================================
+  function initGFMAlerts() {
+    const blockquotes = elements.markdownBody.querySelectorAll('blockquote');
+
+    blockquotes.forEach(bq => {
+      const firstP = bq.querySelector('p');
+      if (!firstP) return;
+
+      const text = firstP.textContent.trim();
+
+      // Check for GFM alert patterns
+      const alertMatch = text.match(/^\[\!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
+      if (alertMatch) {
+        const alertType = alertMatch[1].toUpperCase();
+
+        // Add class to blockquote
+        bq.classList.add('gfm-alert', `gfm-alert-${alertType.toLowerCase()}`);
+
+        // Remove the [!TYPE] marker from the paragraph
+        firstP.textContent = firstP.textContent.replace(alertMatch[0], '').trim();
+
+        // Add icon prefix
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'gfm-alert-icon';
+        iconSpan.textContent = getAlertIcon(alertType);
+        firstP.insertBefore(iconSpan, firstP.firstChild);
+
+        // If firstP is now empty, remove it
+        if (!firstP.textContent.trim()) {
+          firstP.remove();
+        }
+      }
+    });
+  }
+
+  function getAlertIcon(type) {
+    const icons = {
+      'NOTE': 'ℹ️',
+      'TIP': '💡',
+      'IMPORTANT': '❗',
+      'WARNING': '⚠️',
+      'CAUTION': '🔥'
+    };
+    return icons[type] || 'ℹ️';
   }
 
   // ============================================

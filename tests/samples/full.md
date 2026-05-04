@@ -73,6 +73,10 @@ Reference-style link to [GitHub][github].
 
 ![Missing Local](./nonexistent.png "This image does not exist")
 
+### Local Image Test
+
+![本地截图](../../PixPin_2026-05-03_20-47-59.png "本地测试图片")
+
 ---
 
 ## 5. Blockquotes

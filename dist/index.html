@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Typora Next</title>
-  <!-- KaTeX for math rendering -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
-  <!-- Prism.js for code highlighting -->
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
+  <!-- KaTeX for math rendering (local) -->
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <!-- Prism.js for code highlighting (local) -->
+  <link href="vendor/prism/prism-tomorrow.min.css" rel="stylesheet">
   <!-- Main styles -->
   <link rel="stylesheet" href="styles/main.css">
 </head>
@@ -65,12 +65,12 @@
     </main>
   </div>
 
-  <!-- Scripts -->
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <!-- Scripts (local vendor) -->
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="vendor/katex/auto-render.min.js"></script>
+  <script src="vendor/prism/prism.min.js"></script>
+  <script src="vendor/prism/prism-autoloader.min.js" data-autoloader-path="vendor/prism/"></script>
+  <script src="vendor/mermaid/mermaid.min.js"></script>
   <script src="scripts/main.js"></script>
 </body>
 </html>
