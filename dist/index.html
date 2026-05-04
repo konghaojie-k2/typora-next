@@ -31,6 +31,9 @@
           打开文件夹
         </button>
       </div>
+      <div class="file-tree-search">
+        <input type="text" id="fileTreeSearch" placeholder="搜索文件...">
+      </div>
       <nav class="file-tree" id="fileTree">
         <p class="file-tree-empty">打开文件夹以显示文件树</p>
       </nav>
@@ -69,6 +72,13 @@
           </button>
         </div>
         <div class="toolbar-right">
+          <button class="btn-icon" id="exportPdfBtn" title="导出 PDF (Ctrl+P)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
           <button class="btn-toggle" id="sourceToggle">
             <span class="toggle-label">源码</span>
             <span class="toggle-hint">(Ctrl+E)</span>

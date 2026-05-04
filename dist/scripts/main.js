@@ -43,6 +43,7 @@
     fileTreeToggle: document.getElementById('fileTreeToggle'),
     openFolderBtn: document.getElementById('openFolderBtn'),
     openFolderToolbarBtn: document.getElementById('openFolderToolbarBtn'),
+    fileTreeSearch: document.getElementById('fileTreeSearch'),
     contentArea: document.getElementById('contentArea'),
     markdownBody: document.getElementById('markdownBody'),
     sourceView: document.getElementById('sourceView'),
@@ -50,7 +51,8 @@
     tabsBar: document.getElementById('tabsBar'),
     tabsList: document.getElementById('tabsList'),
     openFileBtn: document.getElementById('openFileBtn'),
-    sourceToggle: document.getElementById('sourceToggle')
+    sourceToggle: document.getElementById('sourceToggle'),
+    exportPdfBtn: document.getElementById('exportPdfBtn')
   };
 
   // ============================================
@@ -499,6 +501,81 @@
   function toggleFileTree() {
     state.fileTreeCollapsed = !state.fileTreeCollapsed;
     elements.fileTreeSidebar.classList.toggle('collapsed', state.fileTreeCollapsed);
+  }
+
+  // ============================================
+  // File Tree Search Filter
+  // ============================================
+  function filterFileTree(query) {
+    const items = elements.fileTree.querySelectorAll('.file-tree-item');
+    const lowerQuery = query.toLowerCase().trim();
+
+    if (!lowerQuery) {
+      items.forEach(item => {
+        item.style.display = '';
+        const li = item.closest('li');
+        if (li) li.style.display = '';
+      });
+      // Collapse all directories when clearing search
+      elements.fileTree.querySelectorAll('.file-tree-children.expanded').forEach(children => {
+        children.classList.remove('expanded');
+        const chevron = children.closest('li').querySelector('.tree-chevron');
+        if (chevron) chevron.textContent = '▶';
+      });
+      return;
+    }
+
+    // Track which directories have visible descendants
+    const dirHasMatch = new Map();
+
+    items.forEach(item => {
+      const isDir = item.classList.contains('is-dir');
+      const label = item.querySelector('.tree-label');
+      const name = label ? label.textContent.toLowerCase() : '';
+      const matches = name.includes(lowerQuery);
+
+      if (isDir) {
+        dirHasMatch.set(item, matches);
+      } else {
+        item.style.display = matches ? '' : 'none';
+        const li = item.closest('li');
+        if (li) li.style.display = matches ? '' : 'none';
+      }
+    });
+
+    // Second pass: determine directory visibility based on children
+    // Process from deepest to shallowest by sorting path depth descending
+    const dirItems = Array.from(items).filter(item => item.classList.contains('is-dir'));
+    dirItems.sort((a, b) => {
+      const depthA = (a.dataset.path.match(/[\/]/g) || []).length;
+      const depthB = (b.dataset.path.match(/[\/]/g) || []).length;
+      return depthB - depthA;
+    });
+
+    dirItems.forEach(dirItem => {
+      const li = dirItem.closest('li');
+      if (!li) return;
+
+      const childrenContainer = li.querySelector('.file-tree-children');
+      let hasVisibleChild = false;
+
+      if (childrenContainer) {
+        const childItems = childrenContainer.querySelectorAll('.file-tree-item');
+        hasVisibleChild = Array.from(childItems).some(child => child.style.display !== 'none');
+      }
+
+      const selfMatches = dirHasMatch.get(dirItem) || false;
+      const shouldShow = selfMatches || hasVisibleChild;
+
+      dirItem.style.display = shouldShow ? '' : 'none';
+      li.style.display = shouldShow ? '' : 'none';
+
+      if (shouldShow && childrenContainer) {
+        childrenContainer.classList.add('expanded');
+        const chevron = dirItem.querySelector('.tree-chevron');
+        if (chevron) chevron.textContent = '▼';
+      }
+    });
   }
 
   // ============================================
@@ -951,6 +1028,12 @@
     elements.fileTreeToggle.addEventListener('click', toggleFileTree);
     elements.openFolderBtn.addEventListener('click', openFolder);
     elements.openFolderToolbarBtn.addEventListener('click', openFolder);
+
+    if (elements.fileTreeSearch) {
+      elements.fileTreeSearch.addEventListener('input', (e) => {
+        filterFileTree(e.target.value);
+      });
+    }
   }
 
   // ============================================
@@ -986,6 +1069,7 @@
     toggleTOC,
     toggleFileTree,
     buildTOC,
+    filterFileTree,
     invoke
   };
 

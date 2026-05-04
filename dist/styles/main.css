@@ -201,6 +201,31 @@ html, body {
   border-bottom: 1px solid var(--color-border);
 }
 
+.file-tree-search {
+  padding: var(--spacing-sm) var(--spacing-lg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.file-tree-search input {
+  width: 100%;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  transition: border-color var(--transition-fast);
+}
+
+.file-tree-search input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.file-tree-search input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+}
+
 .file-tree-btn {
   display: flex;
   align-items: center;
@@ -1292,6 +1317,10 @@ mark {
     display: none !important;
   }
 
+  .tabs-bar {
+    display: none !important;
+  }
+
   .content-area {
     padding: 0 !important;
   }
@@ -1323,5 +1352,10 @@ mark {
     background: transparent !important;
     box-shadow: none !important;
     border: 1px solid #ddd !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 }
