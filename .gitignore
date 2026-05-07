@@ -17,3 +17,13 @@ Thumbs.db
 *.exe
 *.dll
 *.so
+
+# Claude / AI assistant files
+.claude/
+
+# Daily reflection / dev logs
+.daily_reflection/
+
+# Task planning files
+task_plan.md
+progress.md
