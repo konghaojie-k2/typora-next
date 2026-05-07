@@ -864,11 +864,31 @@
       }
 
       // Validate syntax before rendering
+      let isValid = true;
+      let parseError = '';
       try {
-        await mermaid.parse(content.trim());
+        // mermaid.parse may be sync or async depending on version
+        const parseResult = mermaid.parse(content.trim(), { suppressErrors: true });
+        if (parseResult && typeof parseResult.then === 'function') {
+          // It's a promise (Mermaid 10+)
+          const result = await parseResult;
+          if (result === false || (result && result.valid === false)) {
+            isValid = false;
+            parseError = result && result.error ? String(result.error) : '语法错误';
+          }
+        } else if (parseResult === false) {
+          isValid = false;
+          parseError = '语法错误';
+        }
+      } catch (err) {
+        isValid = false;
+        parseError = err.message || String(err);
+      }
+
+      if (isValid) {
         validBlocks.push({ block, index, content, preElement });
-      } catch (parseErr) {
-        showMermaidFixUI(preElement, content, parseErr.message || parseErr.str || '语法错误');
+      } else {
+        showMermaidFixUI(preElement, content, parseError || '语法错误');
       }
     }
 
