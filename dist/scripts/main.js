@@ -828,30 +828,96 @@
     }
   }
 
-  function initMermaid() {
-    if (typeof mermaid !== 'undefined') {
-      const isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+  async function initMermaid() {
+    if (typeof mermaid === 'undefined') return;
 
-      mermaid.initialize({
-        startOnLoad: false,
-        theme: isDark ? CONFIG.mermaidTheme.dark : CONFIG.mermaidTheme.light,
-        securityLevel: 'loose'
-      });
+    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: isDark ? CONFIG.mermaidTheme.dark : CONFIG.mermaidTheme.light,
+      securityLevel: 'loose'
+    });
 
-      // Find and render mermaid blocks
-      const mermaidBlocks = elements.markdownBody.querySelectorAll('.mermaid, pre code.language-mermaid');
-      mermaidBlocks.forEach((block, index) => {
-        // Convert code blocks to mermaid format if needed
-        if (block.tagName === 'CODE') {
-          const pre = block.parentElement;
-          const content = block.textContent;
-          pre.outerHTML = `<pre class="mermaid" id="mermaid-${index}">${escapeHtml(content)}</pre>`;
-        }
-      });
+    // Find and validate mermaid blocks
+    const mermaidBlocks = elements.markdownBody.querySelectorAll('.mermaid, pre code.language-mermaid');
+    const validBlocks = [];
 
-      // Run mermaid
+    for (let i = 0; i < mermaidBlocks.length; i++) {
+      const block = mermaidBlocks[i];
+      let content, preElement;
+
+      if (block.tagName === 'CODE') {
+        preElement = block.parentElement;
+        content = block.textContent;
+      } else {
+        preElement = block;
+        content = block.textContent;
+      }
+
+      // Validate syntax before rendering
+      try {
+        await mermaid.parse(content.trim());
+        validBlocks.push({ block, index, content, preElement });
+      } catch (parseErr) {
+        showMermaidFixUI(preElement, content, parseErr.message || parseErr.str || '语法错误');
+      }
+    }
+
+    // Convert valid code blocks to mermaid format
+    validBlocks.forEach(({ block, index, content, preElement }) => {
+      if (block.tagName === 'CODE') {
+        preElement.outerHTML = `<pre class="mermaid" id="mermaid-${index}">${escapeHtml(content)}</pre>`;
+      }
+    });
+
+    // Run mermaid for valid blocks only
+    if (validBlocks.length > 0) {
       mermaid.run();
     }
+  }
+
+  function showMermaidFixUI(preElement, code, errorMessage) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'mermaid-error-wrapper';
+    wrapper.innerHTML = `
+      <div class="mermaid-error-header">
+        <span class="mermaid-error-icon">⚠️</span>
+        <span class="mermaid-error-text">Mermaid 语法错误</span>
+      </div>
+      <div class="mermaid-error-detail">${escapeHtml(errorMessage)}</div>
+      <pre class="mermaid-error-code"><code>${escapeHtml(code)}</code></pre>
+      <button class="mermaid-fix-btn" data-code="${encodeURIComponent(code.trim())}" data-error="${encodeURIComponent(errorMessage)}">
+        🤖 AI 修复
+      </button>
+    `;
+
+    preElement.parentNode.replaceChild(wrapper, preElement);
+
+    wrapper.querySelector('.mermaid-fix-btn').addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.textContent = '修复中...';
+      btn.disabled = true;
+
+      try {
+        const fixed = await invoke('fix_mermaid', {
+          code: decodeURIComponent(btn.dataset.code),
+          error: decodeURIComponent(btn.dataset.error)
+        });
+
+        if (fixed) {
+          const newPre = document.createElement('pre');
+          newPre.className = 'mermaid';
+          newPre.textContent = fixed;
+          wrapper.parentNode.replaceChild(newPre, wrapper);
+          mermaid.run({ querySelector: newPre });
+          showToast('Mermaid 已修复');
+        }
+      } catch (err) {
+        btn.textContent = '🤖 AI 修复';
+        btn.disabled = false;
+        showError('AI 修复失败: ' + err);
+      }
+    });
   }
 
   function initImageHandling() {

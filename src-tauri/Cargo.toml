@@ -32,3 +32,6 @@ thiserror = "2.0"
 
 # File watching
 notify = "8"
+
+# HTTP client for AI API
+ureq = { version = "2", features = ["json"] }

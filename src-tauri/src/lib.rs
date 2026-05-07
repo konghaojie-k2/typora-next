@@ -342,6 +342,48 @@ fn unwatch_file(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Fix Mermaid syntax errors using Claude AI
+#[tauri::command]
+async fn fix_mermaid(code: String, error: String) -> Result<String, String> {
+    let api_key = std::env::var("ANTHROPIC_API_KEY")
+        .map_err(|_| "未设置 ANTHROPIC_API_KEY 环境变量".to_string())?;
+
+    let prompt = format!(
+        "你是 Mermaid 图表专家。以下 Mermaid 代码有语法错误，请修复它。\n\n错误信息: {}\n\n原始代码:\n```mermaid\n{}\n```\n\n请只返回修复后的 Mermaid 代码（不要包含 ```mermaid 标记，不要解释，只返回纯代码）。",
+        error, code
+    );
+
+    let response = ureq::post("https://api.anthropic.com/v1/messages")
+        .set("x-api-key", &api_key)
+        .set("anthropic-version", "2023-06-01")
+        .set("Content-Type", "application/json")
+        .send_json(serde_json::json!({
+            "model": "claude-3-5-haiku-20241022",
+            "max_tokens": 1024,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ]
+        }))
+        .map_err(|e| format!("API 请求失败: {}", e))?;
+
+    let json: serde_json::Value = response.into_json()
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let fixed_code = json["content"][0]["text"]
+        .as_str()
+        .ok_or("响应中没有内容")?;
+
+    // Clean up markdown code fences if present
+    let cleaned = fixed_code
+        .trim()
+        .trim_start_matches("```mermaid")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+
+    Ok(cleaned.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -366,7 +408,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
-            open_folder_dialog, list_directory, watch_file, unwatch_file
+            open_folder_dialog, list_directory, watch_file, unwatch_file,
+            fix_mermaid
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
