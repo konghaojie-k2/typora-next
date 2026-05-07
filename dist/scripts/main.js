@@ -28,7 +28,8 @@
     sidebarCollapsed: false,
     sidebarActiveTab: 'files',   // 'files' | 'toc'
     currentFolder: null,
-    headings: []
+    headings: [],
+    refreshPromptVisible: false
   };
 
   // ============================================
@@ -150,6 +151,81 @@
   }
 
   // ============================================
+  // File Watch
+  // ============================================
+  async function watchCurrentFile(path) {
+    if (!window.__TAURI__) return;
+    try {
+      await invoke('watch_file', { path });
+    } catch (err) {
+      console.error('Failed to watch file:', err);
+    }
+  }
+
+  async function unwatchCurrentFile() {
+    if (!window.__TAURI__) return;
+    try {
+      await invoke('unwatch_file');
+    } catch (err) {
+      console.error('Failed to unwatch file:', err);
+    }
+  }
+
+  function setupFileWatcher() {
+    if (!window.__TAURI__) return;
+    const { listen } = window.__TAURI__.event;
+    listen('file-changed', (event) => {
+      const changedPath = event.payload;
+      const activeTab = state.tabs[state.activeTab];
+      if (activeTab && activeTab.path === changedPath && !state.refreshPromptVisible) {
+        showRefreshPrompt(changedPath);
+      }
+    });
+  }
+
+  function showRefreshPrompt(path) {
+    state.refreshPromptVisible = true;
+    const existing = document.getElementById('refresh-prompt');
+    if (existing) existing.remove();
+
+    const prompt = document.createElement('div');
+    prompt.id = 'refresh-prompt';
+    prompt.innerHTML = `
+      <span class="refresh-text">${escapeHtml(getFileName(path))} 已在外部修改</span>
+      <button class="refresh-btn" id="refreshBtn">刷新</button>
+      <button class="refresh-dismiss" id="dismissRefreshBtn">忽略</button>
+    `;
+    document.body.appendChild(prompt);
+
+    document.getElementById('refreshBtn').addEventListener('click', () => {
+      refreshCurrentFile();
+      prompt.remove();
+      state.refreshPromptVisible = false;
+    });
+    document.getElementById('dismissRefreshBtn').addEventListener('click', () => {
+      prompt.remove();
+      state.refreshPromptVisible = false;
+    });
+  }
+
+  async function refreshCurrentFile() {
+    const tab = state.tabs[state.activeTab];
+    if (!tab) return;
+    try {
+      const result = await invoke('open_file', { path: tab.path });
+      if (result && result.content) {
+        tab.content = result.content;
+        tab.baseDir = result.base_dir || '';
+        loadTabContent(state.activeTab);
+        showToast('文件已刷新');
+      }
+    } catch (err) {
+      console.error('Failed to refresh file:', err);
+      showError('刷新失败: ' + err);
+    }
+  }
+
+  // ============================================
   // Tab Management
   // ============================================
   function addTab(path, content, baseDir) {
@@ -171,6 +247,7 @@
     state.activeTab = state.tabs.length - 1;
     renderTabs();
     loadTabContent(state.activeTab);
+    watchCurrentFile(path);
   }
 
   function switchTab(index) {
@@ -178,6 +255,10 @@
     state.activeTab = index;
     renderTabs();
     loadTabContent(index);
+    const tab = state.tabs[index];
+    if (tab) {
+      watchCurrentFile(tab.path);
+    }
   }
 
   function closeTab(index) {
@@ -189,6 +270,7 @@
       state.activeTab = -1;
       renderTabs();
       showWelcome();
+      unwatchCurrentFile();
     } else {
       // Adjust active tab
       if (index <= state.activeTab) {
@@ -196,6 +278,17 @@
       }
       renderTabs();
       loadTabContent(state.activeTab);
+      const activeTab = state.tabs[state.activeTab];
+      if (activeTab) {
+        watchCurrentFile(activeTab.path);
+      }
+    }
+
+    // Remove refresh prompt if visible
+    const prompt = document.getElementById('refresh-prompt');
+    if (prompt) {
+      prompt.remove();
+      state.refreshPromptVisible = false;
     }
   }
 
@@ -1197,6 +1290,7 @@
     setupDragDrop();
     setupScrollObserver();
     setupThemeDetection();
+    setupFileWatcher();
 
     console.log('Typora Next initialized');
   }

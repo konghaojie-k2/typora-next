@@ -16,3 +16,19 @@
 - phase_completed: "Phase 3 基础功能 (T-015~T-021)"
 - tasks_completed: 19
 - progress_overall: "86%"
+
+## 2026-05-06
+- morning_done: true
+- evening_done: false
+- last_session: "<当前时间>"
+- today_plan: "待定：冒烟测试 / T-019 Word导出 / T-020 AI修复Mermaid"
+- tasks_completed: 19
+- progress_overall: "86%"
+
+## 2026-05-07
+- morning_done: true
+- evening_done: false
+- last_session: "15:30"
+- today_plan: "T-022 文件刷新提示 / T-019 Word导出 / 冒烟测试"
+- tasks_completed: 20
+- progress_overall: "91%"

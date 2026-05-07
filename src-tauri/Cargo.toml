@@ -29,3 +29,6 @@ tauri-plugin-fs = "2"
 # Core markdown processing
 pulldown-cmark = "0.12"
 thiserror = "2.0"
+
+# File watching
+notify = "8"

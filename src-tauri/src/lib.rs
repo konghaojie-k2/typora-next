@@ -1,7 +1,15 @@
 use std::fs;
 use std::path::PathBuf;
+use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+
+/// Application state for file watching
+pub struct AppState {
+    watcher: Mutex<Option<RecommendedWatcher>>,
+    watched_path: Mutex<Option<String>>,
+}
 
 /// File result containing path and content
 #[derive(Debug, Serialize, Deserialize)]
@@ -280,11 +288,69 @@ fn generate_slug(text: &str) -> String {
         .to_string()
 }
 
+/// Start watching a file for external changes
+#[tauri::command]
+fn watch_file(path: String, app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+    // Stop any existing watcher first
+    {
+        let mut watcher_guard = state.watcher.lock().map_err(|e| e.to_string())?;
+        *watcher_guard = None;
+        let mut path_guard = state.watched_path.lock().map_err(|e| e.to_string())?;
+        *path_guard = None;
+    }
+
+    let app_clone = app.clone();
+    let path_for_event = path.clone();
+
+    let watcher = RecommendedWatcher::new(
+        move |res: Result<notify::Event, notify::Error>| {
+            match res {
+                Ok(event) => {
+                    if matches!(event.kind, EventKind::Modify(_)) {
+                        let _ = app_clone.emit("file-changed", path_for_event.clone());
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Watch error: {:?}", e);
+                }
+            }
+        },
+        Config::default(),
+    ).map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    let mut watcher_guard = state.watcher.lock().map_err(|e| e.to_string())?;
+    let mut path_guard = state.watched_path.lock().map_err(|e| e.to_string())?;
+    *watcher_guard = Some(watcher);
+    *path_guard = Some(path.clone());
+
+    // Now start watching
+    if let Some(ref mut w) = watcher_guard.as_mut() {
+        w.watch(PathBuf::from(&path).as_path(), RecursiveMode::NonRecursive)
+            .map_err(|e| format!("Failed to watch file: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Stop watching the current file
+#[tauri::command]
+fn unwatch_file(state: tauri::State<AppState>) -> Result<(), String> {
+    let mut watcher_guard = state.watcher.lock().map_err(|e| e.to_string())?;
+    *watcher_guard = None;
+    let mut path_guard = state.watched_path.lock().map_err(|e| e.to_string())?;
+    *path_guard = None;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .manage(AppState {
+            watcher: Mutex::new(None),
+            watched_path: Mutex::new(None),
+        })
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -300,7 +366,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
-            open_folder_dialog, list_directory
+            open_folder_dialog, list_directory, watch_file, unwatch_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

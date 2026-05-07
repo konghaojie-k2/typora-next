@@ -1,11 +1,12 @@
 {
   "last_session": "2026-05-04T18:32",
   "project_phase": "Phase 3/4: 基础功能已完成，剩余差异化功能",
-  "progress": "86%",
+  "progress": "91%",
   "pending_tasks": [
     {"task": "T-019: Word 导出（精美模式）", "priority": "low"},
     {"task": "T-020: AI 修复 Mermaid", "priority": "low"},
-    {"task": "T-022: 文件刷新提示", "priority": "low"}
+    {"task": "T-019: Word 导出（精美模式）", "priority": "low"},
+    {"task": "T-020: AI 修复 Mermaid", "priority": "low"}
   ],
   "decisions": [
     {"date": "2026-05-03", "decision": "使用 Prism.js", "reason": "Tomorrow 主题更美观"},
