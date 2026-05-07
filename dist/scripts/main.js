@@ -59,7 +59,14 @@
     exportPdfBtn: document.getElementById('exportPdfBtn'),
     themeToggle: document.getElementById('themeToggle'),
     themeIconLight: document.getElementById('themeIconLight'),
-    themeIconDark: document.getElementById('themeIconDark')
+    themeIconDark: document.getElementById('themeIconDark'),
+    settingsBtn: document.getElementById('settingsBtn'),
+    settingsModal: document.getElementById('settingsModal'),
+    settingApiKey: document.getElementById('settingApiKey'),
+    settingTheme: document.getElementById('settingTheme'),
+    settingsModalClose: document.getElementById('settingsModalClose'),
+    settingsCancel: document.getElementById('settingsCancel'),
+    settingsSave: document.getElementById('settingsSave')
   };
 
   // ============================================
@@ -1339,10 +1346,83 @@
     elements.exportPdfBtn.addEventListener('click', exportToPDF);
     elements.themeToggle.addEventListener('click', toggleTheme);
 
+    if (elements.settingsBtn) {
+      elements.settingsBtn.addEventListener('click', openSettings);
+    }
+    if (elements.settingsModalClose) {
+      elements.settingsModalClose.addEventListener('click', closeSettings);
+    }
+    if (elements.settingsCancel) {
+      elements.settingsCancel.addEventListener('click', closeSettings);
+    }
+    if (elements.settingsSave) {
+      elements.settingsSave.addEventListener('click', saveSettings);
+    }
+    if (elements.settingsModal) {
+      elements.settingsModal.addEventListener('click', (e) => {
+        if (e.target === elements.settingsModal) closeSettings();
+      });
+    }
+
     if (elements.fileTreeSearch) {
       elements.fileTreeSearch.addEventListener('input', (e) => {
         filterFileTree(e.target.value);
       });
+    }
+  }
+
+  // ============================================
+  // Settings / Configuration
+  // ============================================
+  async function loadConfig() {
+    if (!window.__TAURI__) return;
+    try {
+      const config = await invoke('get_config');
+      if (config) {
+        if (config.anthropic_api_key && elements.settingApiKey) {
+          elements.settingApiKey.value = config.anthropic_api_key;
+        }
+        if (config.theme && elements.settingTheme) {
+          elements.settingTheme.value = config.theme;
+          applyTheme(config.theme);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load config:', err);
+    }
+  }
+
+  function openSettings() {
+    if (elements.settingsModal) {
+      elements.settingsModal.style.display = 'flex';
+    }
+  }
+
+  function closeSettings() {
+    if (elements.settingsModal) {
+      elements.settingsModal.style.display = 'none';
+    }
+  }
+
+  async function saveSettings() {
+    const apiKey = elements.settingApiKey ? elements.settingApiKey.value.trim() : '';
+    const theme = elements.settingTheme ? elements.settingTheme.value : '';
+
+    const config = {
+      anthropic_api_key: apiKey || null,
+      theme: theme || null
+    };
+
+    try {
+      await invoke('set_config', { config });
+      if (theme) {
+        applyTheme(theme);
+      }
+      showToast('设置已保存');
+      closeSettings();
+    } catch (err) {
+      console.error('Failed to save config:', err);
+      showError('保存失败: ' + err);
     }
   }
 
@@ -1357,6 +1437,7 @@
     setupScrollObserver();
     setupThemeDetection();
     setupFileWatcher();
+    loadConfig();
 
     console.log('Typora Next initialized');
   }

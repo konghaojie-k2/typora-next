@@ -5,6 +5,15 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+/// Application configuration
+#[derive(Debug, Serialize, Deserialize, Default, Clone)]
+pub struct AppConfig {
+    #[serde(default)]
+    pub anthropic_api_key: Option<String>,
+    #[serde(default)]
+    pub theme: Option<String>, // "light", "dark", or None for system
+}
+
 /// Application state for file watching
 pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
@@ -342,11 +351,47 @@ fn unwatch_file(state: tauri::State<AppState>) -> Result<(), String> {
     Ok(())
 }
 
+/// Get the config file path
+fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let config_dir = app.path().app_config_dir()
+        .map_err(|e| format!("Failed to get config dir: {}", e))?;
+    std::fs::create_dir_all(&config_dir)
+        .map_err(|e| format!("Failed to create config dir: {}", e))?;
+    Ok(config_dir.join("config.json"))
+}
+
+/// Load application configuration
+#[tauri::command]
+fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
+    let path = config_path(&app)?;
+    if !path.exists() {
+        return Ok(AppConfig::default());
+    }
+    let content = fs::read_to_string(&path)
+        .map_err(|e| format!("Failed to read config: {}", e))?;
+    let config: AppConfig = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse config: {}", e))?;
+    Ok(config)
+}
+
+/// Save application configuration
+#[tauri::command]
+fn set_config(config: AppConfig, app: tauri::AppHandle) -> Result<(), String> {
+    let path = config_path(&app)?;
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("Failed to serialize config: {}", e))?;
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write config: {}", e))?;
+    Ok(())
+}
+
 /// Fix Mermaid syntax errors using Claude AI
 #[tauri::command]
-async fn fix_mermaid(code: String, error: String) -> Result<String, String> {
-    let api_key = std::env::var("ANTHROPIC_API_KEY")
-        .map_err(|_| "未设置 ANTHROPIC_API_KEY 环境变量".to_string())?;
+async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
+    let config = get_config(app)?;
+    let api_key = config.anthropic_api_key
+        .filter(|k| !k.is_empty())
+        .ok_or("未设置 API Key，请在设置中配置 ANTHROPIC_API_KEY")?;
 
     let prompt = format!(
         "你是 Mermaid 图表专家。以下 Mermaid 代码有语法错误，请修复它。\n\n错误信息: {}\n\n原始代码:\n```mermaid\n{}\n```\n\n请只返回修复后的 Mermaid 代码（不要包含 ```mermaid 标记，不要解释，只返回纯代码）。",
@@ -409,7 +454,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
-            fix_mermaid
+            fix_mermaid, get_config, set_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

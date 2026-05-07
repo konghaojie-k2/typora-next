@@ -79,6 +79,12 @@
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
           </button>
+          <button class="btn-icon" id="settingsBtn" title="设置">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+          </button>
           <button class="btn-icon" id="themeToggle" title="切换主题 (Ctrl+Shift+L)">
             <svg id="themeIconLight" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="5"/>
@@ -121,6 +127,35 @@
         <pre class="source-code" id="sourceCode"></pre>
       </div>
     </main>
+  </div>
+
+  <!-- Settings Modal -->
+  <div class="modal-overlay" id="settingsModal" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>设置</h2>
+        <button class="modal-close" id="settingsModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="setting-item">
+          <label class="setting-label" for="settingApiKey">Anthropic API Key</label>
+          <input type="password" id="settingApiKey" class="setting-input" placeholder="sk-ant-api03-...">
+          <span class="setting-hint">用于 AI 修复 Mermaid 图表</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingTheme">主题</label>
+          <select id="settingTheme" class="setting-select">
+            <option value="">跟随系统</option>
+            <option value="light">浅色</option>
+            <option value="dark">深色</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-secondary" id="settingsCancel">取消</button>
+        <button class="modal-btn modal-btn-primary" id="settingsSave">保存</button>
+      </div>
+    </div>
   </div>
 
   <!-- Scripts (local vendor) -->
