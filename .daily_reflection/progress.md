@@ -33,3 +33,16 @@
   - `dist/styles/main.css` — 刷新提示样式
 - **验证**: `cargo build --release` 成功，产物 `app.exe` (22MB)
 - **进度更新**: 20/22 任务 (91%)
+
+## 2026-05-07 中省
+- **时间**: 15:46
+- **类型**: 中省
+- **完成任务**: T-020 AI 修复 Mermaid
+- **涉及文件**:
+  - `src-tauri/Cargo.toml` — 添加 `ureq` 依赖
+  - `src-tauri/src/lib.rs` — 添加 `fix_mermaid` 命令（调用 Claude API）
+  - `dist/scripts/main.js` — `mermaid.parse()` 预验证、错误 UI、AI 修复按钮
+  - `dist/styles/main.css` — Mermaid 错误和修复按钮样式
+- **验证**: `cargo build --release` 成功
+- **进度更新**: 21/22 任务 (95%)
+- **备注**: 需要设置 `ANTHROPIC_API_KEY` 环境变量
