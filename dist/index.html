@@ -138,16 +138,21 @@
       </div>
       <div class="modal-body">
         <div class="setting-item">
-          <label class="setting-label" for="settingAiProvider">AI 提供商</label>
+          <label class="setting-label" for="settingAiProvider">API 格式</label>
           <select id="settingAiProvider" class="setting-select">
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="openai">OpenAI (GPT)</option>
+            <option value="anthropic">Anthropic Messages</option>
+            <option value="openai">OpenAI Chat Completions</option>
           </select>
         </div>
         <div class="setting-item">
           <label class="setting-label" for="settingAiBaseUrl">Base URL</label>
           <input type="text" id="settingAiBaseUrl" class="setting-input" placeholder="https://api.anthropic.com">
           <span class="setting-hint">留空使用默认地址，可填入第三方兼容服务地址</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingModel">模型名称</label>
+          <input type="text" id="settingModel" class="setting-input" placeholder="claude-3-5-haiku-20241022">
+          <span class="setting-hint">留空使用默认模型</span>
         </div>
         <div class="setting-item">
           <label class="setting-label" for="settingApiKey">API Key</label>

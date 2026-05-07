@@ -29,6 +29,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub ai_base_url: Option<String>,
     #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
     pub theme: Option<String>, // "light", "dark", or None for system
 }
 
@@ -419,6 +421,13 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
             AiProvider::Openai => "https://api.openai.com".to_string(),
         });
 
+    let model = config.model
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
+            AiProvider::Openai => "gpt-4o-mini".to_string(),
+        });
+
     let prompt = format!(
         "你是 Mermaid 图表专家。以下 Mermaid 代码有语法错误，请修复它。\n\n错误信息: {}\n\n原始代码:\n```mermaid\n{}\n```\n\n请只返回修复后的 Mermaid 代码（不要包含 ```mermaid 标记，不要解释，只返回纯代码）。",
         error, code
@@ -429,7 +438,7 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
         AiProvider::Anthropic => {
             let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
-                "model": "claude-3-5-haiku-20241022",
+                "model": model,
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": prompt}]
             });
@@ -444,7 +453,7 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
         AiProvider::Openai => {
             let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
-                "model": "gpt-4o-mini",
+                "model": model,
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": prompt}]
             });

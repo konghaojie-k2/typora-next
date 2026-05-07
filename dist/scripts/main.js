@@ -64,6 +64,7 @@
     settingsModal: document.getElementById('settingsModal'),
     settingAiProvider: document.getElementById('settingAiProvider'),
     settingAiBaseUrl: document.getElementById('settingAiBaseUrl'),
+    settingModel: document.getElementById('settingModel'),
     settingApiKey: document.getElementById('settingApiKey'),
     settingTheme: document.getElementById('settingTheme'),
     settingsModalClose: document.getElementById('settingsModalClose'),
@@ -849,6 +850,7 @@
 
     // Find and validate mermaid blocks
     const mermaidBlocks = elements.markdownBody.querySelectorAll('.mermaid, pre code.language-mermaid');
+    const canValidate = typeof mermaid.parse === 'function';
     const validBlocks = [];
 
     for (let i = 0; i < mermaidBlocks.length; i++) {
@@ -863,45 +865,49 @@
         content = block.textContent;
       }
 
-      // Validate syntax before rendering
       let isValid = true;
       let parseError = '';
-      try {
-        // mermaid.parse may be sync or async depending on version
-        const parseResult = mermaid.parse(content.trim(), { suppressErrors: true });
-        if (parseResult && typeof parseResult.then === 'function') {
-          // It's a promise (Mermaid 10+)
-          const result = await parseResult;
-          if (result === false || (result && result.valid === false)) {
+
+      if (canValidate) {
+        try {
+          const parseResult = mermaid.parse(content.trim(), { suppressErrors: true });
+          if (parseResult && typeof parseResult.then === 'function') {
+            const result = await parseResult;
+            if (result === false || (result && result.valid === false)) {
+              isValid = false;
+              parseError = result && result.error ? String(result.error) : '语法错误';
+            }
+          } else if (parseResult === false) {
             isValid = false;
-            parseError = result && result.error ? String(result.error) : '语法错误';
+            parseError = '语法错误';
           }
-        } else if (parseResult === false) {
+        } catch (err) {
           isValid = false;
-          parseError = '语法错误';
+          parseError = err.message || String(err);
         }
-      } catch (err) {
-        isValid = false;
-        parseError = err.message || String(err);
       }
 
       if (isValid) {
-        validBlocks.push({ block, index, content, preElement });
+        validBlocks.push({ block, index: i, content, preElement });
       } else {
         showMermaidFixUI(preElement, content, parseError || '语法错误');
       }
     }
 
-    // Convert valid code blocks to mermaid format
+    // Convert code blocks to mermaid format
     validBlocks.forEach(({ block, index, content, preElement }) => {
       if (block.tagName === 'CODE') {
         preElement.outerHTML = `<pre class="mermaid" id="mermaid-${index}">${escapeHtml(content)}</pre>`;
       }
     });
 
-    // Run mermaid for valid blocks only
-    if (validBlocks.length > 0) {
-      mermaid.run();
+    // Render all mermaid blocks
+    if (mermaidBlocks.length > 0) {
+      try {
+        await mermaid.run();
+      } catch (err) {
+        console.error('Mermaid render error:', err);
+      }
     }
   }
 
@@ -938,7 +944,7 @@
           newPre.className = 'mermaid';
           newPre.textContent = fixed;
           wrapper.parentNode.replaceChild(newPre, wrapper);
-          mermaid.run({ querySelector: newPre });
+          mermaid.run({ nodes: [newPre] });
           showToast('Mermaid 已修复');
         }
       } catch (err) {
@@ -1410,6 +1416,9 @@
         if (config.ai_base_url !== undefined && elements.settingAiBaseUrl) {
           elements.settingAiBaseUrl.value = config.ai_base_url || '';
         }
+        if (config.model !== undefined && elements.settingModel) {
+          elements.settingModel.value = config.model || '';
+        }
         if (config.theme && elements.settingTheme) {
           elements.settingTheme.value = config.theme;
           applyTheme(config.theme);
@@ -1436,12 +1445,14 @@
     const apiKey = elements.settingApiKey ? elements.settingApiKey.value.trim() : '';
     const aiProvider = elements.settingAiProvider ? elements.settingAiProvider.value : 'anthropic';
     const aiBaseUrl = elements.settingAiBaseUrl ? elements.settingAiBaseUrl.value.trim() : '';
+    const model = elements.settingModel ? elements.settingModel.value.trim() : '';
     const theme = elements.settingTheme ? elements.settingTheme.value : '';
 
     const config = {
       api_key: apiKey || null,
       ai_provider: aiProvider,
       ai_base_url: aiBaseUrl || null,
+      model: model || null,
       theme: theme || null
     };
 

@@ -112,6 +112,16 @@ cargo run -- render input.md output.html
 
 **Key insight**: 预览器不需要 WYSIWYG 的复杂交互，专注渲染质量即可。
 
+## ⚠️ 铁律
+
+### 禁止主动提交代码
+
+**Claude 不得自行执行 `git commit` 或 `git push`**。所有提交操作必须由用户明确授权后才能执行。
+
+- 代码修改完成后，应告知用户改动内容并询问是否提交
+- 用户说"提交"、"commit"或明确授权后，方可执行提交
+- 用户说"不要提交"或类似拒绝时，必须尊重用户决定
+
 ## Code Style
 
 - Rust: `cargo fmt` + `cargo clippy`
