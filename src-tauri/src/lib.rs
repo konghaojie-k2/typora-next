@@ -5,11 +5,29 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+/// AI provider type
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum AiProvider {
+    Anthropic,
+    Openai,
+}
+
+impl Default for AiProvider {
+    fn default() -> Self {
+        AiProvider::Anthropic
+    }
+}
+
 /// Application configuration
 #[derive(Debug, Serialize, Deserialize, Default, Clone)]
 pub struct AppConfig {
     #[serde(default)]
-    pub anthropic_api_key: Option<String>,
+    pub api_key: Option<String>,
+    #[serde(default)]
+    pub ai_provider: Option<AiProvider>,
+    #[serde(default)]
+    pub ai_base_url: Option<String>,
     #[serde(default)]
     pub theme: Option<String>, // "light", "dark", or None for system
 }
@@ -385,38 +403,68 @@ fn set_config(config: AppConfig, app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Fix Mermaid syntax errors using Claude AI
+/// Fix Mermaid syntax errors using AI
 #[tauri::command]
 async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
     let config = get_config(app)?;
-    let api_key = config.anthropic_api_key
+    let api_key = config.api_key
         .filter(|k| !k.is_empty())
-        .ok_or("未设置 API Key，请在设置中配置 ANTHROPIC_API_KEY")?;
+        .ok_or("未设置 API Key，请在设置中配置")?;
+
+    let provider = config.ai_provider.unwrap_or_default();
+    let base_url = config.ai_base_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
+            AiProvider::Openai => "https://api.openai.com".to_string(),
+        });
 
     let prompt = format!(
         "你是 Mermaid 图表专家。以下 Mermaid 代码有语法错误，请修复它。\n\n错误信息: {}\n\n原始代码:\n```mermaid\n{}\n```\n\n请只返回修复后的 Mermaid 代码（不要包含 ```mermaid 标记，不要解释，只返回纯代码）。",
         error, code
     );
 
-    let response = ureq::post("https://api.anthropic.com/v1/messages")
-        .set("x-api-key", &api_key)
-        .set("anthropic-version", "2023-06-01")
-        .set("Content-Type", "application/json")
-        .send_json(serde_json::json!({
-            "model": "claude-3-5-haiku-20241022",
-            "max_tokens": 1024,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }))
-        .map_err(|e| format!("API 请求失败: {}", e))?;
+    // Build request based on provider
+    let (response, is_anthropic) = match provider {
+        AiProvider::Anthropic => {
+            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": "claude-3-5-haiku-20241022",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, true)
+        }
+        AiProvider::Openai => {
+            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": "gpt-4o-mini",
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, false)
+        }
+    };
 
     let json: serde_json::Value = response.into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let fixed_code = json["content"][0]["text"]
-        .as_str()
-        .ok_or("响应中没有内容")?;
+    let fixed_code = if is_anthropic {
+        json["content"][0]["text"].as_str()
+    } else {
+        json["choices"][0]["message"]["content"].as_str()
+    }.ok_or("响应中没有内容")?;
 
     // Clean up markdown code fences if present
     let cleaned = fixed_code

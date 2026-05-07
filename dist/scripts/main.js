@@ -62,6 +62,8 @@
     themeIconDark: document.getElementById('themeIconDark'),
     settingsBtn: document.getElementById('settingsBtn'),
     settingsModal: document.getElementById('settingsModal'),
+    settingAiProvider: document.getElementById('settingAiProvider'),
+    settingAiBaseUrl: document.getElementById('settingAiBaseUrl'),
     settingApiKey: document.getElementById('settingApiKey'),
     settingTheme: document.getElementById('settingTheme'),
     settingsModalClose: document.getElementById('settingsModalClose'),
@@ -1379,8 +1381,14 @@
     try {
       const config = await invoke('get_config');
       if (config) {
-        if (config.anthropic_api_key && elements.settingApiKey) {
-          elements.settingApiKey.value = config.anthropic_api_key;
+        if (config.api_key && elements.settingApiKey) {
+          elements.settingApiKey.value = config.api_key;
+        }
+        if (config.ai_provider && elements.settingAiProvider) {
+          elements.settingAiProvider.value = config.ai_provider;
+        }
+        if (config.ai_base_url !== undefined && elements.settingAiBaseUrl) {
+          elements.settingAiBaseUrl.value = config.ai_base_url || '';
         }
         if (config.theme && elements.settingTheme) {
           elements.settingTheme.value = config.theme;
@@ -1406,10 +1414,14 @@
 
   async function saveSettings() {
     const apiKey = elements.settingApiKey ? elements.settingApiKey.value.trim() : '';
+    const aiProvider = elements.settingAiProvider ? elements.settingAiProvider.value : 'anthropic';
+    const aiBaseUrl = elements.settingAiBaseUrl ? elements.settingAiBaseUrl.value.trim() : '';
     const theme = elements.settingTheme ? elements.settingTheme.value : '';
 
     const config = {
-      anthropic_api_key: apiKey || null,
+      api_key: apiKey || null,
+      ai_provider: aiProvider,
+      ai_base_url: aiBaseUrl || null,
       theme: theme || null
     };
 

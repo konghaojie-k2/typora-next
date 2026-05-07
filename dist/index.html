@@ -138,8 +138,20 @@
       </div>
       <div class="modal-body">
         <div class="setting-item">
-          <label class="setting-label" for="settingApiKey">Anthropic API Key</label>
-          <input type="password" id="settingApiKey" class="setting-input" placeholder="sk-ant-api03-...">
+          <label class="setting-label" for="settingAiProvider">AI 提供商</label>
+          <select id="settingAiProvider" class="setting-select">
+            <option value="anthropic">Anthropic (Claude)</option>
+            <option value="openai">OpenAI (GPT)</option>
+          </select>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingAiBaseUrl">Base URL</label>
+          <input type="text" id="settingAiBaseUrl" class="setting-input" placeholder="https://api.anthropic.com">
+          <span class="setting-hint">留空使用默认地址，可填入第三方兼容服务地址</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingApiKey">API Key</label>
+          <input type="password" id="settingApiKey" class="setting-input" placeholder="sk-...">
           <span class="setting-hint">用于 AI 修复 Mermaid 图表</span>
         </div>
         <div class="setting-item">
