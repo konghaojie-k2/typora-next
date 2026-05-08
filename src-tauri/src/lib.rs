@@ -405,6 +405,69 @@ fn set_config(config: AppConfig, app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Test LLM configuration by making a simple API call
+#[tauri::command]
+async fn test_llm_config(config: AppConfig) -> Result<(), String> {
+    let api_key = config.api_key
+        .filter(|k| !k.is_empty())
+        .ok_or("未设置 API Key")?;
+
+    let provider = config.ai_provider.unwrap_or_default();
+    let base_url = config.ai_base_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
+            AiProvider::Openai => "https://api.openai.com".to_string(),
+        });
+
+    let model = config.model
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
+            AiProvider::Openai => "gpt-4o-mini".to_string(),
+        });
+
+    let test_message = "Hello";
+
+    match provider {
+        AiProvider::Anthropic => {
+            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": test_message}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+
+            let _json: serde_json::Value = resp.into_json()
+                .map_err(|e| format!("解析响应失败: {}", e))?;
+        }
+        AiProvider::Openai => {
+            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 1,
+                "messages": [{"role": "user", "content": test_message}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+
+            let _json: serde_json::Value = resp.into_json()
+                .map_err(|e| format!("解析响应失败: {}", e))?;
+        }
+    };
+
+    Ok(())
+}
+
 /// Fix Mermaid syntax errors using AI
 #[tauri::command]
 async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
@@ -491,6 +554,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
+            // When a new instance is launched while one is already running,
+            // emit the file path to the existing instance
+            if args.len() > 1 {
+                let file_path = &args[1];
+                if file_path.ends_with(".md") || file_path.ends_with(".markdown") {
+                    let _ = app.emit("open-file-from-args", file_path.clone());
+                }
+            }
+        }))
         .manage(AppState {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
@@ -506,12 +579,31 @@ pub fn run() {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
+
+            // Check command line arguments for .md file path (file association)
+            let args: Vec<String> = std::env::args().collect();
+            if args.len() > 1 {
+                let file_path = &args[1];
+                if file_path.ends_with(".md") || file_path.ends_with(".markdown") {
+                    let path = std::path::PathBuf::from(file_path);
+                    if path.exists() {
+                        let app_handle = app.handle().clone();
+                        let path_str = file_path.clone();
+                        // Emit event to frontend after a short delay to ensure window is ready
+                        std::thread::spawn(move || {
+                            std::thread::sleep(std::time::Duration::from_millis(500));
+                            let _ = app_handle.emit("open-file-from-args", path_str);
+                        });
+                    }
+                }
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
-            fix_mermaid, get_config, set_config
+            fix_mermaid, get_config, set_config, test_llm_config
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

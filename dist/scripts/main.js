@@ -69,7 +69,9 @@
     settingTheme: document.getElementById('settingTheme'),
     settingsModalClose: document.getElementById('settingsModalClose'),
     settingsCancel: document.getElementById('settingsCancel'),
-    settingsSave: document.getElementById('settingsSave')
+    settingsSave: document.getElementById('settingsSave'),
+    settingsTest: document.getElementById('settingsTest'),
+    testResult: document.getElementById('testResult')
   };
 
   // ============================================
@@ -189,6 +191,20 @@
       const activeTab = state.tabs[state.activeTab];
       if (activeTab && activeTab.path === changedPath && !state.refreshPromptVisible) {
         showRefreshPrompt(changedPath);
+      }
+    });
+
+    // Listen for file open from command line args (file association)
+    listen('open-file-from-args', (event) => {
+      const filePath = event.payload;
+      if (filePath) {
+        invoke('open_file', { path: filePath }).then(result => {
+          if (result && result.content) {
+            addTab(result.path, result.content, result.base_dir || '');
+          }
+        }).catch(err => {
+          console.error('Failed to open file from args:', err);
+        });
       }
     });
   }
@@ -1236,22 +1252,27 @@
       e.dataTransfer.dropEffect = 'copy';
     });
 
-    document.addEventListener('drop', async (e) => {
-      e.preventDefault();
-
-      const files = e.dataTransfer.files;
-      if (files.length > 0) {
-        const file = files[0];
-        if (file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-          const content = await readFile(file);
-          if (content) {
-            addTab(file.name, content, '');
+    // Use Tauri native drag-drop event to get file paths
+    if (window.__TAURI__) {
+      const { listen } = window.__TAURI__.event;
+      listen('tauri://drag-drop', (event) => {
+        const paths = event.payload.paths;
+        if (paths && paths.length > 0) {
+          const filePath = paths[0];
+          if (filePath.endsWith('.md') || filePath.endsWith('.markdown')) {
+            invoke('open_file', { path: filePath }).then(result => {
+              if (result && result.content) {
+                addTab(result.path, result.content, result.base_dir || '');
+              }
+            }).catch(err => {
+              showError('无法打开文件: ' + err);
+            });
+          } else {
+            showError('请打开 Markdown 文件 (.md 或 .markdown)');
           }
-        } else {
-          showError('请打开 Markdown 文件 (.md 或 .markdown)');
         }
-      }
-    });
+      });
+    }
   }
 
   async function readFile(file) {
@@ -1386,6 +1407,9 @@
     if (elements.settingsSave) {
       elements.settingsSave.addEventListener('click', saveSettings);
     }
+    if (elements.settingsTest) {
+      elements.settingsTest.addEventListener('click', testLLMConfig);
+    }
     if (elements.settingsModal) {
       elements.settingsModal.addEventListener('click', (e) => {
         if (e.target === elements.settingsModal) closeSettings();
@@ -1438,6 +1462,48 @@
   function closeSettings() {
     if (elements.settingsModal) {
       elements.settingsModal.style.display = 'none';
+    }
+  }
+
+  async function testLLMConfig() {
+    const apiKey = elements.settingApiKey ? elements.settingApiKey.value.trim() : '';
+    const aiProvider = elements.settingAiProvider ? elements.settingAiProvider.value : 'anthropic';
+    const aiBaseUrl = elements.settingAiBaseUrl ? elements.settingAiBaseUrl.value.trim() : '';
+    const model = elements.settingModel ? elements.settingModel.value.trim() : '';
+
+    if (!apiKey) {
+      if (elements.testResult) {
+        elements.testResult.textContent = '请先填写 API Key';
+        elements.testResult.style.color = 'var(--color-error)';
+      }
+      return;
+    }
+
+    if (elements.testResult) {
+      elements.testResult.textContent = '测试中...';
+      elements.testResult.style.color = 'var(--color-text-secondary)';
+    }
+
+    const config = {
+      api_key: apiKey,
+      ai_provider: aiProvider,
+      ai_base_url: aiBaseUrl || null,
+      model: model || null
+    };
+
+    try {
+      await invoke('test_llm_config', { config });
+      if (elements.testResult) {
+        elements.testResult.textContent = '连接成功';
+        elements.testResult.style.color = 'var(--color-success)';
+      }
+      showToast('连接测试成功');
+    } catch (err) {
+      console.error('LLM config test failed:', err);
+      if (elements.testResult) {
+        elements.testResult.textContent = '连接失败: ' + err;
+        elements.testResult.style.color = 'var(--color-error)';
+      }
     }
   }
 

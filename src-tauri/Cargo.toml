@@ -25,6 +25,7 @@ tauri = { version = "2.11.0", features = ["devtools", "protocol-asset"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+tauri-plugin-single-instance = "2"
 
 # Core markdown processing
 pulldown-cmark = "0.12"
