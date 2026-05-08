@@ -126,3 +126,9 @@ cargo run -- render input.md output.html
 
 - Rust: `cargo fmt` + `cargo clippy`
 - 最小代码解决问题，不做过度抽象
+
+---
+
+## Project Harness
+
+本项目已启用 harness（`.project/` 目录存在），通用流程由全局 CLAUDE.md 定义。项目层无额外扩展目录。
