@@ -653,10 +653,16 @@ pub fn run() {
                 for path_opt in &possible_paths {
                     if let Some(path) = path_opt {
                         if path.exists() {
-                            let _ = std::process::Command::new(path)
-                                .stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null())
-                                .spawn();
+                            let mut cmd = std::process::Command::new(path);
+                            cmd.stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null());
+                            #[cfg(windows)]
+                            {
+                                use std::os::windows::process::CommandExt;
+                                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                                cmd.creation_flags(CREATE_NO_WINDOW);
+                            }
+                            let _ = cmd.spawn();
                             break;
                         }
                     }
