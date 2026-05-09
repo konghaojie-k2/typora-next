@@ -51,9 +51,9 @@ Escaped characters: \*not italic\*, \**not bold\**, \`not code\`.
 
 ### Task List
 
-- [x] Completed task
-- [ ] Pending task
-- [x] Another done item
+- [ ] Completed task
+- [x] Pending task
+- [ ] Another done item
 
 ---
 
@@ -282,7 +282,7 @@ def merge_sort(arr):
 ### Task List with Math
 
 - [x] Prove $\sum_{i=1}^{n} i = \frac{n(n+1)}{2}$
-- [ ] Implement $\int_0^1 x^2 \, dx$
+- [x] Implement $\int_0^1 x^2 \, dx$
 - [x] Calculate $\lim_{x \to 0} \frac{\sin x}{x} = 1$
 
 ---

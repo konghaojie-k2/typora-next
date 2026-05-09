@@ -317,6 +317,47 @@ html, body {
   border-bottom: 1px solid var(--color-border);
 }
 
+.recent-files-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.recent-files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+.recent-files-clear {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  cursor: pointer;
+}
+.recent-files-clear:hover {
+  color: var(--color-error);
+}
+.recent-files-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.recent-file-item {
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-file-item:hover {
+  background: var(--color-bg-hover);
+}
+
 .file-tree-search {
   padding: var(--spacing-sm) var(--spacing-lg);
   border-bottom: 1px solid var(--color-border);
@@ -1742,4 +1783,44 @@ mark {
 @keyframes slideUp {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============================================
+   Frontmatter Card
+   ============================================ */
+.frontmatter-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.frontmatter-title {
+  padding: 12px 16px;
+  font-size: 18px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+}
+.frontmatter-body {
+  padding: 12px 16px;
+}
+.frontmatter-row {
+  display: flex;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+.frontmatter-row:last-child {
+  border-bottom: none;
+}
+.frontmatter-key {
+  width: 120px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  font-weight: 500;
+}
+.frontmatter-value {
+  font-size: 13px;
+  color: var(--color-text-primary);
 }

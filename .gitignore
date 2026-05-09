@@ -27,3 +27,8 @@ Thumbs.db
 # Task planning files
 task_plan.md
 progress.md
+
+# Project Harness (deprecated)
+.project/
+00-meta/
+90-inbox/

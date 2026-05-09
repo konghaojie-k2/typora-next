@@ -29,7 +29,9 @@
     sidebarActiveTab: 'files',   // 'files' | 'toc'
     currentFolder: null,
     headings: [],
-    refreshPromptVisible: false
+    refreshPromptVisible: false,
+    selfChangePending: false,
+    recentFiles: []
   };
 
   // ============================================
@@ -58,6 +60,7 @@
     sourceToggle: document.getElementById('sourceToggle'),
     exportPdfBtn: document.getElementById('exportPdfBtn'),
     exportWordBtn: document.getElementById('exportWordBtn'),
+    slidesBtn: document.getElementById('slidesBtn'),
     themeToggle: document.getElementById('themeToggle'),
     themeIconLight: document.getElementById('themeIconLight'),
     themeIconDark: document.getElementById('themeIconDark'),
@@ -72,7 +75,10 @@
     settingsCancel: document.getElementById('settingsCancel'),
     settingsSave: document.getElementById('settingsSave'),
     settingsTest: document.getElementById('settingsTest'),
-    testResult: document.getElementById('testResult')
+    testResult: document.getElementById('testResult'),
+    recentFilesSection: document.getElementById('recentFilesSection'),
+    recentFilesList: document.getElementById('recentFilesList'),
+    clearRecentFiles: document.getElementById('clearRecentFiles')
   };
 
   // ============================================
@@ -189,6 +195,10 @@
     const { listen } = window.__TAURI__.event;
     listen('file-changed', (event) => {
       const changedPath = event.payload;
+      if (state.selfChangePending) {
+        state.selfChangePending = false;
+        return;
+      }
       const activeTab = state.tabs[state.activeTab];
       if (activeTab && activeTab.path === changedPath && !state.refreshPromptVisible) {
         showRefreshPrompt(changedPath);
@@ -275,6 +285,13 @@
     renderTabs();
     loadTabContent(state.activeTab);
     watchCurrentFile(path);
+
+    // Add to recent files
+    invoke('add_recent_file', { path }).then(() => {
+      loadRecentFiles();
+    }).catch(err => {
+      console.error('Failed to add recent file:', err);
+    });
   }
 
   function switchTab(index) {
@@ -400,6 +417,9 @@
 
       // Extract and build TOC
       buildTOC();
+
+      // Initialize task list checkbox interactivity
+      initTaskListInteraction();
 
       // Update source view
       elements.sourceCode.textContent = content;
@@ -571,6 +591,62 @@
     elements.tabToc.classList.toggle('active', tab === 'toc');
     elements.filesPanel.classList.toggle('active', tab === 'files');
     elements.tocPanel.classList.toggle('active', tab === 'toc');
+  }
+
+  // ============================================
+  // Recent Files
+  // ============================================
+  async function loadRecentFiles() {
+    try {
+      const files = await invoke('get_recent_files');
+      state.recentFiles = files || [];
+      renderRecentFiles();
+    } catch (err) {
+      console.error('Failed to load recent files:', err);
+    }
+  }
+
+  function renderRecentFiles() {
+    if (!elements.recentFilesList || !elements.recentFilesSection) return;
+
+    if (state.recentFiles.length === 0) {
+      elements.recentFilesSection.style.display = 'none';
+      return;
+    }
+
+    elements.recentFilesSection.style.display = '';
+    elements.recentFilesList.innerHTML = '';
+
+    state.recentFiles.forEach(path => {
+      const item = document.createElement('div');
+      item.className = 'recent-file-item';
+      item.textContent = getFileName(path);
+      item.title = path;
+      item.addEventListener('click', () => openRecentFile(path));
+      elements.recentFilesList.appendChild(item);
+    });
+  }
+
+  async function openRecentFile(path) {
+    try {
+      const result = await invoke('open_file', { path });
+      if (result && result.content) {
+        addTab(result.path, result.content, result.base_dir || '');
+      }
+    } catch (err) {
+      console.error('Failed to open recent file:', err);
+      showError('无法打开文件: ' + err);
+    }
+  }
+
+  async function clearRecentFiles() {
+    try {
+      await invoke('clear_recent_files');
+      state.recentFiles = [];
+      renderRecentFiles();
+    } catch (err) {
+      console.error('Failed to clear recent files:', err);
+    }
   }
 
   // ============================================
@@ -1047,6 +1123,115 @@
   }
 
   // ============================================
+  // Task List Interaction
+  // ============================================
+  function initTaskListInteraction() {
+    const checkboxes = elements.markdownBody.querySelectorAll('input[type="checkbox"]');
+    checkboxes.forEach((cb, index) => {
+      cb.addEventListener('change', async () => {
+        const tab = state.tabs[state.activeTab];
+        if (!tab) return;
+        const lines = tab.content.split('\n');
+        let cbIndex = 0;
+        let found = false;
+        for (let i = 0; i < lines.length; i++) {
+          const match = lines[i].match(/^- \[[ x]\] /);
+          if (match) {
+            if (cbIndex === index) {
+              const newState = cb.checked ? 'x' : ' ';
+              lines[i] = lines[i].replace(/^- \[[ x]\] /, `- [${newState}] `);
+              found = true;
+              break;
+            }
+            cbIndex++;
+          }
+        }
+        if (found) {
+          const newContent = lines.join('\n');
+          tab.content = newContent;
+          elements.sourceCode.textContent = newContent;
+          state.selfChangePending = true;
+          try {
+            await invoke('write_file', { path: tab.path, content: newContent });
+          } catch (err) {
+            console.error('Failed to save file:', err);
+            showError('保存失败: ' + err);
+          }
+        }
+      });
+    });
+  }
+
+  async function openSlides() {
+    const tab = state.tabs[state.activeTab];
+    if (!tab || !tab.content) {
+      showToast('请先打开一个 Markdown 文件');
+      return;
+    }
+
+    if (document.getElementById('slides-overlay')) return;
+
+    // Pre-render markdown via Rust backend for full GFM support (tables, code, math, etc.)
+    let renderedHtml = '';
+    try {
+      renderedHtml = await invoke('render_markdown', { content: tab.content });
+    } catch (err) {
+      console.error('Failed to render markdown for slides:', err);
+      showToast('幻灯片渲染失败');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.id = 'slides-overlay';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:#000;';
+
+    const iframe = document.createElement('iframe');
+    iframe.src = 'slides.html';
+    iframe.style.cssText = 'width:100%;height:100%;border:none;';
+
+    iframe.addEventListener('load', () => {
+      try {
+        const cw = iframe.contentWindow;
+        if (cw) {
+          cw.__slides_html = renderedHtml;
+          if (typeof cw.__reloadSlides === 'function') {
+            cw.__reloadSlides();
+          } else {
+            setTimeout(() => {
+              if (typeof cw.__reloadSlides === 'function') {
+                cw.__reloadSlides();
+              }
+            }, 300);
+          }
+        }
+      } catch (e) {
+        console.error('Failed to inject slides content:', e);
+      }
+    });
+
+    overlay.appendChild(iframe);
+    document.body.appendChild(overlay);
+
+    const messageHandler = (event) => {
+      if (event.source !== iframe.contentWindow) return;
+      if (event.data === 'close-slides') {
+        overlay.remove();
+        window.removeEventListener('message', messageHandler);
+      }
+    };
+    window.addEventListener('message', messageHandler);
+
+    const closeHandler = (e) => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', closeHandler);
+        window.removeEventListener('message', messageHandler);
+      }
+    };
+    document.addEventListener('keydown', closeHandler);
+  }
+
+  // ============================================
   // GFM Alerts Styling
   // ============================================
   function initGFMAlerts() {
@@ -1264,6 +1449,12 @@
         e.preventDefault();
         toggleTheme();
       }
+
+      // F5: Open slides presentation
+      if (e.key === 'F5') {
+        e.preventDefault();
+        openSlides();
+      }
     });
   }
 
@@ -1420,6 +1611,9 @@
     if (elements.exportWordBtn) {
       elements.exportWordBtn.addEventListener('click', exportWord);
     }
+    if (elements.slidesBtn) {
+      elements.slidesBtn.addEventListener('click', openSlides);
+    }
     elements.themeToggle.addEventListener('click', toggleTheme);
 
     if (elements.settingsBtn) {
@@ -1447,6 +1641,10 @@
       elements.fileTreeSearch.addEventListener('input', (e) => {
         filterFileTree(e.target.value);
       });
+    }
+
+    if (elements.clearRecentFiles) {
+      elements.clearRecentFiles.addEventListener('click', clearRecentFiles);
     }
   }
 
@@ -1574,6 +1772,7 @@
     setupThemeDetection();
     setupFileWatcher();
     loadConfig();
+    loadRecentFiles();
 
     console.log('Typora Next initialized');
   }

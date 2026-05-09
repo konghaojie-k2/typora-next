@@ -1,0 +1,195 @@
+/* ============================================
+   Typora Next - Slides Theme Overrides
+   ============================================ */
+
+/* Base reveal.js overrides */
+.reveal {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+  font-size: 32px;
+  color: #f1f5f9;
+}
+
+.reveal .slides {
+  text-align: left;
+}
+
+.reveal .slides section {
+  padding: 40px 60px;
+}
+
+/* Headings */
+.reveal h1,
+.reveal h2,
+.reveal h3,
+.reveal h4,
+.reveal h5,
+.reveal h6 {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+  font-weight: 600;
+  color: #f1f5f9;
+  text-transform: none;
+  letter-spacing: normal;
+  line-height: 1.3;
+  margin-bottom: 0.6em;
+}
+
+.reveal h1 { font-size: 2.2em; }
+.reveal h2 { font-size: 1.8em; }
+.reveal h3 { font-size: 1.4em; }
+.reveal h4 { font-size: 1.2em; }
+.reveal h5 { font-size: 1.0em; }
+.reveal h6 { font-size: 0.9em; color: #94a3b8; }
+
+/* Paragraphs */
+.reveal p {
+  line-height: 1.6;
+  margin-bottom: 0.8em;
+}
+
+/* Lists */
+.reveal ul,
+.reveal ol {
+  margin-left: 0;
+  padding-left: 1.5em;
+}
+
+.reveal li {
+  margin-bottom: 0.4em;
+  line-height: 1.5;
+}
+
+.reveal li > ul,
+.reveal li > ol {
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+}
+
+/* Links */
+.reveal a {
+  color: #60a5fa;
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.reveal a:hover {
+  color: #93c5fd;
+  text-decoration: underline;
+}
+
+/* Code */
+.reveal code {
+  font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas, monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  color: #f0abfc;
+}
+
+.reveal pre {
+  background: #1e1e2e;
+  border-radius: 8px;
+  padding: 1em;
+  margin: 0.8em 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  overflow-x: auto;
+}
+
+.reveal pre code {
+  background: transparent;
+  padding: 0;
+  font-size: 0.75em;
+  line-height: 1.5;
+  color: #cdd6f4;
+}
+
+/* Blockquotes */
+.reveal blockquote {
+  background: rgba(255, 255, 255, 0.05);
+  border-left: 4px solid #60a5fa;
+  padding: 0.8em 1.2em;
+  margin: 0.8em 0;
+  border-radius: 0 8px 8px 0;
+  font-style: italic;
+  color: #cbd5e1;
+}
+
+.reveal blockquote p:last-child {
+  margin-bottom: 0;
+}
+
+/* Images */
+.reveal img {
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* Horizontal rule */
+.reveal hr {
+  border: none;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgba(255,255,255,0.2), transparent);
+  margin: 1em 0;
+}
+
+/* Strikethrough */
+.reveal del {
+  opacity: 0.5;
+}
+
+/* Speaker notes (hidden during presentation) */
+.reveal .notes {
+  display: none;
+}
+
+/* Slide number */
+.reveal .slide-number {
+  background: rgba(0, 0, 0, 0.4);
+  color: #94a3b8;
+  font-size: 14px;
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Controls */
+.reveal .controls {
+  color: #94a3b8;
+}
+
+.reveal .controls button:hover {
+  color: #f1f5f9;
+}
+
+/* Progress bar */
+.reveal .progress {
+  background: rgba(255, 255, 255, 0.05);
+  height: 3px;
+}
+
+.reveal .progress span {
+  background: #60a5fa;
+}
+
+/* Overview mode */
+.reveal.overview .slides section {
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+}
+
+.reveal.overview .slides section:hover {
+  border-color: #60a5fa;
+}
+
+/* Print styles */
+@media print {
+  .reveal .slides section {
+    padding: 20px 40px;
+  }
+
+  .reveal h1 { font-size: 1.8em; }
+  .reveal h2 { font-size: 1.5em; }
+  .reveal h3 { font-size: 1.2em; }
+}
