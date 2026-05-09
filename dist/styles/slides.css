@@ -5,7 +5,7 @@
 /* Base reveal.js overrides */
 .reveal {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
-  font-size: 32px;
+  font-size: 28px;
   color: #f1f5f9;
 }
 
@@ -14,7 +14,7 @@
 }
 
 .reveal .slides section {
-  padding: 40px 60px;
+  padding: 30px 50px;
 }
 
 /* Headings */
@@ -29,39 +29,40 @@
   color: #f1f5f9;
   text-transform: none;
   letter-spacing: normal;
-  line-height: 1.3;
-  margin-bottom: 0.6em;
+  line-height: 1.25;
+  margin-bottom: 0.5em;
+  margin-top: 0;
 }
 
-.reveal h1 { font-size: 2.2em; }
-.reveal h2 { font-size: 1.8em; }
-.reveal h3 { font-size: 1.4em; }
-.reveal h4 { font-size: 1.2em; }
+.reveal h1 { font-size: 2.0em; }
+.reveal h2 { font-size: 1.6em; }
+.reveal h3 { font-size: 1.3em; }
+.reveal h4 { font-size: 1.1em; }
 .reveal h5 { font-size: 1.0em; }
 .reveal h6 { font-size: 0.9em; color: #94a3b8; }
 
 /* Paragraphs */
 .reveal p {
-  line-height: 1.6;
-  margin-bottom: 0.8em;
+  line-height: 1.5;
+  margin-bottom: 0.5em;
+  margin-top: 0;
 }
 
-/* Lists */
 .reveal ul,
 .reveal ol {
-  margin-left: 0;
+  margin: 0.3em 0;
   padding-left: 1.5em;
 }
 
 .reveal li {
-  margin-bottom: 0.4em;
-  line-height: 1.5;
+  margin-bottom: 0.25em;
+  line-height: 1.4;
 }
 
 .reveal li > ul,
 .reveal li > ol {
-  margin-top: 0.3em;
-  margin-bottom: 0.3em;
+  margin-top: 0.15em;
+  margin-bottom: 0.15em;
 }
 
 /* Links */
@@ -89,17 +90,18 @@
 .reveal pre {
   background: #1e1e2e;
   border-radius: 8px;
-  padding: 1em;
-  margin: 0.8em 0;
+  padding: 0.8em;
+  margin: 0.5em 0;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   overflow-x: auto;
+  max-height: 45vh;
 }
 
 .reveal pre code {
   background: transparent;
   padding: 0;
-  font-size: 0.75em;
-  line-height: 1.5;
+  font-size: 0.7em;
+  line-height: 1.4;
   color: #cdd6f4;
 }
 
@@ -107,8 +109,8 @@
 .reveal blockquote {
   background: rgba(255, 255, 255, 0.05);
   border-left: 4px solid #60a5fa;
-  padding: 0.8em 1.2em;
-  margin: 0.8em 0;
+  padding: 0.5em 1em;
+  margin: 0.4em 0;
   border-radius: 0 8px 8px 0;
   font-style: italic;
   color: #cbd5e1;
@@ -121,9 +123,11 @@
 /* Images */
 .reveal img {
   max-width: 100%;
-  max-height: 60vh;
+  max-height: 45vh;
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  display: block;
+  margin: 0.5em auto;
 }
 
 /* Horizontal rule */
@@ -134,9 +138,53 @@
   margin: 1em 0;
 }
 
+/* Tables */
+.reveal table {
+  margin: 0.4em 0;
+  border-collapse: collapse;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 0.8em;
+}
+
+.reveal table th {
+  font-weight: 600;
+  text-align: left;
+  padding: 0.4em 0.6em;
+  border-bottom: 2px solid rgba(255, 255, 255, 0.3);
+  color: #f1f5f9;
+}
+
+.reveal table td {
+  text-align: left;
+  padding: 0.35em 0.6em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0;
+}
+
+.reveal table tbody tr:last-child th,
+.reveal table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.reveal table tbody tr:hover td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 /* Strikethrough */
 .reveal del {
   opacity: 0.5;
+}
+
+/* KaTeX overrides for dark theme */
+.reveal .katex {
+  color: #f1f5f9;
+}
+
+.reveal .katex-display {
+  margin: 0.8em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 /* Speaker notes (hidden during presentation) */

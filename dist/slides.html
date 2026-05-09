@@ -5,11 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>幻灯片放映 - Typora Next</title>
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; background: #111; color: #eee; font-family: system-ui, sans-serif; }
-    #slidesContainer { height: 100vh; display: flex; align-items: center; justify-content: center; text-align: center; }
+    html, body { margin: 0; padding: 0; height: 100%; background: #111; }
   </style>
   <link rel="stylesheet" href="vendor/reveal.js/reveal.css">
   <link rel="stylesheet" href="vendor/reveal.js/theme/black.css">
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <link rel="stylesheet" href="vendor/prism/prism-tomorrow.min.css">
   <link rel="stylesheet" href="styles/slides.css">
 </head>
 <body>
@@ -19,6 +20,11 @@
     </div>
   </div>
 
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="vendor/katex/auto-render.min.js"></script>
+  <script src="vendor/prism/prism.min.js"></script>
+  <script src="vendor/prism/prism-autoloader.min.js" data-autoloader-path="vendor/prism/"></script>
+  <script src="vendor/mermaid/mermaid.min.js"></script>
   <script src="vendor/reveal.js/reveal.js"></script>
   <script src="scripts/slides.js"></script>
 </body>

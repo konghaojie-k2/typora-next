@@ -1162,6 +1162,84 @@
     });
   }
 
+  /**
+   * Parse markdown into slide sections.
+   * --- = horizontal slide separator
+   * --  = vertical slide separator (within a horizontal section)
+   * Skips YAML frontmatter and code blocks.
+   */
+  function parseMarkdownSections(content) {
+    const lines = content.split('\n');
+    const sections = [];
+    let currentSlideLines = [];
+    let currentVerticalSlides = [];
+    let inCodeBlock = false;
+    let inYaml = false;
+    let yamlStarted = false;
+
+    function flushVerticalSlide() {
+      if (currentSlideLines.length > 0) {
+        currentVerticalSlides.push(currentSlideLines.join('\n'));
+        currentSlideLines = [];
+      }
+    }
+
+    function flushHorizontalSection() {
+      flushVerticalSlide();
+      if (currentVerticalSlides.length === 1) {
+        sections.push({ type: 'horizontal', content: currentVerticalSlides[0] });
+      } else if (currentVerticalSlides.length > 1) {
+        sections.push({ type: 'vertical', children: currentVerticalSlides.map(function(c) { return { content: c }; }) });
+      }
+      currentVerticalSlides = [];
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('```')) {
+        inCodeBlock = !inCodeBlock;
+        currentSlideLines.push(line);
+        continue;
+      }
+
+      if (inCodeBlock) {
+        currentSlideLines.push(line);
+        continue;
+      }
+
+      // YAML frontmatter: only at the very beginning of the file (no content yet)
+      if (!yamlStarted && trimmed === '---' && currentSlideLines.length === 0 && currentVerticalSlides.length === 0) {
+        inYaml = true;
+        yamlStarted = true;
+        continue;
+      }
+      if (inYaml && trimmed === '---') {
+        inYaml = false;
+        continue;
+      }
+      if (inYaml) {
+        continue;
+      }
+
+      if (trimmed === '---') {
+        flushHorizontalSection();
+        continue;
+      }
+
+      if (trimmed === '--') {
+        flushVerticalSlide();
+        continue;
+      }
+
+      currentSlideLines.push(line);
+    }
+
+    flushHorizontalSection();
+    return sections;
+  }
+
   async function openSlides() {
     const tab = state.tabs[state.activeTab];
     if (!tab || !tab.content) {
@@ -1171,10 +1249,30 @@
 
     if (document.getElementById('slides-overlay')) return;
 
-    // Pre-render markdown via Rust backend for full GFM support (tables, code, math, etc.)
-    let renderedHtml = '';
+    // Parse markdown into sections (--- horizontal, -- vertical)
+    const sections = parseMarkdownSections(tab.content);
+    if (sections.length === 0) {
+      showToast('未能解析出幻灯片内容');
+      return;
+    }
+
+    // Render each section individually via Rust backend
+    const renderedSections = [];
     try {
-      renderedHtml = await invoke('render_markdown', { content: tab.content });
+      for (let i = 0; i < sections.length; i++) {
+        const section = sections[i];
+        if (section.type === 'horizontal') {
+          const html = await invoke('render_markdown', { content: section.content });
+          renderedSections.push({ type: 'horizontal', html: html });
+        } else if (section.type === 'vertical') {
+          const children = [];
+          for (let j = 0; j < section.children.length; j++) {
+            const html = await invoke('render_markdown', { content: section.children[j].content });
+            children.push(html);
+          }
+          renderedSections.push({ type: 'vertical', children: children });
+        }
+      }
     } catch (err) {
       console.error('Failed to render markdown for slides:', err);
       showToast('幻灯片渲染失败');
@@ -1193,7 +1291,7 @@
       try {
         const cw = iframe.contentWindow;
         if (cw) {
-          cw.__slides_html = renderedHtml;
+          cw.__slides_sections = renderedSections;
           if (typeof cw.__reloadSlides === 'function') {
             cw.__reloadSlides();
           } else {
