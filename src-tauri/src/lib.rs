@@ -468,6 +468,67 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Export markdown to Word document via md2docx_service
+#[tauri::command]
+async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
+    let resp = ureq::post("http://127.0.0.1:6007/convert")
+        .set("Content-Type", "text/plain; charset=utf-8")
+        .send_string(&markdown)
+        .map_err(|e| format!("md2docx_service 请求失败: {}", e))?;
+
+    let mut bytes = Vec::new();
+    resp.into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("读取响应失败: {}", e))?;
+
+    let default_name = file_name.replace(".md", ".docx").replace(".markdown", ".docx");
+
+    use tauri_plugin_dialog::DialogExt;
+    let file_path = app.dialog()
+        .file()
+        .add_filter("Word Document", &["docx"])
+        .set_file_name(&default_name)
+        .blocking_save_file();
+
+    match file_path {
+        Some(path) => {
+            let path_ref = path.as_path().unwrap_or(std::path::Path::new(""));
+            std::fs::write(path_ref, &bytes)
+                .map_err(|e| format!("写入文件失败: {}", e))?;
+            Ok(path_ref.display().to_string())
+        }
+        None => Err("用户取消了保存".to_string()),
+    }
+}
+
+/// Get list of recently opened files
+#[tauri::command]
+async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    // TODO: T-027 agent - implement this
+    Ok(Vec::new())
+}
+
+/// Add a file to recent files list
+#[tauri::command]
+async fn add_recent_file(path: String, app: tauri::AppHandle) -> Result<(), String> {
+    // TODO: T-027 agent - implement this
+    Ok(())
+}
+
+/// Clear recent files list
+#[tauri::command]
+async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
+    // TODO: T-027 agent - implement this
+    Ok(())
+}
+
+/// Write content to a file
+#[tauri::command]
+async fn write_file(path: String, content: String) -> Result<(), String> {
+    // TODO: T-029 agent - implement this
+    Ok(())
+}
+
 /// Fix Mermaid syntax errors using AI
 #[tauri::command]
 async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
@@ -603,7 +664,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
-            fix_mermaid, get_config, set_config, test_llm_config
+            fix_mermaid, get_config, set_config, test_llm_config, export_word,
+            get_recent_files, add_recent_file, clear_recent_files, write_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
