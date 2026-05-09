@@ -641,6 +641,28 @@ pub fn run() {
                 window.open_devtools();
             }
 
+            // Start md2docx_service for Word export
+            let app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                // Try to find the service binary
+                let possible_paths = [
+                    app_handle.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
+                    std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
+                ];
+
+                for path_opt in &possible_paths {
+                    if let Some(path) = path_opt {
+                        if path.exists() {
+                            let _ = std::process::Command::new(path)
+                                .stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null())
+                                .spawn();
+                            break;
+                        }
+                    }
+                }
+            });
+
             // Check command line arguments for .md file path (file association)
             let args: Vec<String> = std::env::args().collect();
             if args.len() > 1 {

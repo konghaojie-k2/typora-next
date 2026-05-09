@@ -57,6 +57,7 @@
     openFileBtn: document.getElementById('openFileBtn'),
     sourceToggle: document.getElementById('sourceToggle'),
     exportPdfBtn: document.getElementById('exportPdfBtn'),
+    exportWordBtn: document.getElementById('exportWordBtn'),
     themeToggle: document.getElementById('themeToggle'),
     themeIconLight: document.getElementById('themeIconLight'),
     themeIconDark: document.getElementById('themeIconDark'),
@@ -1191,6 +1192,29 @@
   }
 
   // ============================================
+  // Word Export
+  // ============================================
+  async function exportWord() {
+    const tab = state.tabs[state.activeTab];
+    if (!tab || !tab.content) {
+      showToast('请先打开一个 Markdown 文件');
+      return;
+    }
+
+    try {
+      showToast('正在生成 Word 文档...');
+      const result = await invoke('export_word', {
+        markdown: tab.content,
+        fileName: tab.name
+      });
+      showToast('Word 导出成功: ' + result);
+    } catch (err) {
+      console.error('Word export failed:', err);
+      showError('Word 导出失败: ' + err);
+    }
+  }
+
+  // ============================================
   // Keyboard Shortcuts
   // ============================================
   function setupKeyboardShortcuts() {
@@ -1393,6 +1417,9 @@
     elements.openFolderBtn.addEventListener('click', openFolder);
     elements.openFolderToolbarBtn.addEventListener('click', openFolder);
     elements.exportPdfBtn.addEventListener('click', exportToPDF);
+    if (elements.exportWordBtn) {
+      elements.exportWordBtn.addEventListener('click', exportWord);
+    }
     elements.themeToggle.addEventListener('click', toggleTheme);
 
     if (elements.settingsBtn) {
