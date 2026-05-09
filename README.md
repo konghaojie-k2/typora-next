@@ -34,6 +34,12 @@ Typora Next 是一款面向技术文档撰写者的 Markdown 预览器。它在 
 | **项目文件树** | 打开文件夹，侧边栏显示目录结构，支持搜索过滤 |
 | **多标签** | 单窗口多文件 Tab 切换 |
 | **主题系统** | 浅色 / 深色主题切换，基于 CSS 变量 |
+| **幻灯片放映** | Reveal.js 驱动，支持 `---`/`--` 翻页、fragment 动画、数学/图表/代码渲染 |
+| **图片 Lightbox** | 点击放大查看，支持键盘导航 |
+| **任务列表交互** | 点击 checkbox 实时切换状态并写回文件 |
+| **最近打开文件** | 记录并快速访问最近打开的文档 |
+| **YAML Frontmatter** | 卡片化渲染文档元数据 |
+| **Word 导出** | 精美模式导出 DOCX |
 | **PDF 导出** | 保留渲染样式直接导出 PDF |
 | **文件刷新提示** | 检测外部编辑器修改，自动提示刷新 |
 
@@ -58,20 +64,26 @@ Typora Next 的设计哲学是：
 
 ## 🚀 快速开始
 
-### 前置要求
+### 直接下载安装
 
+访问 [Releases](https://github.com/konghaojie-k2/typora-next/releases) 下载最新 MSI 安装包，双击安装即可。
+
+> 系统要求：Windows 10+（WebView2 已内置）
+
+### 从源码编译
+
+前置要求：
 - [Rust](https://www.rust-lang.org/tools/install)（1.70+）
-- Windows 10+（WebView2 已内置）
-
-### 安装与运行
+- [MinGW](https://www.mingw-w64.org/)（`scoop install mingw`）
 
 ```bash
 # 克隆项目
-git clone https://github.com/username/typora-next.git
+git clone https://github.com/konghaojie-k2/typora-next.git
 cd typora-next
 
 # 编译桌面应用
 cd src-tauri
+export PATH="/c/Users/17625/scoop/apps/mingw/15.2.0-rt_v13-rev0/bin:$PATH"
 cargo build --release
 
 # 运行
@@ -117,6 +129,7 @@ cargo run -- render input.md output.html --math --mermaid
 | `Ctrl + T` | 折叠 / 展开侧边栏 |
 | `Ctrl + P` | 导出 PDF |
 | `Ctrl + Shift + L` | 切换浅色 / 深色主题 |
+| `Ctrl + Shift + P` | 幻灯片放映 |
 | `Ctrl + W` | 关闭当前 Tab |
 
 ---
@@ -156,6 +169,15 @@ graph TD
 - 右上角复制按钮
 - 语言徽标标识
 
+### 幻灯片放映
+
+基于 Reveal.js，将 Markdown 一键转为演示文稿：
+
+- `---` 水平翻页、`--` 垂直翻页
+- `<!-- .element: class="fragment" -->` 页内动画
+- 支持数学公式、代码高亮、Mermaid 图表在幻灯片中渲染
+- `Esc` 退出放映，`O` 进入概览模式
+
 ### AI 修复 Mermaid
 
 当 Mermaid 语法错误时，点击 "AI 修复" 按钮，调用配置的 AI 模型（支持 Anthropic / OpenAI 兼容 API）自动修正语法。
@@ -171,8 +193,9 @@ graph TD
 | **Phase 1** | P0 核心渲染（Markdown、代码高亮、数学公式） | 已完成 |
 | **Phase 2** | P1 扩展功能（Mermaid、图片、Tauri 桌面应用、TOC、源码切换） | 已完成 |
 | **Phase 3** | P2 项目管理（文件树、多标签、PDF 导出、主题系统） | 已完成 |
-| **Phase 4** | P3 增强功能（AI 修复 Mermaid、文件刷新提示） | 已完成 |
-| **Phase 5** | Word 导出（精美模式） | 计划中 |
+| **Phase 4** | P3 增强功能（AI 修复 Mermaid、文件刷新提示、Word 导出） | 已完成 |
+| **Phase 5** | P4 差异化功能（幻灯片放映、Lightbox、任务列表交互、最近文件、Frontmatter） | 已完成 |
+| **Phase 6** | P5 Obsidian 兼容 + 文档内搜索 | 计划中 |
 
 ---
 
