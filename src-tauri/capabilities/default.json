@@ -3,7 +3,8 @@
   "identifier": "default",
   "description": "enables the default permissions for Typora Next",
   "windows": [
-    "main"
+    "main",
+    "slides"
   ],
   "permissions": [
     "core:default",

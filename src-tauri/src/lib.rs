@@ -121,9 +121,62 @@ fn render_markdown(content: &str) -> String {
     render_markdown_body(content)
 }
 
+/// Extract YAML frontmatter from markdown content
+fn extract_frontmatter(text: &str) -> (Option<String>, String) {
+    let trimmed = text.trim_start();
+    if !trimmed.starts_with("---") {
+        return (None, text.to_string());
+    }
+    if let Some(end_pos) = trimmed[3..].find("\n---") {
+        let yaml = trimmed[3..3 + end_pos].trim();
+        let rest = trimmed[3 + end_pos + 4..].trim_start();
+        return (Some(yaml.to_string()), rest.to_string());
+    }
+    (None, text.to_string())
+}
+
+/// Render YAML frontmatter as an HTML card
+fn render_frontmatter_card(yaml: &str) -> String {
+    let mut title = None;
+    let mut rows = String::new();
+    for line in yaml.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if let Some((key, value)) = trimmed.split_once(':') {
+            let key = key.trim();
+            let value = value.trim().trim_matches('"').trim_matches('\'');
+            if key.to_lowercase() == "title" {
+                title = Some(value.to_string());
+            } else {
+                rows.push_str(&format!(
+                    "<div class=\"frontmatter-row\"><span class=\"frontmatter-key\">{}</span><span class=\"frontmatter-value\">{}</span></div>",
+                    escape_html(key), escape_html(value)
+                ));
+            }
+        }
+    }
+    let title_html = title.map_or(String::new(), |t| format!("<div class=\"frontmatter-title\">{}</div>", escape_html(&t)));
+    format!(
+        "<div class=\"frontmatter-card\">{}<div class=\"frontmatter-body\">{}</div></div>",
+        title_html, rows
+    )
+}
+
+/// Escape HTML special characters
+fn escape_html(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
 /// Simple markdown to HTML renderer (body content only)
 fn render_markdown_body(text: &str) -> String {
     use pulldown_cmark::{Parser, Options, html::push_html};
+
+    let (frontmatter, body) = extract_frontmatter(text);
 
     // Parse with GFM extensions
     let mut options = Options::empty();
@@ -132,12 +185,21 @@ fn render_markdown_body(text: &str) -> String {
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
-    let parser = Parser::new_ext(text, options);
+    let parser = Parser::new_ext(&body, options);
     let mut html = String::new();
     push_html(&mut html, parser);
 
     // Process mermaid blocks
     html = postprocess_mermaid(&html);
+    // Remove disabled attribute from task list checkboxes for interactivity
+    html = html.replace("<input disabled=\"\" type=\"checkbox\"", "<input type=\"checkbox\"");
+    html = html.replace("<input disabled type=\"checkbox\"", "<input type=\"checkbox\"");
+    html = html.replace("<input disabled=\"true\" type=\"checkbox\"", "<input type=\"checkbox\"");
+
+    if let Some(fm) = frontmatter {
+        let card = render_frontmatter_card(&fm);
+        return card + &html;
+    }
 
     html
 }
@@ -504,28 +566,168 @@ async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle)
 /// Get list of recently opened files
 #[tauri::command]
 async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
-    // TODO: T-027 agent - implement this
-    Ok(Vec::new())
+    let config_dir = app.path().app_config_dir()
+        .map_err(|e| format!("无法获取配置目录: {}", e))?;
+    let file_path = config_dir.join("recent_files.json");
+
+    if !file_path.exists() {
+        return Ok(Vec::new());
+    }
+
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("读取最近文件列表失败: {}", e))?;
+
+    let files: Vec<String> = serde_json::from_str(&content)
+        .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
+
+    Ok(files)
 }
 
 /// Add a file to recent files list
 #[tauri::command]
 async fn add_recent_file(path: String, app: tauri::AppHandle) -> Result<(), String> {
-    // TODO: T-027 agent - implement this
+    let config_dir = app.path().app_config_dir()
+        .map_err(|e| format!("无法获取配置目录: {}", e))?;
+    let file_path = config_dir.join("recent_files.json");
+
+    let mut files: Vec<String> = if file_path.exists() {
+        let content = std::fs::read_to_string(&file_path)
+            .map_err(|e| format!("读取最近文件列表失败: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("解析最近文件列表失败: {}", e))?
+    } else {
+        Vec::new()
+    };
+
+    // Remove existing entry if present
+    files.retain(|p| p != &path);
+    // Add to front
+    files.insert(0, path);
+    // Limit to 20
+    if files.len() > 20 {
+        files.truncate(20);
+    }
+
+    let json = serde_json::to_string_pretty(&files)
+        .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
+
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("保存最近文件列表失败: {}", e))?;
+
     Ok(())
 }
 
 /// Clear recent files list
 #[tauri::command]
 async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
-    // TODO: T-027 agent - implement this
+    let config_dir = app.path().app_config_dir()
+        .map_err(|e| format!("无法获取配置目录: {}", e))?;
+    let file_path = config_dir.join("recent_files.json");
+
+    let files: Vec<String> = Vec::new();
+    let json = serde_json::to_string_pretty(&files)
+        .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
+
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("保存最近文件列表失败: {}", e))?;
+
     Ok(())
 }
 
 /// Write content to a file
 #[tauri::command]
 async fn write_file(path: String, content: String) -> Result<(), String> {
-    // TODO: T-029 agent - implement this
+    fs::write(&path, content)
+        .map_err(|e| format!("Failed to write file: {}", e))?;
+    Ok(())
+}
+
+/// Simple file-based logger for slides debugging
+fn log_to_file(msg: &str) {
+    if let Ok(exe) = std::env::current_exe() {
+        let log_path = exe.parent().unwrap_or(std::path::Path::new(".")).join("slides_debug.log");
+        let line = format!("{}\n", msg);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .and_then(|mut f| std::io::Write::write_all(&mut f, line.as_bytes()));
+    }
+}
+
+/// Open a new window for slide presentation
+#[tauri::command]
+fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), String> {
+    log_to_file(&format!("[SLIDES] open_slides_window called, content len={}", content.len()));
+
+    // Serialize content as JSON string to safely inject into JS
+    let json_content = serde_json::to_string(&content)
+        .map_err(|e| format!("Failed to serialize content: {}", e))?;
+    let script = format!("window.__slides_content = {};", json_content);
+    log_to_file(&format!("[SLIDES] injection script len={}", script.len()));
+
+    // If slides window already exists, update content and focus it
+    if let Some(window) = app.get_webview_window("slides") {
+        log_to_file("[SLIDES] existing window found, updating content");
+        let _ = window.eval(&script);
+        let _ = window.eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    log_to_file("[SLIDES] creating new window");
+
+    // Try to find the correct resource path
+    let resource_dir = app.path().resource_dir()
+        .map_err(|e| format!("Failed to get resource dir: {}", e))?;
+    log_to_file(&format!("[SLIDES] resource_dir={:?}", resource_dir));
+
+    // Try multiple possible paths (cargo build --release puts exe in target/release/)
+    let possible_paths = [
+        resource_dir.join("../../../dist/slides.html"),  // from src-tauri/target/release/
+        resource_dir.join("../../dist/slides.html"),      // from target/release/
+        resource_dir.join("dist/slides.html"),            // from project root
+    ];
+    let mut found_path = None;
+    for (i, path) in possible_paths.iter().enumerate() {
+        let clean = path.to_string_lossy().replace("\\\\?\\", "");
+        log_to_file(&format!("[SLIDES] trying path[{}]={}", i, clean));
+        if path.exists() {
+            found_path = Some(clean);
+            log_to_file(&format!("[SLIDES] found slides.html at path[{}]", i));
+            break;
+        }
+    }
+
+    // Build window with App URL (file:// crashes WebView2)
+    log_to_file("[SLIDES] building WebviewWindowBuilder with App URL");
+    // DEBUG: try index.html first to isolate the issue
+    let test_url = "index.html";
+    log_to_file(&format!("[SLIDES] using WebviewUrl::App({})", test_url));
+    let builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        "slides",
+        tauri::WebviewUrl::App(test_url.into())
+    )
+    .title("幻灯片放映")
+    .inner_size(1280.0, 720.0)
+    .min_inner_size(800.0, 600.0);
+
+    log_to_file("[SLIDES] calling build()...");
+    let window = builder.build()
+        .map_err(|e| format!("无法创建幻灯片窗口: {}", e))?;
+
+    log_to_file(&format!("[SLIDES] window created OK, label={}", window.label()));
+
+    // Inject content via eval after a short delay (avoid initialization_script crash)
+    let window_clone = window.clone();
+    let script_clone = script.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        let _ = window_clone.eval(&script_clone);
+        let _ = window_clone.eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
+    });
+
     Ok(())
 }
 
@@ -693,7 +895,8 @@ pub fn run() {
             open_file_dialog, open_file, render_markdown, get_toc,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
             fix_mermaid, get_config, set_config, test_llm_config, export_word,
-            get_recent_files, add_recent_file, clear_recent_files, write_file
+            get_recent_files, add_recent_file, clear_recent_files, write_file,
+            open_slides_window
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
