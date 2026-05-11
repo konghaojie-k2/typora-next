@@ -32,6 +32,24 @@ pub struct AppConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub theme: Option<String>, // "light", "dark", or None for system
+    // Window state
+    #[serde(default)]
+    pub window_width: Option<f64>,
+    #[serde(default)]
+    pub window_height: Option<f64>,
+    #[serde(default)]
+    pub window_x: Option<f64>,
+    #[serde(default)]
+    pub window_y: Option<f64>,
+    #[serde(default)]
+    pub window_maximized: Option<bool>,
+    // UI state
+    #[serde(default)]
+    pub sidebar_collapsed: Option<bool>,
+    #[serde(default)]
+    pub sidebar_active_tab: Option<String>,
+    #[serde(default)]
+    pub last_file: Option<String>,
 }
 
 /// Application state for file watching

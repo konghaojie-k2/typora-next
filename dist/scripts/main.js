@@ -292,6 +292,8 @@
     }).catch(err => {
       console.error('Failed to add recent file:', err);
     });
+
+    saveUIState();
   }
 
   function switchTab(index) {
@@ -334,6 +336,8 @@
       prompt.remove();
       state.refreshPromptVisible = false;
     }
+
+    saveUIState();
   }
 
   function renderTabs() {
@@ -583,6 +587,13 @@
   function toggleSidebar() {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     elements.sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+    saveUIState();
+  }
+
+  function toggleZenMode() {
+    document.body.classList.toggle('zen-mode');
+    const isZen = document.body.classList.contains('zen-mode');
+    showToast(isZen ? '进入专注模式 (F11 退出)' : '退出专注模式');
   }
 
   function switchSidebarTab(tab) {
@@ -591,6 +602,7 @@
     elements.tabToc.classList.toggle('active', tab === 'toc');
     elements.filesPanel.classList.toggle('active', tab === 'files');
     elements.tocPanel.classList.toggle('active', tab === 'toc');
+    saveUIState();
   }
 
   // ============================================
@@ -1553,6 +1565,12 @@
         e.preventDefault();
         openSlides();
       }
+
+      // F11: Toggle Zen Mode (focus mode)
+      if (e.key === 'F11') {
+        e.preventDefault();
+        toggleZenMode();
+      }
     });
   }
 
@@ -1667,9 +1685,27 @@
     localStorage.setItem('typora-theme', theme);
   }
 
+  function applyThemeFromConfig(theme) {
+    applyTheme(theme || 'light');
+  }
+
   function toggleTheme() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    applyTheme(isDark ? 'light' : 'dark');
+    const newTheme = isDark ? 'light' : 'dark';
+    applyTheme(newTheme);
+    // Save theme to config
+    if (window.__TAURI__) {
+      invoke('get_config').then(config => {
+        if (config) {
+          config.theme = newTheme;
+          invoke('set_config', { config }).catch(err => {
+            console.error('Failed to save theme:', err);
+          });
+        }
+      }).catch(err => {
+        console.error('Failed to get config for theme save:', err);
+      });
+    }
   }
 
   function updateThemeIcon(theme) {
@@ -1776,6 +1812,48 @@
     }
   }
 
+  async function loadUIState() {
+    if (!window.__TAURI__) return;
+    try {
+      const config = await invoke('get_config');
+      if (!config) return;
+
+      // Restore sidebar collapsed state
+      if (config.sidebar_collapsed !== undefined && config.sidebar_collapsed !== null) {
+        state.sidebarCollapsed = config.sidebar_collapsed;
+        elements.sidebar.classList.toggle('collapsed', state.sidebarCollapsed);
+      }
+
+      // Restore sidebar active tab
+      if (config.sidebar_active_tab) {
+        switchSidebarTab(config.sidebar_active_tab);
+      }
+
+      // Note: do NOT auto-open last file on startup — user prefers clean start
+    } catch (err) {
+      console.error('Failed to load UI state:', err);
+    }
+  }
+
+  async function saveUIState() {
+    if (!window.__TAURI__) return;
+    try {
+      const config = await invoke('get_config');
+      if (!config) return;
+
+      config.sidebar_collapsed = state.sidebarCollapsed;
+      config.sidebar_active_tab = state.sidebarActiveTab;
+
+      // Save last_file for reference, but don't auto-open on startup
+      const activeTab = state.tabs[state.activeTab];
+      config.last_file = activeTab ? activeTab.path : null;
+
+      await invoke('set_config', { config });
+    } catch (err) {
+      console.error('Failed to save UI state:', err);
+    }
+  }
+
   function openSettings() {
     if (elements.settingsModal) {
       elements.settingsModal.style.display = 'flex';
@@ -1871,6 +1949,7 @@
     setupFileWatcher();
     loadConfig();
     loadRecentFiles();
+    loadUIState();
 
     console.log('Typora Next initialized');
   }

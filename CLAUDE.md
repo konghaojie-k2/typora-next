@@ -129,6 +129,14 @@ cargo run -- render input.md output.html
 
 ---
 
-## Project Harness
+## 上下文管理
 
-本项目已启用 harness（`.project/` 目录存在），通用流程由全局 CLAUDE.md 定义。项目层无额外扩展目录。
+本项目使用 **daily-reflection** skill 进行跨会话状态同步，数据存放在 `.daily_reflection/`：
+
+- `context-sync.json` — 核心状态（进度、待办、活跃陷阱、最近文件）
+- `decisions.md` — 决策记录（活跃区 + 归档区）
+- `daily-status.md` — 每日流程打卡（早省/晚省 checklist）
+- `archive/` — 归档历史
+- `inbox/` — 临时输入池
+
+**不再使用 project harness**（已移除 `.project/` 目录）。

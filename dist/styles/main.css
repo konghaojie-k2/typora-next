@@ -1824,3 +1824,29 @@ mark {
   font-size: 13px;
   color: var(--color-text-primary);
 }
+
+/* ============================================
+   Zen Mode (Focus Mode)
+   ============================================ */
+body.zen-mode .toolbar,
+body.zen-mode .tabs-bar,
+body.zen-mode .sidebar {
+  display: none !important;
+}
+
+body.zen-mode .app-container {
+  display: block;
+}
+
+body.zen-mode .content-area {
+  margin: 0;
+  max-width: none;
+  height: 100vh;
+}
+
+body.zen-mode .markdown-body {
+  padding: 40px 80px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+}
