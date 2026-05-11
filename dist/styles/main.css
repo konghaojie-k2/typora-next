@@ -1850,3 +1850,146 @@ body.zen-mode .markdown-body {
   margin: 0 auto;
 }
 }
+
+/* ============================================
+   Obsidian Syntax Support
+   ============================================ */
+
+/* Highlight: ==text== */
+.obsidian-highlight {
+  background-color: var(--color-highlight-bg, rgba(255, 212, 0, 0.3));
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+[data-theme="dark"] .obsidian-highlight {
+  --color-highlight-bg: rgba(255, 212, 0, 0.25);
+}
+
+/* Tags: #tag */
+.obsidian-tag {
+  display: inline-block;
+  background-color: var(--color-tag-bg, rgba(100, 149, 237, 0.15));
+  color: var(--color-tag-text, #4a7bc0);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.obsidian-tag:hover {
+  background-color: var(--color-tag-bg-hover, rgba(100, 149, 237, 0.25));
+}
+
+[data-theme="dark"] .obsidian-tag {
+  --color-tag-bg: rgba(100, 149, 237, 0.2);
+  --color-tag-text: #7aa8e8;
+  --color-tag-bg-hover: rgba(100, 149, 237, 0.35);
+}
+
+/* WikiLink: [[File]] */
+.wiki-link {
+  color: var(--color-wiki-link, #4a7bc0);
+  text-decoration: none;
+  border-bottom: 1px dashed var(--color-wiki-link, #4a7bc0);
+  cursor: pointer;
+  transition: opacity 0.2s;
+}
+
+.wiki-link:hover {
+  opacity: 0.8;
+}
+
+[data-theme="dark"] .wiki-link {
+  --color-wiki-link: #7aa8e8;
+}
+
+/* Embed: ![[File]] */
+.obsidian-embed {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  margin: 12px 0;
+  background-color: var(--color-bg-secondary);
+  position: relative;
+}
+
+.obsidian-embed::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--color-accent), transparent);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+}
+
+/* Callout blocks */
+.obsidian-callout {
+  border-radius: var(--radius-md);
+  padding: 0;
+  margin: 16px 0;
+  border-left: 4px solid;
+  background-color: var(--color-callout-bg, var(--color-bg-secondary));
+  overflow: hidden;
+}
+
+.obsidian-callout-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.obsidian-callout-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.obsidian-callout-content {
+  padding: 0 14px 12px 38px;
+}
+
+.obsidian-callout-collapsed .obsidian-callout-content {
+  display: none;
+}
+
+/* Callout type colors */
+.obsidian-callout-note    { border-left-color: #448aff; --color-callout-bg: rgba(68, 138, 255, 0.08); }
+.obsidian-callout-info    { border-left-color: #00b8d4; --color-callout-bg: rgba(0, 184, 212, 0.08); }
+.obsidian-callout-tip     { border-left-color: #00c853; --color-callout-bg: rgba(0, 200, 83, 0.08); }
+.obsidian-callout-success { border-left-color: #00c853; --color-callout-bg: rgba(0, 200, 83, 0.08); }
+.obsidian-callout-warning { border-left-color: #ff9100; --color-callout-bg: rgba(255, 145, 0, 0.08); }
+.obsidian-callout-caution { border-left-color: #ff1744; --color-callout-bg: rgba(255, 23, 68, 0.08); }
+.obsidian-callout-danger  { border-left-color: #ff1744; --color-callout-bg: rgba(255, 23, 68, 0.08); }
+.obsidian-callout-important { border-left-color: #aa00ff; --color-callout-bg: rgba(170, 0, 255, 0.08); }
+.obsidian-callout-abstract { border-left-color: #00bfa5; --color-callout-bg: rgba(0, 191, 165, 0.08); }
+.obsidian-callout-todo    { border-left-color: #5c6bc0; --color-callout-bg: rgba(92, 107, 192, 0.08); }
+.obsidian-callout-question { border-left-color: #7c4dff; --color-callout-bg: rgba(124, 77, 255, 0.08); }
+.obsidian-callout-failure { border-left-color: #ff5252; --color-callout-bg: rgba(255, 82, 82, 0.08); }
+.obsidian-callout-bug     { border-left-color: #f44336; --color-callout-bg: rgba(244, 67, 54, 0.08); }
+.obsidian-callout-quote   { border-left-color: #9e9e9e; --color-callout-bg: rgba(158, 158, 158, 0.08); }
+.obsidian-callout-example { border-left-color: #7c4dff; --color-callout-bg: rgba(124, 77, 255, 0.08); }
+
+[data-theme="dark"] .obsidian-callout-note    { --color-callout-bg: rgba(68, 138, 255, 0.12); }
+[data-theme="dark"] .obsidian-callout-info    { --color-callout-bg: rgba(0, 184, 212, 0.12); }
+[data-theme="dark"] .obsidian-callout-tip     { --color-callout-bg: rgba(0, 200, 83, 0.12); }
+[data-theme="dark"] .obsidian-callout-success { --color-callout-bg: rgba(0, 200, 83, 0.12); }
+[data-theme="dark"] .obsidian-callout-warning { --color-callout-bg: rgba(255, 145, 0, 0.12); }
+[data-theme="dark"] .obsidian-callout-caution { --color-callout-bg: rgba(255, 23, 68, 0.12); }
+[data-theme="dark"] .obsidian-callout-danger  { --color-callout-bg: rgba(255, 23, 68, 0.12); }
+[data-theme="dark"] .obsidian-callout-important { --color-callout-bg: rgba(170, 0, 255, 0.12); }
+[data-theme="dark"] .obsidian-callout-abstract { --color-callout-bg: rgba(0, 191, 165, 0.12); }
+[data-theme="dark"] .obsidian-callout-todo    { --color-callout-bg: rgba(92, 107, 192, 0.12); }
+[data-theme="dark"] .obsidian-callout-question { --color-callout-bg: rgba(124, 77, 255, 0.12); }
+[data-theme="dark"] .obsidian-callout-failure { --color-callout-bg: rgba(255, 82, 82, 0.12); }
+[data-theme="dark"] .obsidian-callout-bug     { --color-callout-bg: rgba(244, 67, 54, 0.12); }
+[data-theme="dark"] .obsidian-callout-quote   { --color-callout-bg: rgba(158, 158, 158, 0.12); }
+[data-theme="dark"] .obsidian-callout-example { --color-callout-bg: rgba(124, 77, 255, 0.12); }

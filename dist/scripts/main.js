@@ -425,6 +425,13 @@
       // Initialize task list checkbox interactivity
       initTaskListInteraction();
 
+      // Initialize Obsidian syntax support
+      initObsidianHighlight();
+      initObsidianTags();
+      initObsidianCallouts();
+      initWikiLinks();
+      initObsidianEmbeds(baseDir);
+
       // Update source view
       elements.sourceCode.textContent = content;
 
@@ -1387,6 +1394,246 @@
       'CAUTION': '🔥'
     };
     return icons[type] || 'ℹ️';
+  }
+
+  // ============================================
+  // Obsidian Syntax Support
+  // ============================================
+
+  /**
+   * Collect text nodes from markdownBody, skipping code blocks and other protected elements.
+   */
+  function collectTextNodes(excludeSelector = 'code, pre, .mermaid, a, mark, .obsidian-tag') {
+    const nodes = [];
+    const walker = document.createTreeWalker(elements.markdownBody, NodeFilter.SHOW_TEXT);
+    while (walker.nextNode()) {
+      if (walker.currentNode.parentElement.closest(excludeSelector)) continue;
+      nodes.push(walker.currentNode);
+    }
+    return nodes;
+  }
+
+  /**
+   * Replace text nodes matching a regex with HTML.
+   * @param {RegExp} regex
+   * @param {Function} replacer - receives match array, returns HTML string
+   */
+  function replaceInTextNodes(regex, replacer) {
+    const nodes = collectTextNodes();
+    nodes.forEach(node => {
+      const text = node.textContent;
+      if (!regex.test(text)) return;
+      regex.lastIndex = 0;
+      const html = text.replace(regex, replacer);
+      if (html === text) return;
+      const span = document.createElement('span');
+      span.innerHTML = html;
+      node.parentNode.replaceChild(span, node);
+    });
+  }
+
+  /**
+   * Obsidian Highlight: ==highlighted text==
+   */
+  function initObsidianHighlight() {
+    replaceInTextNodes(
+      /==([^=\s][^=]*|[^=\s])==/g,
+      (m, content) => `<mark class="obsidian-highlight">${escapeHtml(content)}</mark>`
+    );
+  }
+
+  /**
+   * Obsidian Tags: #tag-name or #tag/subtag
+   */
+  function initObsidianTags() {
+    // Match #tag where:
+    // - preceded by start of string, whitespace, or non-word char
+    // - followed by a letter (not a number, to avoid hex colors)
+    // - can contain letters, digits, underscores, hyphens, forward slashes
+    replaceInTextNodes(
+      /(^|\s|[^\w])#([a-zA-Z][\w\-/]*)/g,
+      (m, prefix, tag) => `${prefix}<span class="obsidian-tag" data-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</span>`
+    );
+  }
+
+  /**
+   * Obsidian Callouts: extend GFM alerts with more types and collapsible support.
+   */
+  function initObsidianCallouts() {
+    const blockquotes = elements.markdownBody.querySelectorAll('blockquote');
+
+    blockquotes.forEach(bq => {
+      const firstP = bq.querySelector('p');
+      if (!firstP) return;
+
+      const text = firstP.textContent.trim();
+
+      // Match Obsidian callout: > [!TYPE] or > [!TYPE]- or > [!TYPE]+
+      const calloutMatch = text.match(/^\[!([^\]]+)\]([\-+]?)/i);
+      if (!calloutMatch) return;
+
+      const calloutType = calloutMatch[1].toUpperCase();
+      const foldIndicator = calloutMatch[2]; // '-' = collapsed, '+' = expanded (default)
+      const isCollapsed = foldIndicator === '-';
+
+      // Add classes
+      bq.classList.add('obsidian-callout', `obsidian-callout-${calloutType.toLowerCase()}`);
+      if (isCollapsed) {
+        bq.classList.add('obsidian-callout-collapsed');
+      }
+
+      // Remove the [!TYPE] marker
+      firstP.textContent = firstP.textContent.replace(calloutMatch[0], '').trim();
+
+      // Add icon and title
+      const calloutMeta = getCalloutMeta(calloutType);
+      const titleText = firstP.textContent.trim() || calloutMeta.title;
+
+      // Rebuild the callout header
+      const header = document.createElement('div');
+      header.className = 'obsidian-callout-title';
+      header.innerHTML = `<span class="obsidian-callout-icon">${calloutMeta.icon}</span><span class="obsidian-callout-title-text">${escapeHtml(titleText)}</span>`;
+
+      // If firstP had content beyond the title, preserve it as body
+      firstP.remove();
+
+      // Wrap remaining content in a body div
+      const bodyDiv = document.createElement('div');
+      bodyDiv.className = 'obsidian-callout-content';
+      while (bq.firstChild) {
+        bodyDiv.appendChild(bq.firstChild);
+      }
+
+      bq.appendChild(header);
+      bq.appendChild(bodyDiv);
+
+      // Click header to toggle collapse
+      header.addEventListener('click', () => {
+        bq.classList.toggle('obsidian-callout-collapsed');
+      });
+    });
+  }
+
+  function getCalloutMeta(type) {
+    const meta = {
+      'NOTE': { icon: 'ℹ️', title: 'Note' },
+      'TIP': { icon: '💡', title: 'Tip' },
+      'IMPORTANT': { icon: '🔑', title: 'Important' },
+      'WARNING': { icon: '⚠️', title: 'Warning' },
+      'CAUTION': { icon: '🔥', title: 'Caution' },
+      'INFO': { icon: 'ℹ️', title: 'Info' },
+      'ABSTRACT': { icon: '📋', title: 'Abstract' },
+      'TODO': { icon: '☐', title: 'Todo' },
+      'SUCCESS': { icon: '✅', title: 'Success' },
+      'QUESTION': { icon: '❓', title: 'Question' },
+      'FAILURE': { icon: '❌', title: 'Failure' },
+      'DANGER': { icon: '⚡', title: 'Danger' },
+      'BUG': { icon: '🐛', title: 'Bug' },
+      'QUOTE': { icon: '💬', title: 'Quote' },
+      'EXAMPLE': { icon: '📚', title: 'Example' }
+    };
+    return meta[type] || { icon: 'ℹ️', title: type.charAt(0) + type.slice(1).toLowerCase() };
+  }
+
+  /**
+   * WikiLink: [[File Name]] or [[File Name|Display Text]] or [[File Name#Heading]]
+   */
+  function initWikiLinks() {
+    replaceInTextNodes(
+      /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+      (m, target, display) => {
+        const linkText = display ? escapeHtml(display.trim()) : escapeHtml(target.trim());
+        const linkTarget = target.trim();
+        return `<a class="wiki-link" data-target="${escapeHtml(linkTarget)}">${linkText}</a>`;
+      }
+    );
+
+    // Add click handlers
+    elements.markdownBody.querySelectorAll('.wiki-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const target = link.dataset.target;
+        openWikiLink(target);
+      });
+    });
+  }
+
+  async function openWikiLink(target) {
+    const activeTab = state.tabs[state.activeTab];
+    const baseDir = activeTab ? activeTab.baseDir : '';
+
+    // Resolve the target path
+    let resolvedPath = target;
+    if (!target.endsWith('.md') && !target.endsWith('.markdown')) {
+      resolvedPath += '.md';
+    }
+
+    // If relative path and we have a base directory
+    if (!resolvedPath.startsWith('/') && !resolvedPath.match(/^[a-zA-Z]:/) && baseDir) {
+      resolvedPath = baseDir + '/' + resolvedPath;
+    }
+
+    try {
+      const result = await invoke('open_file', { path: resolvedPath });
+      if (result && result.content) {
+        addTab(result.path, result.content, result.base_dir || '');
+      }
+    } catch (err) {
+      showError('无法打开文件: ' + err);
+    }
+  }
+
+  /**
+   * Obsidian Embed: ![[File Name]]
+   */
+  async function initObsidianEmbeds(baseDir) {
+    const embedRegex = /!\[\[([^\]]+)\]\]/g;
+    const textNodes = collectTextNodes('code, pre, .mermaid, a');
+
+    const embeds = [];
+    textNodes.forEach(node => {
+      let match;
+      embedRegex.lastIndex = 0;
+      while ((match = embedRegex.exec(node.textContent)) !== null) {
+        embeds.push({ node, fullMatch: match[0], target: match[1].trim() });
+      }
+    });
+
+    for (const embed of embeds) {
+      const { node, fullMatch, target } = embed;
+
+      let resolvedPath = target;
+      if (!resolvedPath.endsWith('.md') && !resolvedPath.endsWith('.markdown')) {
+        resolvedPath += '.md';
+      }
+
+      if (!resolvedPath.startsWith('/') && !resolvedPath.match(/^[a-zA-Z]:/) && baseDir) {
+        resolvedPath = baseDir + '/' + resolvedPath;
+      }
+
+      try {
+        const result = await invoke('open_file', { path: resolvedPath });
+        if (result && result.content) {
+          const html = await invoke('render_markdown', { content: result.content });
+          const wrapper = document.createElement('div');
+          wrapper.className = 'obsidian-embed';
+          wrapper.innerHTML = html;
+
+          const text = node.textContent;
+          const before = text.substring(0, text.indexOf(fullMatch));
+          const after = text.substring(text.indexOf(fullMatch) + fullMatch.length);
+
+          const parent = node.parentNode;
+          if (before) parent.insertBefore(document.createTextNode(before), node);
+          parent.insertBefore(wrapper, node);
+          if (after) parent.insertBefore(document.createTextNode(after), node);
+          parent.removeChild(node);
+        }
+      } catch (err) {
+        console.error('Failed to embed file:', err);
+        // Leave the original text as-is
+      }
+    }
   }
 
   // ============================================
