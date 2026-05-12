@@ -182,6 +182,196 @@ fn render_frontmatter_card(yaml: &str) -> String {
     )
 }
 
+// ============================================================================
+// Math Preprocessing - Protect math blocks from markdown parsing
+// ============================================================================
+
+/// Math expression types
+#[derive(Debug, Clone, PartialEq)]
+enum MathBlock {
+    Inline(String),
+    Block(String),
+}
+
+/// Extract math blocks from text, returning positions and content
+///
+/// Handles both inline ($...$) and block ($$...$$) math expressions.
+/// Block math takes priority (detected first) to avoid partial matches.
+fn extract_math_blocks(text: &str) -> Vec<(usize, usize, MathBlock)> {
+    let mut results = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+    let len = chars.len();
+    let mut i = 0;
+
+    while i < len {
+        // Check for $$ (block math) first
+        if i + 1 < len && chars[i] == '$' && chars[i + 1] == '$' {
+            let start = i;
+            i += 2; // Skip opening $$
+
+            // Skip leading whitespace/newline after $$
+            while i < len && (chars[i] == ' ' || chars[i] == '\n') {
+                i += 1;
+            }
+
+            let content_start = i;
+
+            // Find closing $$
+            while i + 1 < len {
+                if chars[i] == '$' && chars[i + 1] == '$' {
+                    // Check if it's not escaped
+                    let mut backslash_count = 0;
+                    let mut j = i - 1;
+                    while j > content_start && chars[j] == '\\' {
+                        backslash_count += 1;
+                        j -= 1;
+                    }
+                    if backslash_count % 2 == 0 {
+                        // Found closing $$ - use byte positions for slicing
+                        let byte_content_start = text.char_indices().nth(content_start).map(|(b, _)| b).unwrap_or(0);
+                        let byte_end = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(text.len());
+                        let content = text[byte_content_start..byte_end].to_string();
+                        let content = content.trim_end().to_string();
+                        let byte_end_plus_two = if byte_end + 2 <= text.len() { byte_end + 2 } else { text.len() };
+                        results.push((start, i + 2, MathBlock::Block(content)));
+                        i += 2;
+                        break;
+                    }
+                }
+                i += 1;
+            }
+
+            if i >= len {
+                i = start + 2;
+            }
+        }
+        // Check for single $ (inline math)
+        else if chars[i] == '$' {
+            let start = i;
+            i += 1;
+
+            // Check if $ is followed by space (not inline math)
+            if i < len && (chars[i] == ' ' || chars[i] == '\n') {
+                i = start + 1;
+                continue;
+            }
+
+            let content_start = i;
+
+            // Find closing $
+            while i < len {
+                if chars[i] == '$' {
+                    // Check if it's not escaped
+                    let mut backslash_count = 0;
+                    let mut j = i - 1;
+                    while j > content_start && chars[j] == '\\' {
+                        backslash_count += 1;
+                        j -= 1;
+                    }
+                    if backslash_count % 2 == 0 {
+                        // Use byte positions for slicing
+                        let byte_content_start = text.char_indices().nth(content_start).map(|(b, _)| b).unwrap_or(0);
+                        let byte_end = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(text.len());
+                        let content = &text[byte_content_start..byte_end];
+                        if !content.is_empty() && !content.contains('\n') {
+                            results.push((start, i + 1, MathBlock::Inline(content.to_string())));
+                            i += 1;
+                            break;
+                        }
+                    }
+                }
+                i += 1;
+            }
+
+            if i >= len {
+                i = start + 1;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    results
+}
+
+/// Pre-process text to protect math blocks from markdown parsing
+///
+/// Returns (protected_text, math_blocks) where math_blocks is a vector
+/// of (placeholder, original_content, is_block) tuples.
+///
+/// Uses safe placeholder %%MATH_BLOCK_N%% to avoid DOM truncation issues.
+fn preprocess_math(text: &str) -> (String, Vec<(String, String, bool)>) {
+    let math_blocks = extract_math_blocks(text);
+
+    if math_blocks.is_empty() {
+        return (text.to_string(), Vec::new());
+    }
+
+    // Build replacement map
+    let mut replacements: Vec<(usize, usize, String, String, bool)> = Vec::new();
+
+    for (idx, (start, end, block)) in math_blocks.into_iter().enumerate() {
+        let (content, is_block) = match block {
+            MathBlock::Inline(c) => (c, false),
+            MathBlock::Block(c) => (c, true),
+        };
+        // Use safe placeholder (not control characters)
+        let placeholder = format!("%%MATH_BLOCK_{}%%", idx);
+        replacements.push((start, end, placeholder, content, is_block));
+    }
+
+    // Sort by position (descending) to replace from end to start
+    replacements.sort_by(|a, b| b.0.cmp(&a.0));
+
+    // Build new string with placeholders
+    let mut result = text.to_string();
+    let mut stored_blocks = Vec::new();
+
+    for (char_start, char_end, placeholder, content, is_block) in replacements {
+        // Convert char positions to byte positions
+        let byte_start = result.char_indices().nth(char_start).map(|(b, _)| b).unwrap_or(0);
+        let byte_end = result.char_indices().nth(char_end).map(|(b, _)| b).unwrap_or(result.len());
+
+        let before = &result[..byte_start];
+        let after = &result[byte_end..];
+        stored_blocks.push((placeholder.clone(), content, is_block));
+        result = format!("{}{}{}", before, placeholder, after);
+    }
+
+    (result, stored_blocks)
+}
+
+/// Post-process HTML to restore math blocks as KaTeX markup
+fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> String {
+    let mut result = html.to_string();
+
+    for (placeholder, content, is_block) in math_blocks {
+        // Escape HTML in content
+        let escaped_content = content
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+
+        if *is_block {
+            // Block math: wrap in div with KaTeX class
+            let replacement = format!(
+                "<div class=\"math-block\">$${}$$</div>",
+                escaped_content
+            );
+            result = result.replace(placeholder, &replacement);
+        } else {
+            // Inline math: wrap in span with KaTeX class
+            let replacement = format!(
+                "<span class=\"math-inline\">${}$</span>",
+                escaped_content
+            );
+            result = result.replace(placeholder, &replacement);
+        }
+    }
+
+    result
+}
+
 /// Escape HTML special characters
 fn escape_html(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -191,24 +381,43 @@ fn escape_html(text: &str) -> String {
 }
 
 /// Simple markdown to HTML renderer (body content only)
+/// Now includes math preprocessing to protect LaTeX from markdown parsing
 fn render_markdown_body(text: &str) -> String {
     use pulldown_cmark::{Parser, Options, html::push_html};
 
     let (frontmatter, body) = extract_frontmatter(text);
 
-    // Parse with GFM extensions
+    // Step 1: Pre-process to protect math blocks
+    let (protected_body, math_blocks) = preprocess_math(&body);
+
+    // Debug log for math preprocessing
+    #[cfg(debug_assertions)]
+    {
+        if !math_blocks.is_empty() {
+            println!("[DEBUG render_markdown_body] Found {} math blocks", math_blocks.len());
+            for (placeholder, content, is_block) in &math_blocks {
+                println!("[DEBUG] {} {}: {}", if *is_block { "Block" } else { "Inline" }, placeholder, content);
+            }
+        }
+    }
+
+    // Step 2: Parse protected text with GFM extensions
     let mut options = Options::empty();
     options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
     options.insert(Options::ENABLE_TASKLISTS);
     options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
-    let parser = Parser::new_ext(&body, options);
+    let parser = Parser::new_ext(&protected_body, options);
     let mut html = String::new();
     push_html(&mut html, parser);
 
-    // Process mermaid blocks
+    // Step 3: Post-process to restore math blocks
+    html = postprocess_math(&html, &math_blocks);
+
+    // Step 4: Process mermaid blocks
     html = postprocess_mermaid(&html);
+
     // Remove disabled attribute from task list checkboxes for interactivity
     html = html.replace("<input disabled=\"\" type=\"checkbox\"", "<input type=\"checkbox\"");
     html = html.replace("<input disabled type=\"checkbox\"", "<input type=\"checkbox\"");
