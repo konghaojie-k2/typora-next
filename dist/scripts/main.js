@@ -1557,8 +1557,9 @@
    * WikiLink: [[File Name]] or [[File Name|Display Text]] or [[File Name#Heading]]
    */
   function initWikiLinks() {
+    // 使用负向后瞻 (?<!!) 确保不匹配 ![[...]] 图片嵌入模式
     replaceInTextNodes(
-      /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
+      /(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
       (m, target, display) => {
         const linkText = display ? escapeHtml(display.trim()) : escapeHtml(target.trim());
         const linkTarget = target.trim();
@@ -1605,37 +1606,127 @@
    * Obsidian Embed: ![[File Name]]
    */
   async function initObsidianEmbeds(baseDir) {
+    console.log('[DEBUG initObsidianEmbeds] Starting with baseDir:', baseDir);
+
+    // Debug: output the raw HTML content BEFORE any processing
+    const rawHTML = elements.markdownBody.innerHTML;
+    console.log('[DEBUG Raw HTML length]:', rawHTML.length);
+    console.log('[DEBUG Raw HTML first 500 chars]:', rawHTML.substring(0, 500));
+
+    // Search for WikiLink pattern in raw HTML
+    const wikiLinkPattern = /!\[\[[^\]]+\]\]/g;
+    const wikiMatches = rawHTML.match(wikiLinkPattern);
+    console.log('[DEBUG WikiLink matches in raw HTML]:', wikiMatches);
+
+    // Also search for any bracket patterns
+    const bracketPattern = /\[\[[^\]]+\]\]/g;
+    const bracketMatches = rawHTML.match(bracketPattern);
+    console.log('[DEBUG Any [[...]] in raw HTML]:', bracketMatches);
+
     const embedRegex = /!\[\[([^\]]+)\]\]/g;
     const textNodes = collectTextNodes('code, pre, .mermaid, a');
+    console.log('[DEBUG initObsidianEmbeds] Found textNodes:', textNodes.length);
+
+    // Debug: show first 10 text node contents
+    textNodes.slice(0, 10).forEach((node, i) => {
+      console.log(`[DEBUG TextNode ${i}]`, node.textContent.substring(0, 100));
+    });
+
+    // Debug: check if any node contains WikiLink pattern
+    const hasWikiLink = textNodes.some(node => node.textContent.includes('[['));
+    console.log('[DEBUG initObsidianEmbeds] Any node contains [[:', hasWikiLink);
+
+    // Debug: check full HTML content for WikiLink pattern
+    const fullHTML = elements.markdownBody.innerHTML;
+    const wikiLinkInHTML = fullHTML.includes('![[') || fullHTML.includes('[[');
+    console.log('[DEBUG initObsidianEmbeds] WikiLink in full HTML:', wikiLinkInHTML);
 
     const embeds = [];
     textNodes.forEach(node => {
       let match;
       embedRegex.lastIndex = 0;
       while ((match = embedRegex.exec(node.textContent)) !== null) {
+        console.log('[DEBUG initObsidianEmbeds] Found match:', match[0], 'in node:', node.textContent.substring(0, 100));
         embeds.push({ node, fullMatch: match[0], target: match[1].trim() });
       }
     });
 
+    console.log('[DEBUG initObsidianEmbeds] Total embeds found:', embeds.length);
+
     for (const embed of embeds) {
       const { node, fullMatch, target } = embed;
 
+      // Check if this is an image BEFORE any path manipulation
+      const isImage = /\.(png|jpg|jpeg|gif|webp|svg|bmp)$/i.test(target);
+
+      // Build resolved path - handle Obsidian vault-relative paths
       let resolvedPath = target;
-      if (!resolvedPath.endsWith('.md') && !resolvedPath.endsWith('.markdown')) {
+
+      // Only append .md for non-image files without extension
+      if (!isImage && !resolvedPath.endsWith('.md') && !resolvedPath.endsWith('.markdown')) {
         resolvedPath += '.md';
       }
 
+      // Resolve relative path using baseDir
+      // Obsidian WikiLink paths are relative to vault root, not current file
+      // Need to detect if target overlaps with baseDir path segments
       if (!resolvedPath.startsWith('/') && !resolvedPath.match(/^[a-zA-Z]:/) && baseDir) {
-        resolvedPath = baseDir + '/' + resolvedPath;
+        const baseParts = baseDir.split(/[\/\\]/);
+        const targetParts = target.split(/[\/\\]/);
+
+        // Check if target's first segment matches any part of baseDir
+        let overlapIndex = -1;
+        for (let i = baseParts.length - 1; i >= 0; i--) {
+          if (baseParts[i] === targetParts[0]) {
+            // Check if subsequent parts also match
+            let matchLen = 0;
+            for (let j = 0; j < targetParts.length && i + j < baseParts.length; j++) {
+              if (baseParts[i + j] === targetParts[j]) {
+                matchLen++;
+              } else {
+                break;
+              }
+            }
+            if (matchLen > 0) {
+              overlapIndex = i;
+              break;
+            }
+          }
+        }
+
+        if (overlapIndex >= 0) {
+          // Target overlaps with baseDir - target is relative to vault root
+          // Vault root = baseDir minus the overlapping segments
+          const vaultRoot = baseParts.slice(0, overlapIndex).join('/');
+          resolvedPath = vaultRoot + '/' + target;
+        } else {
+          // No overlap - target is relative to current file directory
+          resolvedPath = baseDir + '/' + target;
+        }
       }
 
       try {
-        const result = await invoke('open_file', { path: resolvedPath });
-        if (result && result.content) {
-          const html = await invoke('render_markdown', { content: result.content });
-          const wrapper = document.createElement('div');
-          wrapper.className = 'obsidian-embed';
-          wrapper.innerHTML = html;
+        if (isImage) {
+          // Handle image embed: ![[image.png]]
+          console.log('[DEBUG WikiLink] Processing image:', target);
+          console.log('[DEBUG WikiLink] resolvedPath:', resolvedPath);
+
+          const imgWrapper = document.createElement('div');
+          imgWrapper.className = 'obsidian-embed obsidian-image-embed';
+
+          const img = document.createElement('img');
+          img.alt = target.split('/').pop().split('\\').pop();
+          img.className = 'obsidian-embed-image';
+
+          // Use Tauri convertFileSrc for local file access
+          const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
+          console.log('[DEBUG WikiLink] convertFileSrc available:', !!convertFileSrc);
+
+          const finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
+          console.log('[DEBUG WikiLink] img.src:', finalSrc);
+          img.src = finalSrc;
+
+          imgWrapper.appendChild(img);
 
           const text = node.textContent;
           const before = text.substring(0, text.indexOf(fullMatch));
@@ -1643,13 +1734,31 @@
 
           const parent = node.parentNode;
           if (before) parent.insertBefore(document.createTextNode(before), node);
-          parent.insertBefore(wrapper, node);
+          parent.insertBefore(imgWrapper, node);
           if (after) parent.insertBefore(document.createTextNode(after), node);
           parent.removeChild(node);
+        } else {
+          // Handle file embed: ![[file.md]]
+          const result = await invoke('open_file', { path: resolvedPath });
+          if (result && result.content) {
+            const html = await invoke('render_markdown', { content: result.content });
+            const wrapper = document.createElement('div');
+            wrapper.className = 'obsidian-embed';
+            wrapper.innerHTML = html;
+
+            const text = node.textContent;
+            const before = text.substring(0, text.indexOf(fullMatch));
+            const after = text.substring(text.indexOf(fullMatch) + fullMatch.length);
+
+            const parent = node.parentNode;
+            if (before) parent.insertBefore(document.createTextNode(before), node);
+            parent.insertBefore(wrapper, node);
+            if (after) parent.insertBefore(document.createTextNode(after), node);
+            parent.removeChild(node);
+          }
         }
       } catch (err) {
-        console.error('Failed to embed file:', err);
-        // Leave the original text as-is
+        console.error('Failed to embed:', target, err);
       }
     }
   }

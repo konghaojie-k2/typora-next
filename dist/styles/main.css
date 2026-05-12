@@ -1950,6 +1950,18 @@ body.zen-mode .markdown-body {
   border-radius: var(--radius-md) var(--radius-md) 0 0;
 }
 
+/* Image embed specific styles */
+.obsidian-image-embed {
+  padding: 8px;
+  text-align: center;
+}
+
+.obsidian-embed-image {
+  max-width: 100%;
+  border-radius: var(--radius-md);
+  cursor: zoom-in;
+}
+
 /* Callout blocks */
 .obsidian-callout {
   border-radius: var(--radius-md);
