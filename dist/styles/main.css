@@ -1435,19 +1435,41 @@ mark {
    ============================================ */
 @media print {
   .sidebar,
-  .toolbar {
+  .toolbar,
+  .tabs-bar,
+  .code-block-actions,
+  .btn-icon,
+  .btn-toggle,
+  .download-btn,
+  .refresh-prompt,
+  .settings-modal {
     display: none !important;
   }
 
-  .tabs-bar {
-    display: none !important;
+  html, body {
+    width: 100%;
+    height: auto;
+    overflow: visible;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .app-container {
+    display: block;
+    height: auto;
   }
 
   .content-area {
+    display: block;
+    height: auto;
+    overflow: visible;
     padding: 0 !important;
   }
 
   .markdown-body {
+    display: block;
+    height: auto;
+    overflow: visible;
     max-width: none;
     padding: 0;
   }
@@ -1456,16 +1478,12 @@ mark {
     background: #f5f5f5 !important;
     box-shadow: none !important;
     border: 1px solid #ddd;
+    white-space: pre-wrap;
+    word-break: break-word;
   }
 
   pre code {
     color: #333 !important;
-  }
-
-  .code-block-actions,
-  .btn-icon,
-  .btn-toggle {
-    display: none !important;
   }
 
   .katex-display,
@@ -1474,6 +1492,11 @@ mark {
     background: transparent !important;
     box-shadow: none !important;
     border: 1px solid #ddd !important;
+    page-break-inside: avoid;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
   }
 
   * {

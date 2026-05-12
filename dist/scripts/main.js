@@ -1747,8 +1747,7 @@
   // PDF Export
   // ============================================
   function exportToPDF() {
-    showToast('请在打印对话框中选择「打印为 PDF」并设置保存位置', 5000);
-    setTimeout(() => window.print(), 300);
+    setTimeout(() => window.print(), 100);
   }
 
   // ============================================
