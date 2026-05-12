@@ -36,3 +36,6 @@ notify = "8"
 
 # HTTP client for AI API
 ureq = { version = "2", features = ["json"] }
+
+# Base64 encoding for file downloads
+base64 = "0.22"

@@ -285,6 +285,7 @@
     renderTabs();
     loadTabContent(state.activeTab);
     watchCurrentFile(path);
+    showToast('已打开: ' + tab.name);
 
     // Add to recent files
     invoke('add_recent_file', { path }).then(() => {
@@ -410,8 +411,8 @@
       // Initialize math rendering
       initMathRendering();
 
-      // Initialize mermaid diagrams
-      initMermaid();
+      // Initialize mermaid diagrams (async, must complete before download buttons)
+      await initMermaid();
 
       // Initialize image handling
       initImageHandling();
@@ -431,6 +432,7 @@
       initObsidianCallouts();
       initWikiLinks();
       initObsidianEmbeds(baseDir);
+      initDownloadButtons();
 
       // Update source view
       elements.sourceCode.textContent = content;
@@ -881,7 +883,7 @@
 
         if (language && language !== 'mermaid') {
           pre.setAttribute('data-language', language);
-          addCopyButton(pre, code);
+          addCodeBlockActions(pre, code);
           Prism.highlightElement(code);
         }
       });
@@ -893,10 +895,25 @@
     return match ? match[1].toLowerCase() : null;
   }
 
-  function addCopyButton(pre, code) {
+  function addCodeBlockActions(pre, code) {
     const actions = document.createElement('div');
     actions.className = 'code-block-actions';
 
+    // Download button
+    const downloadBtn = document.createElement('button');
+    downloadBtn.className = 'code-block-btn';
+    downloadBtn.textContent = '⬇️';
+    downloadBtn.title = '下载代码块';
+    downloadBtn.type = 'button';
+    downloadBtn.addEventListener('click', () => {
+      const language = pre.getAttribute('data-language') || 'txt';
+      const ext = getLanguageExtension(language);
+      const content = code.textContent;
+      const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+      triggerDownload(blob, `code.${ext}`);
+    });
+
+    // Copy button
     const copyBtn = document.createElement('button');
     copyBtn.className = 'code-block-btn';
     copyBtn.textContent = 'Copy';
@@ -917,6 +934,7 @@
       }
     });
 
+    actions.appendChild(downloadBtn);
     actions.appendChild(copyBtn);
     pre.appendChild(actions);
   }
@@ -2206,6 +2224,208 @@
     document.addEventListener('DOMContentLoaded', init);
   } else {
     init();
+  }
+
+  // ============================================
+  // Download Buttons for Non-Text Content
+  // ============================================
+
+  function initDownloadButtons() {
+    addImageDownloadButtons();
+    addMermaidDownloadButtons();
+    addTableDownloadButtons();
+  }
+
+  function addImageDownloadButtons() {
+    const images = elements.markdownBody.querySelectorAll('img');
+    images.forEach(img => {
+      if (img.closest('a')) return; // Skip images inside links
+      if (img.dataset.downloadBtn === 'true') return;
+      img.dataset.downloadBtn = 'true';
+
+      const wrapper = document.createElement('span');
+      wrapper.className = 'downloadable-wrapper';
+      wrapper.style.position = 'relative';
+      wrapper.style.display = 'inline-block';
+
+      img.parentNode.insertBefore(wrapper, img);
+      wrapper.appendChild(img);
+
+      const btn = createDownloadButton('⬇️', '下载图片');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadImage(img);
+      });
+      wrapper.appendChild(btn);
+    });
+  }
+
+  function addMermaidDownloadButtons() {
+    const mermaidBlocks = elements.markdownBody.querySelectorAll('pre.mermaid');
+    mermaidBlocks.forEach(pre => {
+      if (pre.dataset.downloadBtn === 'true') return;
+      pre.dataset.downloadBtn = 'true';
+
+      // Only add button if Mermaid has been rendered (SVG exists inside)
+      const svg = pre.querySelector('svg');
+      if (!svg) return; // Skip unrendered blocks
+
+      const btn = createDownloadButton('⬇️ SVG', '下载 Mermaid 图表');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadMermaid(pre);
+      });
+      // Append as last child of pre (after SVG), absolutely positioned via CSS
+      pre.appendChild(btn);
+    });
+  }
+
+  function addTableDownloadButtons() {
+    const tables = elements.markdownBody.querySelectorAll('table');
+    tables.forEach(table => {
+      if (table.dataset.downloadBtn === 'true') return;
+      table.dataset.downloadBtn = 'true';
+
+      const wrapper = document.createElement('div');
+      wrapper.className = 'downloadable-wrapper';
+      wrapper.style.position = 'relative';
+
+      table.parentNode.insertBefore(wrapper, table);
+      wrapper.appendChild(table);
+
+      const btn = createDownloadButton('⬇️ CSV', '下载表格');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadTable(table);
+      });
+      wrapper.appendChild(btn);
+    });
+  }
+
+  function createDownloadButton(text, title) {
+    const btn = document.createElement('button');
+    btn.className = 'download-btn';
+    btn.textContent = text;
+    btn.title = title;
+    btn.type = 'button';
+    return btn;
+  }
+
+  async function downloadImage(img) {
+    const src = img.src;
+    if (!src) return;
+    const filename = src.split('/').pop().split('?')[0] || 'image.png';
+    try {
+      const response = await fetch(src);
+      const blob = await response.blob();
+      triggerDownload(blob, filename);
+    } catch (err) {
+      console.error('Failed to download image:', err);
+      alert('下载失败：' + err.message);
+    }
+  }
+
+  function downloadMermaid(pre) {
+    const svg = pre.querySelector('svg');
+    if (!svg) {
+      alert('图表尚未渲染完成');
+      return;
+    }
+    const serializer = new XMLSerializer();
+    const svgString = serializer.serializeToString(svg);
+    const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+    triggerDownload(blob, 'diagram.svg');
+  }
+
+  function downloadTable(table) {
+    const rows = table.querySelectorAll('tr');
+    let csv = '﻿'; // BOM for Excel
+    rows.forEach(row => {
+      const cells = row.querySelectorAll('td, th');
+      const values = Array.from(cells).map(cell => {
+        const text = cell.textContent.replace(/"/g, '""').trim();
+        return `"${text}"`;
+      });
+      csv += values.join(',') + '\n';
+    });
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    triggerDownload(blob, 'table.csv');
+  }
+
+  async function triggerDownload(blob, filename) {
+    try {
+      // Use Tauri save dialog to let user choose location
+      const savePath = await window.__TAURI__.dialog.save({
+        defaultPath: filename,
+        filters: [{ name: 'All Files', extensions: ['*'] }]
+      });
+      if (!savePath) return; // User cancelled
+
+      // Convert blob to base64
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64 = reader.result.split(',')[1];
+        // Write file through Rust backend
+        await invoke('write_file', { path: savePath, content: base64, encoding: 'base64' });
+        showToast('已保存: ' + filename);
+      };
+      reader.readAsDataURL(blob);
+    } catch (err) {
+      console.error('Download failed:', err);
+      showError('下载失败: ' + err);
+    }
+  }
+
+  function getLanguageExtension(language) {
+    const map = {
+      javascript: 'js',
+      typescript: 'ts',
+      python: 'py',
+      rust: 'rs',
+      java: 'java',
+      cpp: 'cpp',
+      c: 'c',
+      go: 'go',
+      ruby: 'rb',
+      php: 'php',
+      swift: 'swift',
+      kotlin: 'kt',
+      scala: 'scala',
+      r: 'r',
+      matlab: 'm',
+      shell: 'sh',
+      bash: 'sh',
+      powershell: 'ps1',
+      sql: 'sql',
+      html: 'html',
+      css: 'css',
+      scss: 'scss',
+      sass: 'sass',
+      less: 'less',
+      json: 'json',
+      yaml: 'yml',
+      xml: 'xml',
+      markdown: 'md',
+      dockerfile: 'dockerfile',
+      makefile: 'makefile',
+      vim: 'vim',
+      lua: 'lua',
+      perl: 'pl',
+      haskell: 'hs',
+      clojure: 'clj',
+      erlang: 'erl',
+      elixir: 'ex',
+      julia: 'jl',
+      dart: 'dart',
+      groovy: 'groovy',
+      objectivec: 'm',
+      protobuf: 'proto',
+      graphql: 'graphql',
+      regex: 'regex',
+      diff: 'diff',
+      http: 'http'
+    };
+    return map[language.toLowerCase()] || language.toLowerCase();
   }
 
   // Export for testing/debugging

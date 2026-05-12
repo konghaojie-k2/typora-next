@@ -1993,3 +1993,74 @@ body.zen-mode .markdown-body {
 [data-theme="dark"] .obsidian-callout-bug     { --color-callout-bg: rgba(244, 67, 54, 0.12); }
 [data-theme="dark"] .obsidian-callout-quote   { --color-callout-bg: rgba(158, 158, 158, 0.12); }
 [data-theme="dark"] .obsidian-callout-example { --color-callout-bg: rgba(124, 77, 255, 0.12); }
+
+/* ============================================
+   Download Buttons for Non-Text Content
+   ============================================ */
+
+.downloadable-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+.download-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  z-index: 10;
+  padding: 2px 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: #6c7086;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  line-height: 1.4;
+  backdrop-filter: blur(4px);
+}
+
+.downloadable-wrapper:hover .download-btn,
+pre.mermaid:hover .download-btn {
+  opacity: 1;
+}
+
+.download-btn:hover {
+  background: #fff;
+  color: #4a7bc0;
+  border-color: rgba(74, 123, 192, 0.3);
+}
+
+pre.mermaid .download-btn {
+  top: 8px;
+  right: 8px;
+}
+
+[data-theme="dark"] .download-btn {
+  color: #a6adc8;
+  background: rgba(30, 30, 46, 0.9);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .download-btn:hover {
+  background: #313244;
+  color: #7aa8e8;
+  border-color: rgba(122, 168, 232, 0.3);
+}
+
+pre.mermaid .download-btn {
+  top: 8px;
+  right: 8px;
+}
+
+[data-theme="dark"] .download-btn {
+  background: rgba(220, 53, 69, 0.85);
+  border-color: rgba(220, 53, 69, 0.5);
+  color: #fff;
+}
+
+[data-theme="dark"] .download-btn:hover {
+  background: rgba(220, 53, 69, 1);
+}

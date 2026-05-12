@@ -654,9 +654,21 @@ async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
 
 /// Write content to a file
 #[tauri::command]
-async fn write_file(path: String, content: String) -> Result<(), String> {
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+async fn write_file(path: String, content: String, encoding: Option<String>) -> Result<(), String> {
+    match encoding.as_deref() {
+        Some("base64") => {
+            use base64::Engine;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&content)
+                .map_err(|e| format!("Failed to decode base64: {}", e))?;
+            fs::write(&path, bytes)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+        }
+        _ => {
+            fs::write(&path, content)
+                .map_err(|e| format!("Failed to write file: {}", e))?;
+        }
+    }
     Ok(())
 }
 
