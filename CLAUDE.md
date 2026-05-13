@@ -15,18 +15,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Architecture
 
 ```
-src/
-├── core/           # Rust markdown processing
-│   ├── parser/     # pulldown-cmark + extensions
-│   ├── renderer/   # HTML generation with embedded scripts
-│   └── syntax/     # Math/diagram/code block handlers
-├── web/            # WebView frontend (Tauri loads this)
-│   ├── index.html  # Main preview container
-│   ├── css/        # Premium styling and themes
-│   └── js/         # KaTeX/Mermaid/Prism integration
-└── ui/             # Tauri window management
-    ├── window.rs   # Window state, shortcuts, file handling
-    └── commands.rs # IPC between Rust and WebView
+src-tauri/
+├── src/
+│   ├── lib.rs       # Markdown rendering + Tauri commands
+│   └── main.rs      # App entry point
+└── tauri.conf.json  # Tauri configuration
+
+dist/                 # WebView frontend (Tauri loads this)
+├── index.html        # Main preview container
+├── styles/           # Premium CSS and themes
+├── scripts/          # KaTeX/Mermaid/Prism integration
+└── vendor/           # Third-party libraries (KaTeX, Mermaid, Prism, Reveal.js)
 ```
 
 ## Key Dependencies
@@ -84,9 +83,6 @@ cargo tauri dev
 
 # Build installer (MSI/NSIS)
 cargo tauri build
-
-# CLI only (无 GUI)
-cargo run -- render input.md output.html
 ```
 
 ## MVP Features

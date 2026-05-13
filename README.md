@@ -97,15 +97,7 @@ cargo build --release
 > cargo build --release
 > ```
 
-### CLI 模式
-
-```bash
-# 基础渲染
-cargo run -- render input.md output.html
-
-# 强制启用数学公式和 Mermaid 渲染
-cargo run -- render input.md output.html --math --mermaid
-```
+---
 
 ---
 
