@@ -723,6 +723,44 @@ html, body {
   color: white;
 }
 
+/* Tab Context Menu */
+.tab-context-menu {
+  position: fixed;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs) 0;
+  min-width: 160px;
+  z-index: 1000;
+  font-size: var(--font-size-sm);
+}
+
+.tab-context-menu-item {
+  padding: var(--spacing-sm) var(--spacing-md);
+  cursor: pointer;
+  color: var(--color-text-primary);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.tab-context-menu-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.tab-context-menu-item .shortcut {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.tab-context-menu-separator {
+  height: 1px;
+  background: var(--color-border);
+  margin: var(--spacing-xs) var(--spacing-sm);
+}
+
 /* ============================================
    Markdown Body (Content)
    ============================================ */

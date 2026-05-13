@@ -341,6 +341,81 @@
     saveUIState();
   }
 
+  function closeOtherTabs(keepIndex) {
+    if (keepIndex < 0 || keepIndex >= state.tabs.length) return;
+    const keepTab = state.tabs[keepIndex];
+    state.tabs = [keepTab];
+    state.activeTab = 0;
+    renderTabs();
+    loadTabContent(0);
+    watchCurrentFile(keepTab.path);
+    saveUIState();
+  }
+
+  function closeAllTabs() {
+    state.tabs = [];
+    state.activeTab = -1;
+    renderTabs();
+    showWelcome();
+    unwatchCurrentFile();
+    saveUIState();
+  }
+
+  let activeContextMenu = null;
+
+  function showTabContextMenu(event, index) {
+    // Remove existing menu
+    if (activeContextMenu) {
+      activeContextMenu.remove();
+      activeContextMenu = null;
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+
+    const items = [
+      { label: '关闭', action: () => closeTab(index) },
+      { label: '关闭其他', action: () => closeOtherTabs(index) },
+      { label: '关闭全部', action: () => closeAllTabs() }
+    ];
+
+    items.forEach((item, i) => {
+      if (i > 0) {
+        const sep = document.createElement('div');
+        sep.className = 'tab-context-menu-separator';
+        menu.appendChild(sep);
+      }
+      const el = document.createElement('div');
+      el.className = 'tab-context-menu-item';
+      el.textContent = item.label;
+      el.addEventListener('click', () => {
+        item.action();
+        menu.remove();
+        activeContextMenu = null;
+      });
+      menu.appendChild(el);
+    });
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+
+    // Close menu on click elsewhere
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        activeContextMenu = null;
+        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('contextmenu', closeMenu);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('contextmenu', closeMenu);
+    }, 0);
+  }
+
   function renderTabs() {
     elements.tabsList.innerHTML = '';
 
@@ -367,6 +442,10 @@
       tabEl.appendChild(closeBtn);
 
       tabEl.addEventListener('click', () => switchTab(index));
+      tabEl.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        showTabContextMenu(e, index);
+      });
 
       elements.tabsList.appendChild(tabEl);
     });
