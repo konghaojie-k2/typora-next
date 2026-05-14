@@ -757,6 +757,43 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
     Ok(())
 }
 
+/// Get the current platform (windows, macos, linux)
+#[tauri::command]
+fn get_platform() -> String {
+    std::env::consts::OS.to_string()
+}
+
+/// Show the given file in the system file manager
+#[tauri::command]
+fn show_in_folder(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    let os = std::env::consts::OS;
+
+    let result = match os {
+        "windows" => {
+            std::process::Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+        }
+        "macos" => {
+            std::process::Command::new("open")
+                .args(["-R", &path])
+                .spawn()
+        }
+        _ => {
+            // Linux and others: open the parent directory
+            let dir = path_buf.parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| path.clone());
+            std::process::Command::new("xdg-open")
+                .arg(&dir)
+                .spawn()
+        }
+    };
+
+    result.map(|_| ()).map_err(|e| format!("无法打开文件夹: {}", e))
+}
+
 /// Export markdown to Word document via md2docx_service
 #[tauri::command]
 async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
@@ -1082,33 +1119,32 @@ pub fn run() {
                 window.open_devtools();
             }
 
-            // Start md2docx_service for Word export
-            let app_handle = app.handle().clone();
-            std::thread::spawn(move || {
-                // Try to find the service binary
-                let possible_paths = [
-                    app_handle.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
-                    std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
-                ];
+            // Start md2docx_service for Word export (Windows only)
+            #[cfg(windows)]
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let possible_paths = [
+                        app_handle.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
+                        std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
+                    ];
 
-                for path_opt in &possible_paths {
-                    if let Some(path) = path_opt {
-                        if path.exists() {
-                            let mut cmd = std::process::Command::new(path);
-                            cmd.stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null());
-                            #[cfg(windows)]
-                            {
+                    for path_opt in &possible_paths {
+                        if let Some(path) = path_opt {
+                            if path.exists() {
+                                let mut cmd = std::process::Command::new(path);
+                                cmd.stdout(std::process::Stdio::null())
+                                    .stderr(std::process::Stdio::null());
                                 use std::os::windows::process::CommandExt;
                                 const CREATE_NO_WINDOW: u32 = 0x08000000;
                                 cmd.creation_flags(CREATE_NO_WINDOW);
+                                let _ = cmd.spawn();
+                                break;
                             }
-                            let _ = cmd.spawn();
-                            break;
                         }
                     }
-                }
-            });
+                });
+            }
 
             // Check command line arguments for .md file path (file association)
             let args: Vec<String> = std::env::args().collect();
@@ -1135,7 +1171,7 @@ pub fn run() {
             open_folder_dialog, list_directory, watch_file, unwatch_file,
             fix_mermaid, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
-            open_slides_window
+            open_slides_window, get_platform, show_in_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -375,7 +375,15 @@
     menu.style.left = event.clientX + 'px';
     menu.style.top = event.clientY + 'px';
 
+    const tab = state.tabs[index];
     const items = [
+      { label: '在文件夹中显示', action: () => {
+        if (tab && tab.path) {
+          invoke('show_in_folder', { path: tab.path }).catch(err => {
+            console.error('打开文件夹失败:', err);
+          });
+        }
+      }},
       { label: '关闭', action: () => closeTab(index) },
       { label: '关闭其他', action: () => closeOtherTabs(index) },
       { label: '关闭全部', action: () => closeAllTabs() }
@@ -1164,14 +1172,37 @@
     });
   }
 
+  function replaceBrokenImage(img) {
+    if (img.hasAttribute('data-error-handled')) return;
+    img.setAttribute('data-error-handled', 'true');
+
+    const fileName = img.alt || img.src.split('/').pop() || '未知图片';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'image-error-placeholder';
+    placeholder.title = img.src;
+
+    placeholder.innerHTML =
+      '<div class="image-error-icon">📄</div>' +
+      '<div class="image-error-name">' + escapeHtml(fileName) + '</div>' +
+      '<div class="image-error-hint">图片不存在</div>';
+
+    if (img.parentNode) {
+      img.parentNode.replaceChild(placeholder, img);
+    }
+  }
+
   function initImageHandling() {
     const images = elements.markdownBody.querySelectorAll('img');
     images.forEach(img => {
-      // Error handling
+      // Error handling - replace broken image with friendly placeholder
       img.addEventListener('error', function() {
-        this.setAttribute('data-error', 'true');
-        this.classList.add('image-error');
+        replaceBrokenImage(this);
       });
+
+      // If image already failed (error fired before listener was attached)
+      if (img.complete && img.naturalWidth === 0) {
+        replaceBrokenImage(img);
+      }
 
       // Lightbox
       if (!img.hasAttribute('data-lightbox-handled')) {
@@ -2402,8 +2433,21 @@
     loadConfig();
     loadRecentFiles();
     loadUIState();
+    checkPlatform();
 
     console.log('Typora Next initialized');
+  }
+
+  function checkPlatform() {
+    if (typeof __TAURI__ !== 'undefined') {
+      __TAURI__.core.invoke('get_platform')
+        .then(platform => {
+          if (platform === 'macos' && elements.exportWordBtn) {
+            elements.exportWordBtn.style.display = 'none';
+          }
+        })
+        .catch(err => console.warn('Failed to get platform:', err));
+    }
   }
 
   // Run when DOM is ready

@@ -8,9 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **定位**: 重预览、轻编辑
 - 默认显示渲染结果，快捷键切换源码编辑
-- 特色：极致数学渲染 + 丰富图表支持 + 代码块美化
+- 特色：极致数学渲染 + 丰富图表支持 + 代码块美化 + Obsidian 语法兼容
 
-**Tech Stack**: Rust + Tauri (WebView 渲染)
+**Tech Stack**: Rust + Tauri 2.x (WebView 渲染)，前端 Vanilla JS（无框架）
 
 ## Architecture
 
@@ -23,107 +23,111 @@ src-tauri/
 
 dist/                 # WebView frontend (Tauri loads this)
 ├── index.html        # Main preview container
-├── styles/           # Premium CSS and themes
-├── scripts/          # KaTeX/Mermaid/Prism integration
+├── styles/           # CSS themes (light/dark via CSS variables)
+├── scripts/          # Vanilla JS: tab management, rendering pipeline, UI
 └── vendor/           # Third-party libraries (KaTeX, Mermaid, Prism, Reveal.js)
 ```
 
-## Key Dependencies
-
-### Rust
-- `pulldown-cmark` - CommonMark + GFM parsing
-- `tauri` - Cross-platform WebView window
-- `serde` - Config serialization
-
-### Web Rendering (超越 Typora 的关键)
-- **KaTeX** - 数学渲染（比 MathJax 快 10x）
-- **Mermaid** - 流程图、时序图、甘特图
-- **Prism.js** - 代码高亮（自定义精美样式）
-- **Markmap** - Mind map from markdown lists
-
-## Development Commands
-
-### 重要：路径空格问题
-
-项目路径 `C:\CODE\open Typora` 有空格，GNU toolchain 的 `dlltool.exe` 无法处理。
-
-**解决方案**：创建 junction point
-```powershell
-New-Item -ItemType Junction -Path 'C:\CODE\typora-next' -Target 'C:\CODE\open Typora'
-```
-
-### 编译命令
-
-```powershell
-# 设置 PATH 包含 MinGW 的 dlltool
-$env:PATH = 'C:\Users\17625\scoop\apps\mingw\15.2.0-rt_v13-rev0\bin;' + $env:PATH
-
-# 从 junction 路径编译
-cd C:\CODE\typora-next\src-tauri
-cargo build --release
-```
-
-编译输出位置：
-- `src-tauri/target/release/app.exe` - 桌面应用
-- `src-tauri/target/release/WebView2Loader.dll` - WebView 运行时
-
-### 运行应用
-
-```powershell
-# 从 release 目录启动（需要 DLL 在同目录）
-cd C:\CODE\open Typora\src-tauri\target\release
-.\app.exe
-```
-
-### 其他命令
-
-```bash
-# Development (hot reload) - 需要 npm
-cargo tauri dev
-
-# Build installer (MSI/NSIS)
-cargo tauri build
-```
-
-## MVP Features
-
-| 功能 | 优先级 | 实现方式 |
-|------|--------|----------|
-| 打开 .md 文件渲染 | P0 | pulldown-cmark → HTML |
-| 数学公式渲染 | P0 | KaTeX (inline + block) |
-| 代码块高亮 | P0 | Prism.js + 自定义主题 |
-| 图表渲染 | P1 | Mermaid (flowchart, sequence) |
-| 切换源码模式 | P1 | 快捷键 Ctrl+E |
-| 主题系统 | P2 | CSS 变量 + 主题文件 |
+**前端无框架**：所有交互逻辑在 `dist/scripts/main.js` 中用原生 JS 实现，不依赖 React/Vue 等框架。DOM 操作直接通过 `document.createElement` / `addEventListener` 完成。
 
 ## Rendering Pipeline
 
 ```
 .md file → pulldown-cmark → HTML fragments
          ↓
-    Math/Diagram extraction → KaTeX/Mermaid placeholders
+    Math/Diagram extraction → %%MATH_BLOCK_N%% / %%MERMAID_BLOCK_N%% placeholders
          ↓
-    Combined HTML → WebView render
+    Combined HTML → WebView render → KaTeX/Mermaid/Prism post-processing
 ```
 
-**Key insight**: 预览器不需要 WYSIWYG 的复杂交互，专注渲染质量即可。
+**关键细节**：
+- Markdown 解析前，数学公式和 Mermaid 代码块被提取并用 `%%MATH_BLOCK_N%%` / `%%MERMAID_BLOCK_N%%` 占位符替换，避免被 pulldown-cmark 转义
+- 禁止使用 `\x00` 等控制字符作为占位符（会导致 DOM 解析异常）
 
-## ⚠️ 铁律
+## Key Dependencies
 
-### 禁止主动提交代码
+### Rust
+- `pulldown-cmark` - CommonMark + GFM parsing
+- `tauri` 2.x - Cross-platform WebView window
+- `notify` - File watching for external modifications
+- `ureq` - HTTP client for AI API calls
 
-**Claude 不得自行执行 `git commit` 或 `git push`**。所有提交操作必须由用户明确授权后才能执行。
+### Web Rendering
+- **KaTeX** - 数学渲染
+- **Mermaid.js** - 图表渲染
+- **Prism.js** - 代码高亮（Tomorrow 暗色主题）
+- **Reveal.js** - 幻灯片放映（iframe overlay 方案）
+
+## Development Commands
+
+### 路径空格问题
+
+项目原始路径 `C:\CODE\open Typora` 有空格，GNU toolchain 的 `dlltool.exe` 无法处理。
+
+**解决方案**：使用 junction 路径编译
+```powershell
+# 从 junction 路径编译
+cd C:\CODE\typora-next\src-tauri
+
+# 或 Bash
+cd /c/CODE/typora-next/src-tauri
+```
+
+### 编译
+
+```bash
+# 必须将 MinGW 加入 PATH（编译和打包都需要）
+export PATH="/c/Users/17625/scoop/apps/mingw/15.2.0-rt_v13-rev0/bin:$PATH"
+
+# 快速检查（不生成二进制）
+cargo check
+
+# Debug 编译
+cargo build
+
+# Release 编译
+cargo build --release
+
+# 打包安装包（MSI + NSIS）
+cargo tauri build
+```
+
+### 运行
+
+```bash
+# 从 release 目录启动（需要 DLL 在同目录）
+cd /c/CODE/typora-next/src-tauri/target/release
+./app.exe
+```
+
+## Important Notes
+
+### Release 模式前端嵌入
+
+Tauri release 模式下，前端资源（dist/）在编译时嵌入 exe。修改 dist/ 后必须重新完整编译才能生效，增量编译不会重新嵌入资源。
+
+**验证发布版本的三步**：
+1. `ls -lh target/release/app.exe` 确认文件存在
+2. `stat target/release/app.exe` 确认时间戳是刚才
+3. 手动启动应用确认变更生效
+
+### 安全注意事项
+
+`tauri.conf.json` 中 `assetProtocol.scope` 当前为 `"**"`（允许访问任意路径），生产环境应限定到打开文件目录。
+
+### 编辑定位
+
+**Claude 不得自行执行 `git commit` 或 `git push`**。所有提交操作必须由用户明确授权。
 
 - 代码修改完成后，应告知用户改动内容并询问是否提交
 - 用户说"提交"、"commit"或明确授权后，方可执行提交
 - 用户说"不要提交"或类似拒绝时，必须尊重用户决定
 
-## Code Style
+### Code Style
 
 - Rust: `cargo fmt` + `cargo clippy`
+- 前端：匹配现有原生 JS 风格，不引入框架
 - 最小代码解决问题，不做过度抽象
-
----
 
 ## 上下文管理
 
@@ -131,8 +135,6 @@ cargo tauri build
 
 - `context-sync.json` — 核心状态（进度、待办、活跃陷阱、最近文件）
 - `decisions.md` — 决策记录（活跃区 + 归档区）
-- `daily-status.md` — 每日流程打卡（早省/晚省 checklist）
 - `archive/` — 归档历史
-- `inbox/` — 临时输入池
 
 **不再使用 project harness**（已移除 `.project/` 目录）。
