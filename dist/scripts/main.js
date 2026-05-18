@@ -27,6 +27,7 @@
     sourceMode: false,
     sidebarCollapsed: false,
     sidebarActiveTab: 'files',   // 'files' | 'toc'
+    isTranslated: false,
     currentFolder: null,
     headings: [],
     refreshPromptVisible: false,
@@ -61,6 +62,7 @@
     exportPdfBtn: document.getElementById('exportPdfBtn'),
     exportWordBtn: document.getElementById('exportWordBtn'),
     slidesBtn: document.getElementById('slidesBtn'),
+    translateBtn: document.getElementById('translateBtn'),
     themeToggle: document.getElementById('themeToggle'),
     themeIconLight: document.getElementById('themeIconLight'),
     themeIconDark: document.getElementById('themeIconDark'),
@@ -520,6 +522,13 @@
       initWikiLinks();
       initObsidianEmbeds(baseDir);
       initDownloadButtons();
+
+      // Reset translation state on re-render
+      state.isTranslated = false;
+      if (elements.translateBtn) {
+        elements.translateBtn.title = '翻译';
+        elements.translateBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>`;
+      }
 
       // Update source view
       elements.sourceCode.textContent = content;
@@ -1177,6 +1186,7 @@
     img.setAttribute('data-error-handled', 'true');
 
     const fileName = img.alt || img.src.split('/').pop() || '未知图片';
+    const isNetwork = img.src.startsWith('http');
     const placeholder = document.createElement('div');
     placeholder.className = 'image-error-placeholder';
     placeholder.title = img.src;
@@ -1184,7 +1194,7 @@
     placeholder.innerHTML =
       '<div class="image-error-icon">📄</div>' +
       '<div class="image-error-name">' + escapeHtml(fileName) + '</div>' +
-      '<div class="image-error-hint">图片不存在</div>';
+      '<div class="image-error-hint">' + (isNetwork ? '图片加载失败' : '图片不存在') + '</div>';
 
     if (img.parentNode) {
       img.parentNode.replaceChild(placeholder, img);
@@ -2231,6 +2241,9 @@
     if (elements.slidesBtn) {
       elements.slidesBtn.addEventListener('click', openSlides);
     }
+    if (elements.translateBtn) {
+      elements.translateBtn.addEventListener('click', toggleTranslation);
+    }
     elements.themeToggle.addEventListener('click', toggleTheme);
 
     if (elements.settingsBtn) {
@@ -2425,6 +2438,7 @@
   function init() {
     initTheme();
     bindEvents();
+    initTranslation();
     setupKeyboardShortcuts();
     setupDragDrop();
     setupScrollObserver();
@@ -2448,6 +2462,194 @@
         })
         .catch(err => console.warn('Failed to get platform:', err));
     }
+  }
+
+  // ============================================
+  // Translation
+  // ============================================
+  function getTranslatableElements() {
+    const container = elements.markdownBody;
+    if (!container) return [];
+    const els = container.querySelectorAll('p, li, h1, h2, h3, h4, h5, h6, blockquote');
+    const result = [];
+    els.forEach(el => {
+      if (el.classList.contains('translation')) return;
+      if (el.querySelector('pre, .katex, .mermaid')) return;
+      const text = el.textContent.trim();
+      if (text) result.push(el);
+    });
+    return result;
+  }
+
+  function showTranslationLoading() {
+    if (!elements.markdownBody) return;
+    hideTranslationLoading();
+    const bar = document.createElement('div');
+    bar.id = 'translationLoadingBar';
+    bar.className = 'translation-loading-bar';
+    bar.innerHTML = '<span class="translation-loading-spinner"></span>正在翻译...';
+    elements.markdownBody.insertBefore(bar, elements.markdownBody.firstChild);
+  }
+
+  function hideTranslationLoading() {
+    const bar = document.getElementById('translationLoadingBar');
+    if (bar) bar.remove();
+  }
+
+  function insertTranslation(originalEl, translation) {
+    const tagName = originalEl.tagName.toLowerCase();
+    const translatedEl = document.createElement(tagName);
+    translatedEl.className = 'translation';
+    translatedEl.textContent = translation;
+    originalEl.parentNode.insertBefore(translatedEl, originalEl.nextSibling);
+  }
+
+  function clearTranslations() {
+    if (elements.markdownBody) {
+      elements.markdownBody.querySelectorAll('.translation').forEach(el => el.remove());
+    }
+    state.isTranslated = false;
+    if (elements.translateBtn) {
+      elements.translateBtn.title = '翻译';
+      elements.translateBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+      </svg>`;
+    }
+    hideSelectionToolbar();
+  }
+
+  async function translateFullPage() {
+    const els = getTranslatableElements();
+    if (els.length === 0) return;
+
+    showTranslationLoading();
+
+    if (elements.translateBtn) {
+      elements.translateBtn.disabled = true;
+      elements.translateBtn.title = '翻译中...';
+    }
+
+    try {
+      const texts = els.map(el => el.textContent.trim());
+      const translations = await invoke('translate_text', {
+        texts: texts,
+        targetLang: 'zh-CN'
+      });
+
+      for (let i = 0; i < els.length; i++) {
+        if (translations[i] && translations[i] !== texts[i]) {
+          insertTranslation(els[i], translations[i]);
+        }
+      }
+
+      state.isTranslated = true;
+      if (elements.translateBtn) {
+        elements.translateBtn.title = '清除译文';
+        elements.translateBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
+      }
+    } catch (err) {
+      showError('翻译失败: ' + err);
+    } finally {
+      hideTranslationLoading();
+      if (elements.translateBtn) {
+        elements.translateBtn.disabled = false;
+      }
+    }
+  }
+
+  function toggleTranslation() {
+    if (state.isTranslated) {
+      clearTranslations();
+    } else {
+      translateFullPage();
+    }
+  }
+
+  let selectionToolbar = null;
+
+  function createSelectionToolbar() {
+    if (selectionToolbar) return;
+    selectionToolbar = document.createElement('div');
+    selectionToolbar.className = 'translation-toolbar';
+    selectionToolbar.style.display = 'none';
+    selectionToolbar.innerHTML = `<button id="translateSelectionBtn">翻译</button>`;
+    document.body.appendChild(selectionToolbar);
+
+    selectionToolbar.querySelector('#translateSelectionBtn').addEventListener('click', async () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+
+      const range = selection.getRangeAt(0);
+      const node = range.commonAncestorContainer;
+      const el = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+
+      let targetEl = el.closest('p, li, h1, h2, h3, h4, h5, h6, blockquote');
+      if (!targetEl) return;
+      if (targetEl.querySelector('pre, .katex, .mermaid')) return;
+      if (targetEl.closest('.translation')) return;
+
+      hideSelectionToolbar();
+
+      const spinner = document.createElement('span');
+      spinner.className = 'translation-spinner';
+      targetEl.appendChild(spinner);
+
+      try {
+        const text = targetEl.textContent.trim();
+        const translations = await invoke('translate_text', {
+          texts: [text],
+          target_lang: 'zh-CN'
+        });
+        if (translations[0] && translations[0] !== text) {
+          insertTranslation(targetEl, translations[0]);
+        }
+      } catch (err) {
+        showError('翻译失败: ' + err);
+      } finally {
+        spinner.remove();
+      }
+    });
+  }
+
+  function showSelectionToolbar(rect) {
+    if (!selectionToolbar) createSelectionToolbar();
+    selectionToolbar.style.display = 'flex';
+    selectionToolbar.style.left = (rect.left + rect.width / 2 - 30) + 'px';
+    selectionToolbar.style.top = (rect.top - 40) + 'px';
+  }
+
+  function hideSelectionToolbar() {
+    if (selectionToolbar) {
+      selectionToolbar.style.display = 'none';
+    }
+  }
+
+  function initTranslation() {
+    createSelectionToolbar();
+
+    document.addEventListener('mouseup', () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) {
+        setTimeout(() => hideSelectionToolbar(), 150);
+        return;
+      }
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        showSelectionToolbar(rect);
+      }
+    });
+
+    document.addEventListener('mousedown', (e) => {
+      if (selectionToolbar && !selectionToolbar.contains(e.target)) {
+        setTimeout(() => {
+          const selection = window.getSelection();
+          if (!selection || selection.isCollapsed) {
+            hideSelectionToolbar();
+          }
+        }, 200);
+      }
+    });
   }
 
   // Run when DOM is ready

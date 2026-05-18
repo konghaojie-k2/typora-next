@@ -1088,6 +1088,97 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
     Ok(cleaned.to_string())
 }
 
+/// Translate multiple text segments using AI
+#[tauri::command]
+async fn translate_text(texts: Vec<String>, target_lang: String, app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    if texts.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let config = get_config(app)?;
+    let api_key = config.api_key
+        .filter(|k| !k.is_empty())
+        .ok_or("未设置 API Key，请在设置中配置")?;
+
+    let provider = config.ai_provider.unwrap_or_default();
+    let base_url = config.ai_base_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
+            AiProvider::Openai => "https://api.openai.com".to_string(),
+        });
+
+    let model = config.model
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| match provider {
+            AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
+            AiProvider::Openai => "gpt-4o-mini".to_string(),
+        });
+
+    let joined_texts = texts.iter().enumerate()
+        .map(|(i, text)| format!("段落 {}:\n{}", i + 1, text))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+
+    let prompt = format!(
+        "请将以下文本翻译成 {}。保持 Markdown 格式、代码块标签和特殊符号不变。按顺序逐条返回译文，每条之间用 ---TRANSLATION--- 分隔。\n\n{}",
+        target_lang, joined_texts
+    );
+
+    let (response, is_anthropic) = match provider {
+        AiProvider::Anthropic => {
+            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, true)
+        }
+        AiProvider::Openai => {
+            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, false)
+        }
+    };
+
+    let json: serde_json::Value = response.into_json()
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let content = if is_anthropic {
+        json["content"][0]["text"].as_str()
+    } else {
+        json["choices"][0]["message"]["content"].as_str()
+    }.ok_or("响应中没有内容")?;
+
+    let translations: Vec<String> = content
+        .split("---TRANSLATION---")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if translations.len() != texts.len() {
+        return Ok(texts);
+    }
+
+    Ok(translations)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1169,7 +1260,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
-            fix_mermaid, get_config, set_config, test_llm_config, export_word,
+            fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
             open_slides_window, get_platform, show_in_folder
         ])

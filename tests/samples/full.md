@@ -65,11 +65,11 @@ Reference-style link to [GitHub][github].
 
 [github]: https://github.com
 
-![Sample Image](https://via.placeholder.com/150 "Placeholder")
+![Sample Image](https://picsum.photos/seed/sample1/150/150 "Placeholder")
 
 ### Additional Image Tests
 
-![Medium Image](https://via.placeholder.com/200x100 "Medium sized")
+![Medium Image](https://picsum.photos/seed/sample2/200/100 "Medium sized")
 
 ![Missing Local](./nonexistent.png "This image does not exist")
 
@@ -319,6 +319,6 @@ def merge_sort(arr):
 | Code | `code` | ```code block``` |
 | Math | $x^2$ | $$x^2$$ |
 | Link | [url](https://example.com) | - |
-| Image | ![alt](https://via.placeholder.com/50) | - |
+| Image | ![alt](https://picsum.photos/seed/sample3/50/50) | - |
 
 **End of comprehensive test document.**

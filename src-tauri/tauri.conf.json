@@ -38,6 +38,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
+    "resources": [
+      "bin/md2docx_service-x86_64-pc-windows-gnu.exe"
+    ],
     "fileAssociations": [
       {
         "ext": ["md", "markdown"],

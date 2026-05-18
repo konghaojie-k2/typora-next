@@ -2162,3 +2162,75 @@ pre.mermaid .download-btn {
 [data-theme="dark"] .download-btn:hover {
   background: rgba(220, 53, 69, 1);
 }
+
+/* ============================================
+   Translation
+   ============================================ */
+.translation {
+  color: var(--color-text-secondary);
+  margin-top: 8px;
+}
+
+.translation-toolbar {
+  position: absolute;
+  z-index: 100;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  padding: 4px 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.translation-toolbar button {
+  padding: 4px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+
+.translation-toolbar button:hover {
+  background: var(--color-bg-hover);
+}
+
+.translation-spinner {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-text-secondary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.translation-loading-bar {
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  margin-bottom: 16px;
+}
+
+.translation-loading-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--color-text-secondary);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
