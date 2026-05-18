@@ -2474,6 +2474,7 @@
     const result = [];
     els.forEach(el => {
       if (el.classList.contains('translation')) return;
+      if (el.nextElementSibling && el.nextElementSibling.classList.contains('translation')) return;
       if (el.querySelector('pre, .katex, .mermaid')) return;
       const text = el.textContent.trim();
       if (text) result.push(el);
@@ -2505,6 +2506,10 @@
   }
 
   function clearTranslations() {
+    if (translationObserver) {
+      translationObserver.disconnect();
+      translationObserver = null;
+    }
     if (elements.markdownBody) {
       elements.markdownBody.querySelectorAll('.translation').forEach(el => el.remove());
     }
@@ -2518,40 +2523,96 @@
     hideSelectionToolbar();
   }
 
-  async function translateFullPage() {
-    const els = getTranslatableElements();
+  async function translateElementBatch(els) {
     if (els.length === 0) return;
+    const texts = els.map(el => el.textContent.trim());
+    const currentPath = state.tabs[state.activeTab]?.path || '';
+    const translations = await invoke('translate_text', {
+      texts: texts,
+      targetLang: 'zh-CN',
+      filePath: currentPath
+    });
+    for (let i = 0; i < els.length; i++) {
+      if (translations[i] && translations[i] !== texts[i]) {
+        insertTranslation(els[i], translations[i]);
+      }
+    }
+  }
+
+  function setupLazyTranslation(els) {
+    if (translationObserver) {
+      translationObserver.disconnect();
+    }
+
+    let debounceTimer = null;
+    const pendingEls = [];
+
+    translationObserver = new IntersectionObserver((entries) => {
+      const newlyVisible = entries
+        .filter(e => e.isIntersecting)
+        .map(e => e.target);
+
+      if (newlyVisible.length === 0) return;
+
+      pendingEls.push(...newlyVisible);
+      newlyVisible.forEach(el => translationObserver.unobserve(el));
+
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        const batch = pendingEls.splice(0, pendingEls.length);
+        if (batch.length > 0) {
+          try {
+            await translateElementBatch(batch);
+          } catch (err) {
+            showError('翻译失败: ' + err);
+          }
+        }
+      }, 300);
+    }, {
+      rootMargin: '300px 0px',
+      threshold: 0
+    });
+
+    els.forEach(el => translationObserver.observe(el));
+  }
+
+  async function translateFullPage() {
+    const allEls = getTranslatableElements();
+    if (allEls.length === 0) return;
 
     showTranslationLoading();
-
     if (elements.translateBtn) {
       elements.translateBtn.disabled = true;
       elements.translateBtn.title = '翻译中...';
     }
 
     try {
-      const texts = els.map(el => el.textContent.trim());
-      const currentPath = state.tabs[state.activeTab]?.path || '';
-      const translations = await invoke('translate_text', {
-        texts: texts,
-        targetLang: 'zh-CN',
-        filePath: currentPath
+      const viewportEls = allEls.filter(el => {
+        const rect = el.getBoundingClientRect();
+        return rect.top < window.innerHeight && rect.bottom > 0;
       });
 
-      for (let i = 0; i < els.length; i++) {
-        if (translations[i] && translations[i] !== texts[i]) {
-          insertTranslation(els[i], translations[i]);
-        }
+      if (viewportEls.length > 0) {
+        await translateElementBatch(viewportEls);
       }
 
+      hideTranslationLoading();
       state.isTranslated = true;
       if (elements.translateBtn) {
+        elements.translateBtn.disabled = false;
         elements.translateBtn.title = '清除译文';
         elements.translateBtn.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>`;
       }
+
+      const remainingEls = allEls.filter(el => {
+        const sibling = el.nextElementSibling;
+        return !sibling || !sibling.classList.contains('translation');
+      });
+      if (remainingEls.length > 0) {
+        setupLazyTranslation(remainingEls);
+      }
     } catch (err) {
       showError('翻译失败: ' + err);
-    } finally {
       hideTranslationLoading();
       if (elements.translateBtn) {
         elements.translateBtn.disabled = false;
@@ -2567,6 +2628,7 @@
     }
   }
 
+  let translationObserver = null;
   let selectionToolbar = null;
 
   function createSelectionToolbar() {
