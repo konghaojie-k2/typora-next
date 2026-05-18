@@ -1290,12 +1290,18 @@ async fn translate_text(
 struct Annotation {
     id: String,
     text: String,
-    #[serde(rename = "textHash")]
+    #[serde(rename = "textHash", default)]
     text_hash: String,
+    #[serde(default = "default_color")]
     color: String,
+    #[serde(default)]
     note: String,
     #[serde(rename = "createdAt")]
     created_at: String,
+}
+
+fn default_color() -> String {
+    "#ffeb3b".to_string()
 }
 
 fn get_annotations_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
