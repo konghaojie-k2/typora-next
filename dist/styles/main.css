@@ -2171,7 +2171,7 @@ pre.mermaid .download-btn {
   margin-top: 8px;
 }
 
-.translation-toolbar {
+.selection-toolbar {
   position: absolute;
   z-index: 100;
   background: var(--color-bg-primary);
@@ -2183,7 +2183,7 @@ pre.mermaid .download-btn {
   gap: 4px;
 }
 
-.translation-toolbar button {
+.selection-toolbar button {
   padding: 4px 8px;
   background: transparent;
   border: none;
@@ -2193,8 +2193,20 @@ pre.mermaid .download-btn {
   cursor: pointer;
 }
 
-.translation-toolbar button:hover {
+.selection-toolbar button:hover {
   background: var(--color-bg-hover);
+}
+
+.annotation-highlight {
+  background-color: #ffeb3b;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.annotation-highlight:hover {
+  filter: brightness(0.95);
 }
 
 .translation-spinner {

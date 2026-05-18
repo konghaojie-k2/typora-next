@@ -1282,6 +1282,115 @@ async fn translate_text(
     Ok(result)
 }
 
+// ============================================
+// Annotations
+// ============================================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+struct Annotation {
+    id: String,
+    text: String,
+    #[serde(rename = "textHash")]
+    text_hash: String,
+    color: String,
+    note: String,
+    #[serde(rename = "createdAt")]
+    created_at: String,
+}
+
+fn get_annotations_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let data_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    let dir = data_dir.join("annotations");
+    let _ = fs::create_dir_all(&dir);
+    Ok(dir)
+}
+
+fn annotations_file_path(app: &tauri::AppHandle, file_path: &str) -> Result<PathBuf, String> {
+    let dir = get_annotations_dir(app)?;
+    let file_hash = format!("{:016x}", {
+        let mut hasher = DefaultHasher::new();
+        file_path.hash(&mut hasher);
+        hasher.finish()
+    });
+    Ok(dir.join(format!("{}.json", file_hash)))
+}
+
+fn load_annotations(app: &tauri::AppHandle, file_path: &str) -> Result<Vec<Annotation>, String> {
+    let path = annotations_file_path(app, file_path)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("读取批注失败: {}", e))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析批注失败: {}", e))?;
+    match value.get("annotations") {
+        Some(arr) => {
+            serde_json::from_value(arr.clone()).map_err(|e| format!("解析批注数组失败: {}", e))
+        }
+        None => Ok(Vec::new()),
+    }
+}
+
+fn save_annotations_file(
+    app: &tauri::AppHandle,
+    file_path: &str,
+    annotations: &[Annotation],
+) -> Result<(), String> {
+    let path = annotations_file_path(app, file_path)?;
+    let value = serde_json::json!({ "annotations": annotations });
+    let content =
+        serde_json::to_string_pretty(&value).map_err(|e| format!("序列化批注失败: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("写入批注失败: {}", e))
+}
+
+#[tauri::command]
+async fn get_annotations(
+    file_path: String,
+    app: tauri::AppHandle,
+) -> Result<Vec<Annotation>, String> {
+    load_annotations(&app, &file_path)
+}
+
+#[tauri::command]
+async fn add_annotation(
+    file_path: String,
+    mut annotation: Annotation,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    annotation.text_hash = text_hash(&annotation.text);
+    let mut annotations = load_annotations(&app, &file_path)?;
+    annotations.push(annotation);
+    save_annotations_file(&app, &file_path, &annotations)
+}
+
+#[tauri::command]
+async fn delete_annotation(
+    file_path: String,
+    id: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut annotations = load_annotations(&app, &file_path)?;
+    annotations.retain(|a| a.id != id);
+    save_annotations_file(&app, &file_path, &annotations)
+}
+
+#[tauri::command]
+async fn update_annotation_note(
+    file_path: String,
+    id: String,
+    note: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let mut annotations = load_annotations(&app, &file_path)?;
+    if let Some(ann) = annotations.iter_mut().find(|a| a.id == id) {
+        ann.note = note;
+    }
+    save_annotations_file(&app, &file_path, &annotations)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1365,7 +1474,8 @@ pub fn run() {
             open_folder_dialog, list_directory, watch_file, unwatch_file,
             fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
-            open_slides_window, get_platform, show_in_folder
+            open_slides_window, get_platform, show_in_folder,
+            get_annotations, add_annotation, delete_annotation, update_annotation_note
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
