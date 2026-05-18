@@ -1,4 +1,6 @@
+use std::collections::hash_map::DefaultHasher;
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
@@ -1088,14 +1090,100 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
     Ok(cleaned.to_string())
 }
 
+// ============================================
+// Translation Cache
+// ============================================
+
+fn text_hash(text: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    text.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn cache_key(file_path: &str, target_lang: &str, text: &str) -> String {
+    format!("{}|{}|{}", file_path, target_lang, text_hash(text))
+}
+
+fn get_translation_cache_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    let cache_dir = app
+        .path()
+        .app_local_data_dir()
+        .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+    Ok(cache_dir.join("translation_cache.json"))
+}
+
+fn load_translation_cache(
+    app: &tauri::AppHandle,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    let path = get_translation_cache_path(app)?;
+    if !path.exists() {
+        return Ok(serde_json::Map::new());
+    }
+    let content = fs::read_to_string(&path).map_err(|e| format!("读取翻译缓存失败: {}", e))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析翻译缓存失败: {}", e))?;
+    match value {
+        serde_json::Value::Object(map) => Ok(map),
+        _ => Ok(serde_json::Map::new()),
+    }
+}
+
+fn save_translation_cache(
+    app: &tauri::AppHandle,
+    cache: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let path = get_translation_cache_path(app)?;
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let value = serde_json::Value::Object(cache.clone());
+    let content = serde_json::to_string_pretty(&value)
+        .map_err(|e| format!("序列化翻译缓存失败: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("写入翻译缓存失败: {}", e))
+}
+
 /// Translate multiple text segments using AI
 #[tauri::command]
-async fn translate_text(texts: Vec<String>, target_lang: String, app: tauri::AppHandle) -> Result<Vec<String>, String> {
+async fn translate_text(
+    texts: Vec<String>,
+    target_lang: String,
+    file_path: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<Vec<String>, String> {
     if texts.is_empty() {
         return Ok(Vec::new());
     }
 
-    let config = get_config(app)?;
+    let mut cache = if file_path.is_some() {
+        load_translation_cache(&app).unwrap_or_else(|_| serde_json::Map::new())
+    } else {
+        serde_json::Map::new()
+    };
+
+    let mut result = vec![String::new(); texts.len()];
+    let mut uncached_indices = Vec::new();
+    let mut uncached_texts = Vec::new();
+
+    if let Some(ref path) = file_path {
+        for (i, text) in texts.iter().enumerate() {
+            let key = cache_key(path, &target_lang, text);
+            if let Some(cached) = cache.get(&key).and_then(|v| v.as_str()) {
+                result[i] = cached.to_string();
+            } else {
+                uncached_indices.push(i);
+                uncached_texts.push(text.clone());
+            }
+        }
+    } else {
+        uncached_indices = (0..texts.len()).collect();
+        uncached_texts = texts.clone();
+    }
+
+    if uncached_texts.is_empty() {
+        return Ok(result);
+    }
+
+    let config = get_config(app.clone())?;
     let api_key = config.api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key，请在设置中配置")?;
@@ -1115,7 +1203,7 @@ async fn translate_text(texts: Vec<String>, target_lang: String, app: tauri::App
             AiProvider::Openai => "gpt-4o-mini".to_string(),
         });
 
-    let joined_texts = texts.iter().enumerate()
+    let joined_texts = uncached_texts.iter().enumerate()
         .map(|(i, text)| format!("段落 {}:\n{}", i + 1, text))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -1166,17 +1254,32 @@ async fn translate_text(texts: Vec<String>, target_lang: String, app: tauri::App
         json["choices"][0]["message"]["content"].as_str()
     }.ok_or("响应中没有内容")?;
 
-    let translations: Vec<String> = content
+    let api_translations: Vec<String> = content
         .split("---TRANSLATION---")
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect();
 
-    if translations.len() != texts.len() {
-        return Ok(texts);
+    if api_translations.len() != uncached_texts.len() {
+        for &i in &uncached_indices {
+            result[i] = texts[i].clone();
+        }
+        return Ok(result);
     }
 
-    Ok(translations)
+    for (j, &i) in uncached_indices.iter().enumerate() {
+        result[i] = api_translations[j].clone();
+        if let Some(ref path) = file_path {
+            let key = cache_key(path, &target_lang, &texts[i]);
+            cache.insert(key, serde_json::Value::String(api_translations[j].clone()));
+        }
+    }
+
+    if file_path.is_some() {
+        let _ = save_translation_cache(&app, &cache);
+    }
+
+    Ok(result)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

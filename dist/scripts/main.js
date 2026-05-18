@@ -2531,9 +2531,11 @@
 
     try {
       const texts = els.map(el => el.textContent.trim());
+      const currentPath = state.tabs[state.activeTab]?.path || '';
       const translations = await invoke('translate_text', {
         texts: texts,
-        targetLang: 'zh-CN'
+        targetLang: 'zh-CN',
+        filePath: currentPath
       });
 
       for (let i = 0; i < els.length; i++) {
@@ -2596,9 +2598,11 @@
 
       try {
         const text = targetEl.textContent.trim();
+        const currentPath = state.tabs[state.activeTab]?.path || '';
         const translations = await invoke('translate_text', {
           texts: [text],
-          target_lang: 'zh-CN'
+          targetLang: 'zh-CN',
+          filePath: currentPath
         });
         if (translations[0] && translations[0] !== text) {
           insertTranslation(targetEl, translations[0]);
