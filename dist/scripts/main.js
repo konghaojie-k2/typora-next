@@ -522,7 +522,9 @@
       initWikiLinks();
       initObsidianEmbeds(baseDir);
       initDownloadButtons();
-      applyAnnotations();
+      console.log('[DEBUG renderMarkdown] about to call applyAnnotations');
+      await applyAnnotations();
+      console.log('[DEBUG renderMarkdown] applyAnnotations done');
 
       // Reset translation state on re-render
       state.isTranslated = false;
@@ -2631,6 +2633,16 @@
 
   let translationObserver = null;
   let selectionToolbar = null;
+  let lastAnnotationId = null;
+
+  const ANNOTATION_COLORS = [
+    { color: '#ffeb3b', label: '黄' },
+    { color: '#a5d6a7', label: '绿' },
+    { color: '#90caf9', label: '蓝' },
+    { color: '#ce93d8', label: '紫' },
+    { color: '#ef9a9a', label: '红' },
+  ];
+  let currentAnnotationStyle = 'highlight';
 
   function createSelectionToolbar() {
     if (selectionToolbar) return;
@@ -2638,70 +2650,189 @@
     selectionToolbar.className = 'selection-toolbar';
     selectionToolbar.style.display = 'none';
     selectionToolbar.innerHTML = `
-      <button id="highlightBtn" title="高亮">🖍️</button>
-      <button id="annotateBtn" title="批注">💬</button>
-      <button id="translateSelectionBtn">翻译</button>
+      <div class="toolbar-row colors">
+        ${ANNOTATION_COLORS.map(c => `<button class="color-btn" data-color="${c.color}" style="background:${c.color}" title="${c.label}"></button>`).join('')}
+      </div>
+      <div class="toolbar-row actions">
+        <button id="styleHighlight" title="底纹" class="active">▐</button>
+        <button id="styleUnderline" title="下划线">U̲</button>
+        <button id="annotateBtn" title="添加批注">💬</button>
+        <button id="deleteAnnotationBtn" title="删除">🗑️</button>
+        <button id="translateSelectionBtn" title="翻译">译</button>
+      </div>
     `;
     document.body.appendChild(selectionToolbar);
 
-    selectionToolbar.querySelector('#highlightBtn').addEventListener('click', async () => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) return;
-      const text = selection.toString().trim();
-      if (!text) return;
+    const styleHighlightBtn = selectionToolbar.querySelector('#styleHighlight');
+    const styleUnderlineBtn = selectionToolbar.querySelector('#styleUnderline');
 
-      hideSelectionToolbar();
-      const range = selection.getRangeAt(0);
-      const id = generateId();
-      const mark = highlightRange(range, '#ffeb3b', id);
-      if (!mark) return;
+    async function setStyle(style) {
+      currentAnnotationStyle = style;
+      styleHighlightBtn.classList.toggle('active', style === 'highlight');
+      styleUnderlineBtn.classList.toggle('active', style === 'underline');
 
-      try {
-        const currentPath = state.tabs[state.activeTab]?.path || '';
-        await invoke('add_annotation', {
-          filePath: currentPath,
-          annotation: {
-            id: id,
-            text: text,
-            color: '#ffeb3b',
-            note: '',
-            createdAt: new Date().toISOString()
+      // If editing existing annotation, update its style
+      if (lastAnnotationId) {
+        const wrappers = document.querySelectorAll(`[data-annotation-id="${lastAnnotationId}"]`);
+        if (wrappers.length > 0) {
+          let currentColor = '#ffeb3b';
+          const firstEl = wrappers[0];
+          if (firstEl.style.backgroundColor) {
+            currentColor = firstEl.style.backgroundColor;
+          } else if (firstEl.style.borderBottom) {
+            const match = firstEl.style.borderBottom.match(/solid\s+(.+)/);
+            if (match) currentColor = match[1];
           }
-        });
-      } catch (err) {
-        showError('保存高亮失败: ' + err);
+
+          wrappers.forEach(el => {
+            const newTagName = style === 'underline' ? 'span' : 'mark';
+            const newClassName = style === 'underline' ? 'annotation-underline' : 'annotation-highlight';
+            const newEl = document.createElement(newTagName);
+            newEl.className = newClassName;
+            newEl.dataset.annotationId = lastAnnotationId;
+            if (el.dataset.note) newEl.dataset.note = el.dataset.note;
+            if (style === 'underline') {
+              newEl.style.borderBottom = '2px solid ' + currentColor;
+            } else {
+              newEl.style.backgroundColor = currentColor;
+            }
+
+            while (el.firstChild) {
+              newEl.appendChild(el.firstChild);
+            }
+            el.parentNode.replaceChild(newEl, el);
+          });
+
+          try {
+            const currentPath = state.tabs[state.activeTab]?.path || '';
+            await invoke('update_annotation', {
+              filePath: currentPath,
+              id: lastAnnotationId,
+              style: style
+            });
+          } catch (err) {
+            showError('更新样式失败: ' + err);
+          }
+        }
       }
+    }
+
+    styleHighlightBtn.addEventListener('click', () => setStyle('highlight'));
+    styleUnderlineBtn.addEventListener('click', () => setStyle('underline'));
+
+    selectionToolbar.querySelectorAll('.color-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const color = btn.dataset.color;
+
+        // If editing existing annotation, update its color
+        if (lastAnnotationId) {
+          const wrappers = document.querySelectorAll(`[data-annotation-id="${lastAnnotationId}"]`);
+          if (wrappers.length > 0) {
+            const currentStyle = wrappers[0].classList.contains('annotation-underline') ? 'underline' : 'highlight';
+            wrappers.forEach(el => {
+              if (currentStyle === 'underline') {
+                el.style.borderBottom = '2px solid ' + color;
+              } else {
+                el.style.backgroundColor = color;
+              }
+            });
+            try {
+              const currentPath = state.tabs[state.activeTab]?.path || '';
+              await invoke('update_annotation', {
+                filePath: currentPath,
+                id: lastAnnotationId,
+                color: color
+              });
+            } catch (err) {
+              showError('更新颜色失败: ' + err);
+            }
+          }
+          return;
+        }
+
+        const selection = window.getSelection();
+        if (!selection || selection.isCollapsed) return;
+        const text = selection.toString().trim();
+        if (!text) return;
+
+        const range = selection.getRangeAt(0);
+        const id = generateId();
+        const el = highlightRange(range, color, id, currentAnnotationStyle);
+        if (!el) return;
+        lastAnnotationId = id;
+        // Clear selection but keep toolbar visible for annotation
+        selection.removeAllRanges();
+
+        try {
+          const currentPath = state.tabs[state.activeTab]?.path || '';
+          await invoke('add_annotation', {
+            filePath: currentPath,
+            annotation: {
+              id: id,
+              text: text,
+              color: color,
+              style: currentAnnotationStyle,
+              note: '',
+              createdAt: new Date().toISOString()
+            }
+          });
+        } catch (err) {
+          showError('保存失败: ' + err);
+        }
+      });
     });
 
     selectionToolbar.querySelector('#annotateBtn').addEventListener('click', async () => {
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) return;
-      const text = selection.toString().trim();
-      if (!text) return;
+      if (!lastAnnotationId) {
+        showToast('请先选择颜色添加高亮或下划线');
+        return;
+      }
 
-      hideSelectionToolbar();
       const note = prompt('批注内容:', '');
       if (note === null) return;
 
-      const range = selection.getRangeAt(0);
-      const id = generateId();
-      const mark = highlightRange(range, '#ffe082', id);
-      if (!mark) return;
+      try {
+        const currentPath = state.tabs[state.activeTab]?.path || '';
+        await invoke('update_annotation_note', {
+          filePath: currentPath,
+          id: lastAnnotationId,
+          note: note
+        });
+        // Update DOM tooltip
+        const wrappers = document.querySelectorAll(`[data-annotation-id="${lastAnnotationId}"]`);
+        wrappers.forEach(el => {
+          el.dataset.note = note;
+        });
+        hideSelectionToolbar();
+      } catch (err) {
+        showError('保存批注失败: ' + err);
+      }
+    });
+
+    selectionToolbar.querySelector('#deleteAnnotationBtn').addEventListener('click', async () => {
+      if (!lastAnnotationId) return;
+      if (!confirm('确定删除此标注？')) return;
 
       try {
         const currentPath = state.tabs[state.activeTab]?.path || '';
-        await invoke('add_annotation', {
+        await invoke('delete_annotation', {
           filePath: currentPath,
-          annotation: {
-            id: id,
-            text: text,
-            color: '#ffe082',
-            note: note,
-            createdAt: new Date().toISOString()
+          id: lastAnnotationId
+        });
+        // Remove from DOM: unwrap all annotation elements
+        const wrappers = document.querySelectorAll(`[data-annotation-id="${lastAnnotationId}"]`);
+        wrappers.forEach(el => {
+          if (el.parentNode) {
+            const parent = el.parentNode;
+            while (el.firstChild) {
+              parent.insertBefore(el.firstChild, el);
+            }
+            parent.removeChild(el);
           }
         });
+        hideSelectionToolbar();
       } catch (err) {
-        showError('保存批注失败: ' + err);
+        showError('删除失败: ' + err);
       }
     });
 
@@ -2743,24 +2874,93 @@
     });
   }
 
+  function findTextRange(container, searchText) {
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      textNodes.push(node);
+    }
+
+    let concat = '';
+    const boundaries = [0];
+    for (const n of textNodes) {
+      concat += n.textContent;
+      boundaries.push(concat.length);
+    }
+
+    const idx = concat.indexOf(searchText);
+    if (idx === -1) return null;
+
+    const endIdx = idx + searchText.length;
+    let startNode = null, startOffset = 0;
+    let endNode = null, endOffset = 0;
+
+    for (let i = 0; i < textNodes.length; i++) {
+      if (idx >= boundaries[i] && idx < boundaries[i + 1]) {
+        startNode = textNodes[i];
+        startOffset = idx - boundaries[i];
+      }
+      if (endIdx > boundaries[i] && endIdx <= boundaries[i + 1]) {
+        endNode = textNodes[i];
+        endOffset = endIdx - boundaries[i];
+      }
+      if (startNode && endNode) break;
+    }
+
+    if (!startNode || !endNode) return null;
+    const range = document.createRange();
+    range.setStart(startNode, startOffset);
+    range.setEnd(endNode, endOffset);
+    return range;
+  }
+
   function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
   }
 
-  function highlightRange(range, color, annotationId) {
-    const mark = document.createElement('mark');
-    mark.className = 'annotation-highlight';
-    mark.dataset.annotationId = annotationId;
-    mark.style.backgroundColor = color;
+  function highlightRange(range, color, annotationId, style) {
+    const tagName = style === 'underline' ? 'span' : 'mark';
+    const className = style === 'underline' ? 'annotation-underline' : 'annotation-highlight';
+    const el = document.createElement(tagName);
+    el.className = className;
+    el.dataset.annotationId = annotationId;
+    if (style === 'underline') {
+      el.style.borderBottom = '2px solid ' + color;
+    } else {
+      el.style.backgroundColor = color;
+    }
 
     try {
-      range.surroundContents(mark);
-      return mark;
+      range.surroundContents(el);
+      return el;
     } catch (e) {
+      // Selection spans multiple block elements; wrap each text node individually
       const contents = range.extractContents();
-      mark.appendChild(contents);
-      range.insertNode(mark);
-      return mark;
+      const walker = document.createTreeWalker(contents, NodeFilter.SHOW_TEXT);
+      const nodesToWrap = [];
+      let node;
+      while ((node = walker.nextNode())) {
+        nodesToWrap.push(node);
+      }
+
+      let firstWrapper = null;
+      for (const textNode of nodesToWrap) {
+        const wrapper = document.createElement(tagName);
+        wrapper.className = className;
+        wrapper.dataset.annotationId = annotationId;
+        if (style === 'underline') {
+          wrapper.style.borderBottom = '2px solid ' + color;
+        } else {
+          wrapper.style.backgroundColor = color;
+        }
+        wrapper.textContent = textNode.textContent;
+        if (!firstWrapper) firstWrapper = wrapper;
+        textNode.parentNode.replaceChild(wrapper, textNode);
+      }
+
+      range.insertNode(contents);
+      return firstWrapper;
     }
   }
 
@@ -2776,31 +2976,20 @@
       if (!container) return;
 
       for (const ann of annotations) {
-        const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
-        let node;
-        while ((node = walker.nextNode())) {
-          const idx = node.textContent.indexOf(ann.text);
-          if (idx === -1) continue;
+        const range = findTextRange(container, ann.text);
+        if (!range) continue;
 
-          const range = document.createRange();
-          range.setStart(node, idx);
-          range.setEnd(node, idx + ann.text.length);
+        const style = ann.style || 'highlight';
+        highlightRange(range, ann.color || '#ffeb3b', ann.id, style);
 
-          const mark = document.createElement('mark');
-          mark.className = 'annotation-highlight';
-          mark.dataset.annotationId = ann.id;
-          mark.style.backgroundColor = ann.color || '#ffeb3b';
-
-          try {
-            range.surroundContents(mark);
-          } catch (e) {
-            // ignore cross-boundary failures
-          }
-          break;
-        }
+        // Apply note to all wrappers created for this annotation
+        const wrappers = container.querySelectorAll(`[data-annotation-id="${ann.id}"]`);
+        wrappers.forEach(el => {
+          if (ann.note) el.dataset.note = ann.note;
+        });
       }
     } catch (err) {
-      // silently fail for annotations
+      // silently fail
     }
   }
 
@@ -2812,15 +3001,60 @@
   }
 
   function hideSelectionToolbar() {
+    lastAnnotationId = null;
     if (selectionToolbar) {
       selectionToolbar.style.display = 'none';
     }
   }
 
+  let annotationTooltip = null;
+
+  function ensureAnnotationTooltip() {
+    if (annotationTooltip) return;
+    annotationTooltip = document.createElement('div');
+    annotationTooltip.className = 'annotation-tooltip';
+    annotationTooltip.style.cssText = 'position:fixed;z-index:10001;max-width:280px;padding:10px 14px;background:var(--color-bg-secondary);color:var(--color-text-primary);border:1px solid var(--color-border);border-radius:var(--radius-md);box-shadow:var(--shadow-lg);font-size:var(--font-size-sm);line-height:1.5;display:none;pointer-events:none;word-break:break-word;';
+    document.body.appendChild(annotationTooltip);
+
+    // Event delegation on markdownBody
+    elements.markdownBody.addEventListener('mouseenter', (e) => {
+      const el = e.target.closest('.annotation-highlight, .annotation-underline');
+      if (!el) return;
+      const note = el.dataset.note;
+      if (!note) return;
+      annotationTooltip.textContent = note;
+      annotationTooltip.style.display = 'block';
+      const rect = el.getBoundingClientRect();
+      annotationTooltip.style.left = rect.left + 'px';
+      annotationTooltip.style.top = (rect.bottom + 6) + 'px';
+    }, true);
+
+    elements.markdownBody.addEventListener('mouseleave', (e) => {
+      const el = e.target.closest('.annotation-highlight, .annotation-underline');
+      if (!el) return;
+      annotationTooltip.style.display = 'none';
+    }, true);
+
+    // Click annotation to show full toolbar
+    elements.markdownBody.addEventListener('click', (e) => {
+      const el = e.target.closest('.annotation-highlight, .annotation-underline');
+      if (!el) return;
+      e.stopPropagation();
+      lastAnnotationId = el.dataset.annotationId;
+      const rect = el.getBoundingClientRect();
+      showSelectionToolbar(rect);
+    });
+  }
+
   function initTranslation() {
     createSelectionToolbar();
+    ensureAnnotationTooltip();
 
-    document.addEventListener('mouseup', () => {
+    document.addEventListener('mouseup', (e) => {
+      // When clicking on an annotation, click handler shows toolbar; don't hide it here
+      if (e.target.closest('.annotation-highlight, .annotation-underline')) {
+        return;
+      }
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
         setTimeout(() => hideSelectionToolbar(), 150);
@@ -2829,12 +3063,23 @@
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
+        // Detect if selection is inside an existing annotation
+        const node = range.commonAncestorContainer;
+        const parentEl = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        const annEl = parentEl?.closest('.annotation-highlight, .annotation-underline');
+        if (annEl && annEl.dataset.annotationId) {
+          lastAnnotationId = annEl.dataset.annotationId;
+        }
         showSelectionToolbar(rect);
       }
     });
 
     document.addEventListener('mousedown', (e) => {
       if (selectionToolbar && !selectionToolbar.contains(e.target)) {
+        // Don't hide when clicking on an annotation element (will show toolbar for editing)
+        if (e.target.closest('.annotation-highlight, .annotation-underline')) {
+          return;
+        }
         setTimeout(() => {
           const selection = window.getSelection();
           if (!selection || selection.isCollapsed) {

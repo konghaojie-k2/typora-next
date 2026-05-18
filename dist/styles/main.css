@@ -2197,8 +2197,42 @@ pre.mermaid .download-btn {
   background: var(--color-bg-hover);
 }
 
+.selection-toolbar .toolbar-row {
+  display: flex;
+  gap: 4px;
+  padding: 4px 6px;
+  align-items: center;
+}
+
+.selection-toolbar .color-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 0.15s, border-color 0.15s;
+}
+
+.selection-toolbar .color-btn:hover {
+  transform: scale(1.15);
+  border-color: var(--color-text-primary);
+}
+
+.selection-toolbar .actions button {
+  min-width: 28px;
+  height: 26px;
+  font-size: 13px;
+  padding: 0 6px;
+}
+
+.selection-toolbar .actions button.active {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border);
+  font-weight: bold;
+}
+
 .annotation-highlight {
-  background-color: #ffeb3b;
   color: inherit;
   cursor: pointer;
   border-radius: 2px;
@@ -2206,7 +2240,17 @@ pre.mermaid .download-btn {
 }
 
 .annotation-highlight:hover {
-  filter: brightness(0.95);
+  filter: brightness(0.92);
+}
+
+.annotation-underline {
+  color: inherit;
+  cursor: pointer;
+  padding-bottom: 1px;
+}
+
+.annotation-underline:hover {
+  filter: brightness(0.85);
 }
 
 .translation-spinner {

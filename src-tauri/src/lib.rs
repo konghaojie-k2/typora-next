@@ -1294,6 +1294,8 @@ struct Annotation {
     text_hash: String,
     #[serde(default = "default_color")]
     color: String,
+    #[serde(default = "default_style")]
+    style: String,
     #[serde(default)]
     note: String,
     #[serde(rename = "createdAt")]
@@ -1302,6 +1304,10 @@ struct Annotation {
 
 fn default_color() -> String {
     "#ffeb3b".to_string()
+}
+
+fn default_style() -> String {
+    "highlight".to_string()
 }
 
 fn get_annotations_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -1321,22 +1327,36 @@ fn annotations_file_path(app: &tauri::AppHandle, file_path: &str) -> Result<Path
         file_path.hash(&mut hasher);
         hasher.finish()
     });
-    Ok(dir.join(format!("{}.json", file_hash)))
+    let path = dir.join(format!("{}.json", file_hash));
+    println!("[DEBUG annotations_file_path] input='{}' hash='{}' path='{}'", file_path, file_hash, path.display());
+    Ok(path)
 }
 
 fn load_annotations(app: &tauri::AppHandle, file_path: &str) -> Result<Vec<Annotation>, String> {
     let path = annotations_file_path(app, file_path)?;
     if !path.exists() {
+        println!("[DEBUG load_annotations] file not exists, returning empty. path='{}'", path.display());
         return Ok(Vec::new());
     }
     let content = fs::read_to_string(&path).map_err(|e| format!("读取批注失败: {}", e))?;
+    println!("[DEBUG load_annotations] raw content length={}, path='{}'", content.len(), path.display());
     let value: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| format!("解析批注失败: {}", e))?;
     match value.get("annotations") {
         Some(arr) => {
-            serde_json::from_value(arr.clone()).map_err(|e| format!("解析批注数组失败: {}", e))
+            let anns: Vec<Annotation> = serde_json::from_value(arr.clone())
+                .map_err(|e| format!("解析批注数组失败: {}", e))?;
+            println!("[DEBUG load_annotations] loaded {} annotations", anns.len());
+            for (i, ann) in anns.iter().enumerate() {
+                println!("[DEBUG load_annotations] #{} id='{}' text_len={} text_hash='{}' note_len={}",
+                         i, ann.id, ann.text.len(), ann.text_hash, ann.note.len());
+            }
+            Ok(anns)
         }
-        None => Ok(Vec::new()),
+        None => {
+            println!("[DEBUG load_annotations] no 'annotations' key found");
+            Ok(Vec::new())
+        },
     }
 }
 
@@ -1349,7 +1369,10 @@ fn save_annotations_file(
     let value = serde_json::json!({ "annotations": annotations });
     let content =
         serde_json::to_string_pretty(&value).map_err(|e| format!("序列化批注失败: {}", e))?;
-    fs::write(&path, content).map_err(|e| format!("写入批注失败: {}", e))
+    println!("[DEBUG save_annotations_file] writing {} annotations to '{}'", annotations.len(), path.display());
+    fs::write(&path, content).map_err(|e| format!("写入批注失败: {}", e))?;
+    println!("[DEBUG save_annotations_file] write ok");
+    Ok(())
 }
 
 #[tauri::command]
@@ -1357,7 +1380,13 @@ async fn get_annotations(
     file_path: String,
     app: tauri::AppHandle,
 ) -> Result<Vec<Annotation>, String> {
-    load_annotations(&app, &file_path)
+    println!("[DEBUG get_annotations] file_path='{}'", file_path);
+    let result = load_annotations(&app, &file_path);
+    match &result {
+        Ok(anns) => println!("[DEBUG get_annotations] returning {} annotations", anns.len()),
+        Err(e) => println!("[DEBUG get_annotations] error: {}", e),
+    }
+    result
 }
 
 #[tauri::command]
@@ -1366,7 +1395,9 @@ async fn add_annotation(
     mut annotation: Annotation,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
+    println!("[DEBUG add_annotation] file_path='{}' id='{}' text_len={}", file_path, annotation.id, annotation.text.len());
     annotation.text_hash = text_hash(&annotation.text);
+    println!("[DEBUG add_annotation] computed text_hash='{}'", annotation.text_hash);
     let mut annotations = load_annotations(&app, &file_path)?;
     annotations.push(annotation);
     save_annotations_file(&app, &file_path, &annotations)
@@ -1393,6 +1424,25 @@ async fn update_annotation_note(
     let mut annotations = load_annotations(&app, &file_path)?;
     if let Some(ann) = annotations.iter_mut().find(|a| a.id == id) {
         ann.note = note;
+    }
+    save_annotations_file(&app, &file_path, &annotations)
+}
+
+#[tauri::command]
+async fn update_annotation(
+    file_path: String,
+    id: String,
+    color: Option<String>,
+    style: Option<String>,
+    note: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    println!("[DEBUG update_annotation] id='{}' color={:?} style={:?} note_len={:?}", id, color, style, note.as_ref().map(|n| n.len()));
+    let mut annotations = load_annotations(&app, &file_path)?;
+    if let Some(ann) = annotations.iter_mut().find(|a| a.id == id) {
+        if let Some(c) = color { ann.color = c; }
+        if let Some(s) = style { ann.style = s; }
+        if let Some(n) = note { ann.note = n; }
     }
     save_annotations_file(&app, &file_path, &annotations)
 }
@@ -1481,7 +1531,7 @@ pub fn run() {
             fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
             open_slides_window, get_platform, show_in_folder,
-            get_annotations, add_annotation, delete_annotation, update_annotation_note
+            get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
