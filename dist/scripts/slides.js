@@ -174,6 +174,10 @@
 
           // Use Tauri convertFileSrc for local file access
           var finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
+          // Fix double-encoding issue (%25 indicates % was encoded again)
+          if (finalSrc && finalSrc.includes('%25')) {
+            finalSrc = decodeURIComponent(finalSrc);
+          }
           console.log('[slides WikiLink] target:', target, 'resolvedPath:', resolvedPath, 'finalSrc:', finalSrc);
 
           var imgWrapper = document.createElement('div');

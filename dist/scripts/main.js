@@ -1272,7 +1272,13 @@
 
         // Use Tauri's convertFileSrc to get a webview-safe URL
         if (convertFileSrc) {
-          const safeUrl = convertFileSrc(absolutePath);
+          // Note: convertFileSrc may double-encode non-ASCII characters in some Tauri versions
+          // Decode once to get correct URL encoding
+          let safeUrl = convertFileSrc(absolutePath);
+          // Check for double-encoding (%25 indicates % was encoded again)
+          if (safeUrl.includes('%25')) {
+            safeUrl = decodeURIComponent(safeUrl);
+          }
           img.setAttribute('src', safeUrl);
           console.log('[DEBUG] Resolved image:', src, '->', safeUrl);
         } else {
@@ -1846,7 +1852,11 @@
           const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
           console.log('[DEBUG WikiLink] convertFileSrc available:', !!convertFileSrc);
 
-          const finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
+          let finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
+          // Fix double-encoding issue (%25 indicates % was encoded again)
+          if (finalSrc.includes('%25')) {
+            finalSrc = decodeURIComponent(finalSrc);
+          }
           console.log('[DEBUG WikiLink] img.src:', finalSrc);
           img.src = finalSrc;
 
