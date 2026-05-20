@@ -1,0 +1,6 @@
+[target.x86_64-pc-windows-gnu]
+rustflags = [
+  "-C", "link-arg=-Wl,--disable-auto-image-base",
+  "-C", "link-arg=-Wl,--disable-auto-import",
+  "-C", "link-arg=-Wl,--disable-runtime-pseudo-reloc"
+]
