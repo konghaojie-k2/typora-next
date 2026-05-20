@@ -1,6 +1,11 @@
 <h1 align="center">Typora Next</h1>
 
 <p align="center">
+  <a href="README_EN.md"><img src="https://img.shields.io/badge/Language-English-blue?style=flat-square" alt="English"></a>
+  <img src="https://img.shields.io/badge/Language-中文-red?style=flat-square" alt="Chinese">
+</p>
+
+<p align="center">
   <strong>重预览、轻编辑的现代化 Markdown 预览器</strong>
 </p>
 
@@ -14,7 +19,7 @@
 
 <p align="center">
   <a href="#-快速开始"><img src="https://img.shields.io/badge/快速开始-5_分钟-blue?style=for-the-badge" alt="Quick Start"></a>
-  <a href="#-功能特性"><img src="https://img.shields.io/badge/功能-15+-purple?style=for-the-badge" alt="Features"></a>
+  <a href="#-功能特性"><img src="https://img.shields.io/badge/功能-20+-purple?style=for-the-badge" alt="Features"></a>
   <img src="https://img.shields.io/badge/开源协议-MIT-yellow?style=for-the-badge" alt="License">
 </p>
 
@@ -30,11 +35,13 @@ Typora Next 是一款面向技术文档撰写者的 Markdown 预览器。它在 
 | **数学公式** | KaTeX 驱动，支持行内 `$...$` 和块级 `$$...$$` 公式，速度比 MathJax 快 10 倍 |
 | **代码高亮** | Prism.js 本地化部署，支持 20+ 语言，带行号和一键复制按钮 |
 | **Mermaid 图表** | 支持流程图、时序图、甘特图、类图等 13 种图表类型，渲染失败可 AI 修复 |
-| **图片处理** | 本地相对路径 + 网络图片，支持 Lightbox 放大查看 |
+| **图片处理** | 本地相对路径 + 网络图片 + Obsidian WikiLink `![[image.png]]`，支持 Lightbox 放大 |
+| **划线批注** | 微信读书式批注体验，选中文本弹出工具栏，支持高亮/下划线/备注，自动持久化 |
+| **段落翻译** | 全文翻译 + 选中文本翻译，双语对照显示，结果本地缓存，视口内懒加载 |
 | **项目文件树** | 打开文件夹，侧边栏显示目录结构，支持搜索过滤 |
 | **多标签** | 单窗口多文件 Tab 切换 |
 | **主题系统** | 浅色 / 深色主题切换，基于 CSS 变量 |
-| **幻灯片放映** | Reveal.js 驱动，支持 `---`/`--` 翻页、fragment 动画、数学/图表/代码渲染 |
+| **幻灯片放映** | Reveal.js 驱动，支持 `---`/`--` 翻页、fragment 动画、WikiLink 图片渲染 |
 | **图片 Lightbox** | 点击放大查看，支持键盘导航 |
 | **任务列表交互** | 点击 checkbox 实时切换状态并写回文件 |
 | **最近打开文件** | 记录并快速访问最近打开的文档 |
@@ -172,8 +179,28 @@ graph TD
 
 - `---` 水平翻页、`--` 垂直翻页
 - `<!-- .element: class="fragment" -->` 页内动画
-- 支持数学公式、代码高亮、Mermaid 图表在幻灯片中渲染
+- 支持数学公式、代码高亮、Mermaid 图表、WikiLink 图片在幻灯片中渲染
 - `Esc` 退出放映，`O` 进入概览模式
+
+### 划线批注（微信读书式）
+
+选中文本后弹出批注工具栏：
+
+- **5 种颜色**：黄色、绿色、蓝色、粉色、紫色
+- **2 种样式**：高亮背景、下划线
+- **备注功能**：为批注添加文字说明
+- **自动持久化**：使用 `<mark>` 标签包裹，重新渲染后自动恢复所有批注
+
+### 段落翻译
+
+集成 AI 翻译能力：
+
+- **全文翻译**：一键翻译整篇文档，双语对照显示
+- **选中翻译**：仅翻译选中的文本段落
+- **本地缓存**：翻译结果缓存在本地，关闭后再次打开无需重新请求
+- **视口懒加载**：全文翻译时先翻译可见区域，滚动时批量加载剩余内容
+
+配置方式：设置面板 → 输入 API Key → 选择提供商和模型（支持 Anthropic / OpenAI 兼容 API）。
 
 ### AI 修复 Mermaid
 
@@ -192,7 +219,8 @@ graph TD
 | **Phase 3** | P2 项目管理（文件树、多标签、PDF 导出、主题系统） | 已完成 |
 | **Phase 4** | P3 增强功能（AI 修复 Mermaid、文件刷新提示、Word 导出） | 已完成 |
 | **Phase 5** | P4 差异化功能（幻灯片放映、Lightbox、任务列表交互、最近文件、Frontmatter） | 已完成 |
-| **Phase 6** | P5 Obsidian 兼容（已完成）、文档内搜索 | 进行中 |
+| **Phase 6** | P5 Obsidian 兼容（WikiLink 图片、WikiLink 链接）、批注功能、段落翻译 | 已完成 |
+| **Phase 7** | P6 文档内搜索、用户反馈入口 | 进行中 |
 
 ---
 
