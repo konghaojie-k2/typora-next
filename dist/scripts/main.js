@@ -1452,6 +1452,7 @@
         const cw = iframe.contentWindow;
         if (cw) {
           cw.__slides_sections = renderedSections;
+          cw.__slides_baseDir = tab.baseDir || '';
           if (typeof cw.__reloadSlides === 'function') {
             cw.__reloadSlides();
           } else {

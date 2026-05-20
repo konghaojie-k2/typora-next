@@ -113,7 +113,111 @@
   }
 
   /**
-   * Post-process slide content: KaTeX math, Prism code highlighting, Mermaid diagrams, fragments.
+   * Process WikiLink images: ![[image.png]]
+   * Mirrors main.js initObsidianEmbeds path resolution logic.
+   */
+  function processWikiLinkImages(container, baseDir) {
+    var embedRegex = /!\[\[([^\]]+)\]\]/g;
+    var imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'];
+    var convertFileSrc = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc;
+
+    var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
+    var textNodes = [];
+    while (walker.nextNode()) {
+      textNodes.push(walker.currentNode);
+    }
+
+    textNodes.forEach(function(node) {
+      var text = node.textContent;
+      var match;
+      embedRegex.lastIndex = 0;
+      var replacements = [];
+
+      while ((match = embedRegex.exec(text)) !== null) {
+        var target = match[1].trim();
+        var ext = target.split('.').pop().toLowerCase();
+        var isImage = imageExtensions.indexOf(ext) !== -1;
+
+        if (isImage) {
+          // Resolve path (same logic as main.js initObsidianEmbeds)
+          var resolvedPath = target;
+          if (baseDir) {
+            var baseParts = baseDir.replace(/\\/g, '/').split('/');
+            var targetParts = target.replace(/\\/g, '/').split('/');
+
+            // Check if target's first segment matches any part of baseDir
+            var overlapIndex = -1;
+            for (var i = baseParts.length - 1; i >= 0; i--) {
+              if (baseParts[i] === targetParts[0]) {
+                var matchLen = 0;
+                for (var j = 0; j < targetParts.length && i + j < baseParts.length; j++) {
+                  if (baseParts[i + j] === targetParts[j]) {
+                    matchLen++;
+                  } else {
+                    break;
+                  }
+                }
+                if (matchLen > 0) {
+                  overlapIndex = i;
+                  break;
+                }
+              }
+            }
+
+            if (overlapIndex >= 0) {
+              var vaultRoot = baseParts.slice(0, overlapIndex).join('/');
+              resolvedPath = vaultRoot + '/' + target;
+            } else {
+              resolvedPath = baseDir + '/' + target;
+            }
+          }
+
+          // Use Tauri convertFileSrc for local file access
+          var finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
+          console.log('[slides WikiLink] target:', target, 'resolvedPath:', resolvedPath, 'finalSrc:', finalSrc);
+
+          var imgWrapper = document.createElement('div');
+          imgWrapper.className = 'obsidian-embed obsidian-image-embed';
+
+          var img = document.createElement('img');
+          img.alt = target.split('/').pop().split('\\').pop();
+          img.className = 'obsidian-embed-image';
+          img.src = finalSrc;
+          img.style.maxWidth = '100%';
+          img.style.maxHeight = '60vh';
+          img.style.objectFit = 'contain';
+
+          img.onerror = function() {
+            img.alt = '图片加载失败: ' + target;
+            img.style.border = '1px dashed #f44';
+          };
+
+          imgWrapper.appendChild(img);
+          replacements.push({ fullMatch: match[0], element: imgWrapper });
+        }
+      }
+
+      if (replacements.length > 0) {
+        var parent = node.parentNode;
+        var remaining = text;
+        replacements.forEach(function(r) {
+          var idx = remaining.indexOf(r.fullMatch);
+          if (idx !== -1) {
+            var before = remaining.substring(0, idx);
+            var after = remaining.substring(idx + r.fullMatch.length);
+            if (before) parent.insertBefore(document.createTextNode(before), node);
+            parent.insertBefore(r.element, node);
+            remaining = after;
+          }
+        });
+        if (remaining) parent.insertBefore(document.createTextNode(remaining), node);
+        parent.removeChild(node);
+      }
+    });
+  }
+
+  /**
+   * Post-process slide content: KaTeX math, Prism code highlighting, Mermaid diagrams, fragments, WikiLink images.
    */
   function postProcessSlides() {
     var container = document.getElementById('slidesContainer');
@@ -122,7 +226,11 @@
     // 1. Process fragment comments: <!-- .element: class="fragment" -->
     processFragments(container);
 
-    // 2. KaTeX math rendering
+    // 2. WikiLink images: ![[image.png]]
+    var baseDir = window.__slides_baseDir || '';
+    processWikiLinkImages(container, baseDir);
+
+    // 3. KaTeX math rendering
     if (typeof renderMathInElement !== 'undefined') {
       try {
         renderMathInElement(container, {
@@ -139,7 +247,7 @@
       }
     }
 
-    // 3. Prism code highlighting (skip mermaid blocks)
+    // 4. Prism code highlighting (skip mermaid blocks)
     if (typeof Prism !== 'undefined') {
       var codeBlocks = container.querySelectorAll('pre code[class*="language-"]');
       for (var i = 0; i < codeBlocks.length; i++) {
@@ -159,7 +267,7 @@
       }
     }
 
-    // 4. Mermaid diagrams
+    // 5. Mermaid diagrams
     if (typeof mermaid !== 'undefined') {
       try {
         mermaid.initialize({
