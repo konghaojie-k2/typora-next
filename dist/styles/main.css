@@ -762,6 +762,88 @@ html, body {
 }
 
 /* ============================================
+   Document Search Bar
+   ============================================ */
+.search-bar {
+  position: absolute;
+  top: calc(var(--toolbar-height) + var(--tabs-bar-height, 0px) + 8px);
+  right: var(--spacing-lg);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-xs) var(--spacing-sm);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  z-index: 100;
+  max-width: 400px;
+}
+
+.search-input {
+  width: 180px;
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--color-accent);
+}
+
+.search-count {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  min-width: 40px;
+  text-align: center;
+}
+
+.search-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.search-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+.search-close:hover {
+  background: var(--color-error);
+  color: #fff;
+}
+
+/* Search match highlights */
+.search-match {
+  background: var(--color-warning, #ffeb3b);
+  color: var(--color-text-primary);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+.search-match-current {
+  background: var(--color-accent, #2196f3);
+  color: #fff;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+
+/* ============================================
    Markdown Body (Content)
    ============================================ */
 .markdown-body {
@@ -1909,6 +1991,29 @@ mark {
 .frontmatter-value {
   font-size: 13px;
   color: var(--color-text-primary);
+}
+
+/* ============================================
+   Custom Cursor
+   ============================================ */
+body.cursor-pencil,
+body.cursor-pencil * {
+  cursor: url('../cursors/pencil.svg') 4 4, auto !important;
+}
+
+body.cursor-highlighter,
+body.cursor-highlighter * {
+  cursor: url('../cursors/highlighter.svg') 4 3, auto !important;
+}
+
+body.cursor-pen,
+body.cursor-pen * {
+  cursor: url('../cursors/pen.svg') 3 3, auto !important;
+}
+
+body.cursor-cat,
+body.cursor-cat * {
+  cursor: url('../cursors/cat.svg') 12 12, auto !important;
 }
 
 /* ============================================

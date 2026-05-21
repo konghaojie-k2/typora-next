@@ -143,6 +143,28 @@
         <div class="tabs-list" id="tabsList"></div>
       </div>
 
+      <!-- Document Search Bar -->
+      <div class="search-bar" id="searchBar" style="display: none;">
+        <input type="text" class="search-input" id="searchInput" placeholder="查找..." autocomplete="off">
+        <span class="search-count" id="searchCount"></span>
+        <button class="search-btn" id="searchPrev" title="上一个 (Shift+Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="18 15 12 9 6 15"/>
+          </svg>
+        </button>
+        <button class="search-btn" id="searchNext" title="下一个 (Enter)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <button class="search-btn search-close" id="searchClose" title="关闭 (Esc)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"/>
+            <line x1="6" y1="6" x2="18" y2="18"/>
+          </svg>
+        </button>
+      </div>
+
       <!-- Markdown Content -->
       <article class="markdown-body" id="markdownBody">
         <div class="welcome-message">
@@ -201,6 +223,17 @@
             <option value="light">浅色</option>
             <option value="dark">深色</option>
           </select>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingCustomCursor">鼠标光标</label>
+          <select id="settingCustomCursor" class="setting-select">
+            <option value="">系统默认</option>
+            <option value="pencil">铅笔</option>
+            <option value="highlighter">荧光笔</option>
+            <option value="pen">圆珠笔</option>
+            <option value="cat">猫咪</option>
+          </select>
+          <span class="setting-hint">选择自定义鼠标指针样式</span>
         </div>
       </div>
       <div class="modal-footer">

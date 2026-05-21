@@ -22,7 +22,7 @@
   // State Management
   // ============================================
   const state = {
-    tabs: [],           // {path, content, baseDir, name}
+    tabs: [],           // {path, content, baseDir, name, scrollTop}
     activeTab: -1,      // index of active tab
     sourceMode: false,
     sidebarCollapsed: false,
@@ -32,7 +32,10 @@
     headings: [],
     refreshPromptVisible: false,
     selfChangePending: false,
-    recentFiles: []
+    recentFiles: [],
+    searchQuery: '',
+    searchMatches: [],
+    searchCurrentIndex: -1
   };
 
   // ============================================
@@ -73,6 +76,7 @@
     settingModel: document.getElementById('settingModel'),
     settingApiKey: document.getElementById('settingApiKey'),
     settingTheme: document.getElementById('settingTheme'),
+    settingCustomCursor: document.getElementById('settingCustomCursor'),
     settingsModalClose: document.getElementById('settingsModalClose'),
     settingsCancel: document.getElementById('settingsCancel'),
     settingsSave: document.getElementById('settingsSave'),
@@ -80,7 +84,13 @@
     testResult: document.getElementById('testResult'),
     recentFilesSection: document.getElementById('recentFilesSection'),
     recentFilesList: document.getElementById('recentFilesList'),
-    clearRecentFiles: document.getElementById('clearRecentFiles')
+    clearRecentFiles: document.getElementById('clearRecentFiles'),
+    searchBar: document.getElementById('searchBar'),
+    searchInput: document.getElementById('searchInput'),
+    searchCount: document.getElementById('searchCount'),
+    searchPrev: document.getElementById('searchPrev'),
+    searchNext: document.getElementById('searchNext'),
+    searchClose: document.getElementById('searchClose')
   };
 
   // ============================================
@@ -251,11 +261,17 @@
     const tab = state.tabs[state.activeTab];
     if (!tab) return;
     try {
+      const savedScrollTop = elements.markdownBody ? elements.markdownBody.scrollTop : 0;
       const result = await invoke('open_file', { path: tab.path });
       if (result && result.content) {
         tab.content = result.content;
         tab.baseDir = result.base_dir || '';
-        loadTabContent(state.activeTab);
+        // Close search before refreshing content
+        closeSearch();
+        await loadTabContent(state.activeTab);
+        if (elements.markdownBody) {
+          elements.markdownBody.scrollTop = savedScrollTop;
+        }
         showToast('文件已刷新');
       }
     } catch (err) {
@@ -267,25 +283,32 @@
   // ============================================
   // Tab Management
   // ============================================
-  function addTab(path, content, baseDir) {
+  async function addTab(path, content, baseDir) {
     const existingIndex = state.tabs.findIndex(t => t.path === path);
     if (existingIndex >= 0) {
       // Tab already open, switch to it
-      switchTab(existingIndex);
+      await switchTab(existingIndex);
       return;
+    }
+
+    // Save scroll position of current tab before adding new one
+    const currentTab = state.tabs[state.activeTab];
+    if (currentTab && elements.markdownBody) {
+      currentTab.scrollTop = elements.markdownBody.scrollTop;
     }
 
     const tab = {
       path,
       content,
       baseDir,
-      name: getFileName(path)
+      name: getFileName(path),
+      scrollTop: 0
     };
 
     state.tabs.push(tab);
     state.activeTab = state.tabs.length - 1;
     renderTabs();
-    loadTabContent(state.activeTab);
+    await loadTabContent(state.activeTab);
     watchCurrentFile(path);
     showToast('已打开: ' + tab.name);
 
@@ -299,19 +322,41 @@
     saveUIState();
   }
 
-  function switchTab(index) {
+  async function switchTab(index) {
     if (index < 0 || index >= state.tabs.length) return;
+
+    // Close search when switching tabs
+    closeSearch();
+
+    // Save scroll position of current tab before switching
+    const currentTab = state.tabs[state.activeTab];
+    if (currentTab && elements.markdownBody) {
+      currentTab.scrollTop = elements.markdownBody.scrollTop;
+    }
+
     state.activeTab = index;
     renderTabs();
-    loadTabContent(index);
+    await loadTabContent(index);
+
+    // Restore scroll position of the new tab after render completes
     const tab = state.tabs[index];
+    if (tab && elements.markdownBody) {
+      elements.markdownBody.scrollTop = tab.scrollTop || 0;
+    }
+
     if (tab) {
       watchCurrentFile(tab.path);
     }
   }
 
-  function closeTab(index) {
+  async function closeTab(index) {
     if (index < 0 || index >= state.tabs.length) return;
+
+    // Save scroll position of current tab before closing
+    const closingTab = state.tabs[state.activeTab];
+    if (closingTab && elements.markdownBody) {
+      closingTab.scrollTop = elements.markdownBody.scrollTop;
+    }
 
     state.tabs.splice(index, 1);
 
@@ -326,9 +371,12 @@
         state.activeTab = Math.max(0, state.activeTab - 1);
       }
       renderTabs();
-      loadTabContent(state.activeTab);
+      await loadTabContent(state.activeTab);
       const activeTab = state.tabs[state.activeTab];
       if (activeTab) {
+        if (elements.markdownBody) {
+          elements.markdownBody.scrollTop = activeTab.scrollTop || 0;
+        }
         watchCurrentFile(activeTab.path);
       }
     }
@@ -343,13 +391,16 @@
     saveUIState();
   }
 
-  function closeOtherTabs(keepIndex) {
+  async function closeOtherTabs(keepIndex) {
     if (keepIndex < 0 || keepIndex >= state.tabs.length) return;
     const keepTab = state.tabs[keepIndex];
     state.tabs = [keepTab];
     state.activeTab = 0;
     renderTabs();
-    loadTabContent(0);
+    await loadTabContent(0);
+    if (elements.markdownBody) {
+      elements.markdownBody.scrollTop = keepTab.scrollTop || 0;
+    }
     watchCurrentFile(keepTab.path);
     saveUIState();
   }
@@ -451,7 +502,7 @@
       tabEl.appendChild(label);
       tabEl.appendChild(closeBtn);
 
-      tabEl.addEventListener('click', () => switchTab(index));
+      tabEl.addEventListener('click', async () => await switchTab(index));
       tabEl.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         showTabContextMenu(e, index);
@@ -461,10 +512,10 @@
     });
   }
 
-  function loadTabContent(index) {
+  async function loadTabContent(index) {
     if (index < 0 || index >= state.tabs.length) return;
     const tab = state.tabs[index];
-    renderMarkdown(tab.content, tab.baseDir);
+    await renderMarkdown(tab.content, tab.baseDir);
 
     // Update file tree active state
     elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
@@ -680,6 +731,11 @@
   // ============================================
   function toggleSourceMode() {
     state.sourceMode = !state.sourceMode;
+
+    // Close search when entering source mode
+    if (state.sourceMode) {
+      closeSearch();
+    }
 
     elements.sourceToggle.classList.toggle('active', state.sourceMode);
     elements.markdownBody.style.display = state.sourceMode ? 'none' : 'block';
@@ -2017,6 +2073,144 @@
   }
 
   // ============================================
+  // Document Search
+  // ============================================
+  function openSearch() {
+    if (!elements.searchBar) return;
+    elements.searchBar.style.display = 'flex';
+    if (elements.searchInput) {
+      elements.searchInput.focus();
+      elements.searchInput.select();
+    }
+  }
+
+  function closeSearch() {
+    if (!elements.searchBar) return;
+    elements.searchBar.style.display = 'none';
+    clearSearchHighlights();
+    state.searchQuery = '';
+    state.searchMatches = [];
+    state.searchCurrentIndex = -1;
+    if (elements.searchInput) {
+      elements.searchInput.value = '';
+    }
+    updateSearchCount();
+  }
+
+  function clearSearchHighlights() {
+    if (!elements.markdownBody) return;
+    const marks = elements.markdownBody.querySelectorAll('mark.search-match, mark.search-match-current');
+    marks.forEach(mark => {
+      const parent = mark.parentNode;
+      if (parent) {
+        parent.replaceChild(document.createTextNode(mark.textContent), mark);
+        parent.normalize();
+      }
+    });
+  }
+
+  function performSearch(query) {
+    clearSearchHighlights();
+    state.searchQuery = query;
+    state.searchMatches = [];
+    state.searchCurrentIndex = -1;
+
+    if (!query || !elements.markdownBody) {
+      updateSearchCount();
+      return;
+    }
+
+    const walker = document.createTreeWalker(
+      elements.markdownBody,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false
+    );
+
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      // Skip text nodes inside script/style tags or already inside mark elements
+      const parent = node.parentElement;
+      if (parent && (parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE' || parent.tagName === 'MARK')) {
+        continue;
+      }
+      textNodes.push(node);
+    }
+
+    // Process from end to start to avoid index shifting when splitting nodes
+    for (let i = textNodes.length - 1; i >= 0; i--) {
+      const textNode = textNodes[i];
+      const text = textNode.textContent;
+      const lowerText = text.toLowerCase();
+      const lowerQuery = query.toLowerCase();
+
+      let idx = lowerText.lastIndexOf(lowerQuery);
+      while (idx !== -1) {
+        const endIdx = idx + query.length;
+        const range = document.createRange();
+        range.setStart(textNode, idx);
+        range.setEnd(textNode, endIdx);
+
+        const mark = document.createElement('mark');
+        mark.className = 'search-match';
+        try {
+          range.surroundContents(mark);
+          state.searchMatches.unshift(mark);
+        } catch (err) {
+          // surroundContents fails if range crosses element boundaries
+          // In that case, skip this match
+        }
+
+        idx = lowerText.lastIndexOf(lowerQuery, idx - 1);
+      }
+    }
+
+    if (state.searchMatches.length > 0) {
+      state.searchCurrentIndex = 0;
+      highlightCurrentMatch();
+      scrollToCurrentMatch();
+    }
+    updateSearchCount();
+  }
+
+  function highlightCurrentMatch() {
+    state.searchMatches.forEach((mark, index) => {
+      mark.className = index === state.searchCurrentIndex ? 'search-match-current' : 'search-match';
+    });
+  }
+
+  function scrollToCurrentMatch() {
+    const mark = state.searchMatches[state.searchCurrentIndex];
+    if (mark && elements.markdownBody) {
+      mark.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function navigateSearch(direction) {
+    if (state.searchMatches.length === 0) return;
+    state.searchCurrentIndex += direction;
+    if (state.searchCurrentIndex >= state.searchMatches.length) {
+      state.searchCurrentIndex = 0;
+    } else if (state.searchCurrentIndex < 0) {
+      state.searchCurrentIndex = state.searchMatches.length - 1;
+    }
+    highlightCurrentMatch();
+    scrollToCurrentMatch();
+    updateSearchCount();
+  }
+
+  function updateSearchCount() {
+    if (!elements.searchCount) return;
+    const total = state.searchMatches.length;
+    if (total === 0) {
+      elements.searchCount.textContent = state.searchQuery ? '0/0' : '';
+    } else {
+      elements.searchCount.textContent = (state.searchCurrentIndex + 1) + '/' + total;
+    }
+  }
+
+  // ============================================
   // Keyboard Shortcuts
   // ============================================
   function setupKeyboardShortcuts() {
@@ -2039,11 +2233,23 @@
         toggleSourceMode();
       }
 
-      // Escape: Close lightbox or exit source mode
+      // Ctrl+F: Open document search
+      if (e.ctrlKey && e.key === 'f') {
+        e.preventDefault();
+        if (elements.searchBar && elements.searchBar.style.display === 'flex') {
+          closeSearch();
+        } else {
+          openSearch();
+        }
+      }
+
+      // Escape: Close lightbox, search, or exit source mode
       if (e.key === 'Escape') {
         const lightbox = document.querySelector('.image-lightbox');
         if (lightbox) {
           closeLightbox(lightbox);
+        } else if (elements.searchBar && elements.searchBar.style.display === 'flex') {
+          closeSearch();
         } else if (state.sourceMode) {
           toggleSourceMode();
         }
@@ -2196,6 +2402,13 @@
     applyTheme(theme || 'light');
   }
 
+  function applyCustomCursor(cursorType) {
+    document.body.classList.remove('cursor-pencil', 'cursor-highlighter', 'cursor-pen', 'cursor-cat');
+    if (cursorType) {
+      document.body.classList.add('cursor-' + cursorType);
+    }
+  }
+
   function toggleTheme() {
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
     const newTheme = isDark ? 'light' : 'dark';
@@ -2290,6 +2503,31 @@
     if (elements.clearRecentFiles) {
       elements.clearRecentFiles.addEventListener('click', clearRecentFiles);
     }
+
+    // Search bar events
+    if (elements.searchInput) {
+      elements.searchInput.addEventListener('input', (e) => {
+        performSearch(e.target.value);
+      });
+      elements.searchInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          navigateSearch(e.shiftKey ? -1 : 1);
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          closeSearch();
+        }
+      });
+    }
+    if (elements.searchPrev) {
+      elements.searchPrev.addEventListener('click', () => navigateSearch(-1));
+    }
+    if (elements.searchNext) {
+      elements.searchNext.addEventListener('click', () => navigateSearch(1));
+    }
+    if (elements.searchClose) {
+      elements.searchClose.addEventListener('click', closeSearch);
+    }
   }
 
   // ============================================
@@ -2315,6 +2553,10 @@
         if (config.theme && elements.settingTheme) {
           elements.settingTheme.value = config.theme;
           applyTheme(config.theme);
+        }
+        if (elements.settingCustomCursor) {
+          elements.settingCustomCursor.value = config.custom_cursor || '';
+          applyCustomCursor(config.custom_cursor);
         }
       }
     } catch (err) {
@@ -2424,13 +2666,15 @@
     const aiBaseUrl = elements.settingAiBaseUrl ? elements.settingAiBaseUrl.value.trim() : '';
     const model = elements.settingModel ? elements.settingModel.value.trim() : '';
     const theme = elements.settingTheme ? elements.settingTheme.value : '';
+    const customCursor = elements.settingCustomCursor ? elements.settingCustomCursor.value : '';
 
     const config = {
       api_key: apiKey || null,
       ai_provider: aiProvider,
       ai_base_url: aiBaseUrl || null,
       model: model || null,
-      theme: theme || null
+      theme: theme || null,
+      custom_cursor: customCursor || null
     };
 
     try {
@@ -2438,6 +2682,7 @@
       if (theme) {
         applyTheme(theme);
       }
+      applyCustomCursor(customCursor);
       showToast('设置已保存');
       closeSettings();
     } catch (err) {

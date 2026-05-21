@@ -34,6 +34,8 @@ pub struct AppConfig {
     pub model: Option<String>,
     #[serde(default)]
     pub theme: Option<String>, // "light", "dark", or None for system
+    #[serde(default)]
+    pub custom_cursor: Option<String>,
     // Window state
     #[serde(default)]
     pub window_width: Option<f64>,

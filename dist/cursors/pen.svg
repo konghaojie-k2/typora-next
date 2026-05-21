@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- 笔身 -->
+  <path d="M4 6 L24 26 L26 24 L6 4 Z" fill="#4a7bc0" stroke="#2e5a9e" stroke-width="1" stroke-linejoin="round"/>
+  <!-- 金属笔尖套 -->
+  <path d="M4 6 L6 4 L4 2 L2 4 Z" fill="#c0c0c0" stroke="#888" stroke-width="1" stroke-linejoin="round"/>
+  <!-- 圆珠 -->
+  <circle cx="3" cy="3" r="1.5" fill="#333"/>
+  <!-- 笔尾 -->
+  <path d="M24 26 L26 24 L27 25 L25 27 Z" fill="#2e5a9e" stroke-linejoin="round"/>
+  <!-- 高光 -->
+  <path d="M5 5 L23 23" stroke="#fff" stroke-width="1.5" opacity="0.35" stroke-linecap="round"/>
+</svg>
