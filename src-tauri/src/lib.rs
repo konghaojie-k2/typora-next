@@ -66,21 +66,27 @@ pub struct AppState {
 /// Kill all existing md2docx_service processes (Windows only)
 #[cfg(windows)]
 fn kill_md2docx_service_processes() {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/IM", "md2docx_service-x86_64-pc-windows-gnu.exe"])
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/F", "/IM", "md2docx_service-x86_64-pc-windows-gnu.exe"])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+        .stderr(std::process::Stdio::null());
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let _ = cmd.status();
 }
 
 /// Kill a process by PID (Windows only)
 #[cfg(windows)]
 fn kill_process_by_pid(pid: u32) {
-    let _ = std::process::Command::new("taskkill")
-        .args(["/F", "/PID", &pid.to_string()])
+    let mut cmd = std::process::Command::new("taskkill");
+    cmd.args(["/F", "/PID", &pid.to_string()])
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+        .stderr(std::process::Stdio::null());
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x08000000;
+    cmd.creation_flags(CREATE_NO_WINDOW);
+    let _ = cmd.status();
 }
 
 /// File result containing path and content
@@ -1505,9 +1511,6 @@ pub fn run() {
             // Start md2docx_service for Word export (Windows only)
             #[cfg(windows)]
             {
-                // Kill any existing md2docx_service processes first
-                kill_md2docx_service_processes();
-
                 let state: tauri::State<AppState> = app.state();
                 let possible_paths = [
                     app.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
