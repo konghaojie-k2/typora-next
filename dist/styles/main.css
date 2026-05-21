@@ -1216,11 +1216,32 @@ img:hover {
   cursor: zoom-out;
 }
 
-.image-lightbox img {
-  max-width: 90%;
-  max-height: 90%;
+.lightbox-viewport {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+
+.lightbox-content {
+  transition: transform 0.05s ease-out;
+}
+
+.lightbox-content img {
+  max-width: 90vw;
+  max-height: 90vh;
   border-radius: var(--radius-lg);
   box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);
+}
+
+.lightbox-content svg {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 40px rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-primary);
 }
 
 .lightbox-controls {
@@ -1235,8 +1256,8 @@ img:hover {
 
 .lightbox-btn {
   padding: var(--spacing-sm) var(--spacing-md);
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   border-radius: var(--radius-md);
   color: white;
   font-size: var(--font-size-sm);
@@ -1245,7 +1266,7 @@ img:hover {
 }
 
 .lightbox-btn:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(0, 0, 0, 0.85);
 }
 
 .lightbox-zoom-info {

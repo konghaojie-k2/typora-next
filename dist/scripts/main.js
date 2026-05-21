@@ -1957,12 +1957,23 @@
   // Lightbox
   // ============================================
   function openLightbox(img) {
+    resetLightboxState();
     const lightbox = document.createElement('div');
     lightbox.className = 'image-lightbox';
+
+    const viewport = document.createElement('div');
+    viewport.className = 'lightbox-viewport';
+
+    const content = document.createElement('div');
+    content.className = 'lightbox-content';
 
     const lightboxImg = document.createElement('img');
     lightboxImg.src = img.src;
     lightboxImg.alt = img.alt || '';
+    content.appendChild(lightboxImg);
+
+    viewport.appendChild(content);
+    lightbox.appendChild(viewport);
 
     const zoomInfo = document.createElement('div');
     zoomInfo.className = 'lightbox-zoom-info';
@@ -1971,11 +1982,10 @@
     const controls = document.createElement('div');
     controls.className = 'lightbox-controls';
 
-    // Create control buttons
     const buttons = [
-      { text: '+ Zoom In', action: () => zoomImage(lightboxImg, zoomInfo, 0.25) },
-      { text: '- Zoom Out', action: () => zoomImage(lightboxImg, zoomInfo, -0.25) },
-      { text: 'Reset', action: () => resetZoom(lightboxImg, zoomInfo) },
+      { text: '+', action: () => zoomContent(content, zoomInfo, 0.25) },
+      { text: '-', action: () => zoomContent(content, zoomInfo, -0.25) },
+      { text: 'Reset', action: () => resetLightboxView(content, zoomInfo) },
       { text: 'Close', action: () => closeLightbox(lightbox) }
     ];
 
@@ -1990,39 +2000,182 @@
       controls.appendChild(button);
     });
 
-    lightbox.appendChild(lightboxImg);
     lightbox.appendChild(zoomInfo);
     lightbox.appendChild(controls);
 
-    // Close on background click
     lightbox.addEventListener('click', function(e) {
       if (e.target === lightbox) closeLightbox(lightbox);
     });
+
+    bindLightboxEvents(lightbox, content, zoomInfo);
 
     document.body.appendChild(lightbox);
     document.body.style.overflow = 'hidden';
   }
 
   let currentZoom = 1;
+  let panX = 0;
+  let panY = 0;
+  let isPanning = false;
+  let panStartX = 0;
+  let panStartY = 0;
+  let isSpacePressed = false;
 
-  function zoomImage(img, info, delta) {
-    currentZoom = Math.max(0.5, Math.min(3, currentZoom + delta));
-    img.style.transform = `scale(${currentZoom})`;
+  function zoomContent(content, info, delta) {
+    currentZoom = Math.max(0.05, currentZoom + delta);
+    updateTransform(content);
     info.textContent = `Zoom: ${Math.round(currentZoom * 100)}%`;
   }
 
-  function resetZoom(img, info) {
+  function resetLightboxView(content, info) {
     currentZoom = 1;
-    img.style.transform = `scale(1)`;
+    panX = 0;
+    panY = 0;
+    updateTransform(content);
     info.textContent = 'Zoom: 100%';
   }
 
+  function updateTransform(content) {
+    content.style.transform = `translate(${panX}px, ${panY}px) scale(${currentZoom})`;
+  }
+
+  function resetLightboxState() {
+    currentZoom = 1;
+    panX = 0;
+    panY = 0;
+    isPanning = false;
+    isSpacePressed = false;
+  }
+
+  function bindLightboxEvents(lightbox, content, zoomInfo) {
+    const wheelHandler = (e) => {
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 0.25 : -0.25;
+      zoomContent(content, zoomInfo, delta);
+    };
+    lightbox.addEventListener('wheel', wheelHandler, { passive: false });
+
+    const keydownHandler = (e) => {
+      if (e.code === 'Space' && !e.repeat && !e.target.matches('input, textarea')) {
+        isSpacePressed = true;
+        lightbox.style.cursor = 'grab';
+        e.preventDefault();
+      }
+    };
+
+    const keyupHandler = (e) => {
+      if (e.code === 'Space') {
+        isSpacePressed = false;
+        if (!isPanning) {
+          lightbox.style.cursor = 'zoom-out';
+        }
+      }
+    };
+
+    document.addEventListener('keydown', keydownHandler);
+    document.addEventListener('keyup', keyupHandler);
+
+    const mouseDownHandler = (e) => {
+      if (isSpacePressed && e.button === 0) {
+        isPanning = true;
+        panStartX = e.clientX - panX;
+        panStartY = e.clientY - panY;
+        lightbox.style.cursor = 'grabbing';
+        e.preventDefault();
+      }
+    };
+
+    const mouseMoveHandler = (e) => {
+      if (isPanning) {
+        panX = e.clientX - panStartX;
+        panY = e.clientY - panStartY;
+        updateTransform(content);
+      }
+    };
+
+    const mouseUpHandler = () => {
+      if (isPanning) {
+        isPanning = false;
+        lightbox.style.cursor = isSpacePressed ? 'grab' : 'zoom-out';
+      }
+    };
+
+    lightbox.addEventListener('mousedown', mouseDownHandler);
+    document.addEventListener('mousemove', mouseMoveHandler);
+    document.addEventListener('mouseup', mouseUpHandler);
+
+    lightbox._cleanup = () => {
+      lightbox.removeEventListener('wheel', wheelHandler);
+      document.removeEventListener('keydown', keydownHandler);
+      document.removeEventListener('keyup', keyupHandler);
+      lightbox.removeEventListener('mousedown', mouseDownHandler);
+      document.removeEventListener('mousemove', mouseMoveHandler);
+      document.removeEventListener('mouseup', mouseUpHandler);
+    };
+  }
+
   function closeLightbox(lightbox) {
+    if (lightbox._cleanup) lightbox._cleanup();
     lightbox.style.opacity = '0';
     setTimeout(() => {
       lightbox.remove();
       document.body.style.overflow = '';
     }, 200);
+  }
+
+  function openMermaidLightbox(svg) {
+    resetLightboxState();
+    const lightbox = document.createElement('div');
+    lightbox.className = 'image-lightbox';
+
+    const viewport = document.createElement('div');
+    viewport.className = 'lightbox-viewport';
+
+    const content = document.createElement('div');
+    content.className = 'lightbox-content';
+
+    const clonedSvg = svg.cloneNode(true);
+    content.appendChild(clonedSvg);
+
+    viewport.appendChild(content);
+    lightbox.appendChild(viewport);
+
+    const zoomInfo = document.createElement('div');
+    zoomInfo.className = 'lightbox-zoom-info';
+    zoomInfo.textContent = 'Zoom: 100%';
+
+    const controls = document.createElement('div');
+    controls.className = 'lightbox-controls';
+
+    const buttons = [
+      { text: '+', action: () => zoomContent(content, zoomInfo, 0.25) },
+      { text: '-', action: () => zoomContent(content, zoomInfo, -0.25) },
+      { text: 'Reset', action: () => resetLightboxView(content, zoomInfo) },
+      { text: 'Close', action: () => closeLightbox(lightbox) }
+    ];
+
+    buttons.forEach(btn => {
+      const button = document.createElement('button');
+      button.className = 'lightbox-btn';
+      button.textContent = btn.text;
+      button.addEventListener('click', (e) => {
+        e.stopPropagation();
+        btn.action();
+      });
+      controls.appendChild(button);
+    });
+
+    lightbox.appendChild(zoomInfo);
+    lightbox.appendChild(controls);
+
+    lightbox.addEventListener('click', function(e) {
+      if (e.target === lightbox) closeLightbox(lightbox);
+    });
+
+    bindLightboxEvents(lightbox, content, zoomInfo);
+
+    document.body.appendChild(lightbox);
+    document.body.style.overflow = 'hidden';
   }
 
   // ============================================
@@ -3396,6 +3549,13 @@
       // Only add button if Mermaid has been rendered (SVG exists inside)
       const svg = pre.querySelector('svg');
       if (!svg) return; // Skip unrendered blocks
+
+      // Click to open lightbox
+      pre.style.cursor = 'zoom-in';
+      pre.addEventListener('click', (e) => {
+        if (e.target.closest('.download-btn')) return;
+        openMermaidLightbox(svg);
+      });
 
       const btn = createDownloadButton('⬇️ SVG', '下载 Mermaid 图表');
       btn.addEventListener('click', (e) => {
