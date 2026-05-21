@@ -56,10 +56,31 @@ pub struct AppConfig {
     pub last_file: Option<String>,
 }
 
-/// Application state for file watching
+/// Application state for file watching and process management
 pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
     watched_path: Mutex<Option<String>>,
+    md2docx_pid: Mutex<Option<u32>>,
+}
+
+/// Kill all existing md2docx_service processes (Windows only)
+#[cfg(windows)]
+fn kill_md2docx_service_processes() {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/IM", "md2docx_service-x86_64-pc-windows-gnu.exe"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+}
+
+/// Kill a process by PID (Windows only)
+#[cfg(windows)]
+fn kill_process_by_pid(pid: u32) {
+    let _ = std::process::Command::new("taskkill")
+        .args(["/F", "/PID", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 /// File result containing path and content
@@ -1467,6 +1488,7 @@ pub fn run() {
         .manage(AppState {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
+            md2docx_pid: Mutex::new(None),
         })
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1483,28 +1505,34 @@ pub fn run() {
             // Start md2docx_service for Word export (Windows only)
             #[cfg(windows)]
             {
-                let app_handle = app.handle().clone();
-                std::thread::spawn(move || {
-                    let possible_paths = [
-                        app_handle.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
-                        std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
-                    ];
+                // Kill any existing md2docx_service processes first
+                kill_md2docx_service_processes();
 
-                    for path_opt in &possible_paths {
-                        if let Some(path) = path_opt {
-                            if path.exists() {
-                                let mut cmd = std::process::Command::new(path);
-                                cmd.stdout(std::process::Stdio::null())
-                                    .stderr(std::process::Stdio::null());
-                                use std::os::windows::process::CommandExt;
-                                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                                cmd.creation_flags(CREATE_NO_WINDOW);
-                                let _ = cmd.spawn();
-                                break;
+                let state: tauri::State<AppState> = app.state();
+                let possible_paths = [
+                    app.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
+                    std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
+                ];
+
+                for path_opt in &possible_paths {
+                    if let Some(path) = path_opt {
+                        if path.exists() {
+                            let mut cmd = std::process::Command::new(&path);
+                            cmd.stdout(std::process::Stdio::null())
+                                .stderr(std::process::Stdio::null());
+                            use std::os::windows::process::CommandExt;
+                            const CREATE_NO_WINDOW: u32 = 0x08000000;
+                            cmd.creation_flags(CREATE_NO_WINDOW);
+                            if let Ok(child) = cmd.spawn() {
+                                let pid = child.id();
+                                let mut pid_guard = state.md2docx_pid.lock().unwrap();
+                                *pid_guard = Some(pid);
+                                println!("[DEBUG] Started md2docx_service with PID: {}", pid);
                             }
+                            break;
                         }
                     }
-                });
+                }
             }
 
             // Check command line arguments for .md file path (file association)
@@ -1535,6 +1563,15 @@ pub fn run() {
             open_slides_window, get_platform, show_in_folder,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                #[cfg(windows)]
+                {
+                    println!("[DEBUG] Killing all md2docx_service processes on exit");
+                    kill_md2docx_service_processes();
+                }
+            }
+        });
 }
