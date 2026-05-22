@@ -1,18 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <!-- 猫头 -->
-  <ellipse cx="12" cy="12" rx="9" ry="8" fill="#f4a460" stroke="#d2691e" stroke-width="1.5"/>
+  <ellipse cx="12" cy="14" rx="9" ry="8" fill="#fb923c" stroke="#1a1a2e" stroke-width="1.5"/>
   <!-- 左耳 -->
-  <path d="M5 7 L3 1 L9 5 Z" fill="#f4a460" stroke="#d2691e" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M5 9 L3 3 L9 7 Z" fill="#fb923c" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
   <!-- 右耳 -->
-  <path d="M15 5 L21 1 L19 7 Z" fill="#f4a460" stroke="#d2691e" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M15 7 L21 3 L19 9 Z" fill="#fb923c" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
   <!-- 眼睛 -->
-  <circle cx="9" cy="11" r="1.5" fill="#333"/>
-  <circle cx="15" cy="11" r="1.5" fill="#333"/>
+  <ellipse cx="9" cy="13" rx="1.5" ry="2.5" fill="#1a1a2e"/>
+  <ellipse cx="15" cy="13" rx="1.5" ry="2.5" fill="#1a1a2e"/>
   <!-- 鼻子 -->
-  <polygon points="12,14 11,16 13,16" fill="#ffb6c1"/>
-  <!-- 胡须 -->
-  <line x1="6" y1="15" x2="2" y2="14" stroke="#d2691e" stroke-width="1"/>
-  <line x1="6" y1="17" x2="2" y2="18" stroke="#d2691e" stroke-width="1"/>
-  <line x1="18" y1="15" x2="22" y2="14" stroke="#d2691e" stroke-width="1"/>
-  <line x1="18" y1="17" x2="22" y2="18" stroke="#d2691e" stroke-width="1"/>
+  <polygon points="12,16 11,18 13,18" fill="#f472b6"/>
 </svg>

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- 魔法棒 -->
+  <path d="M7 7 L9 9 L28 28 L26 26 Z" fill="#6B4226" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- 木纹高光 -->
+  <line x1="8" y1="8" x2="27" y2="27" stroke="#A07850" stroke-width="1.5" opacity="0.4"/>
+  <!-- 四角星芒（放大+粗描边） -->
+  <path d="M4 -2 L5.5 2.5 L10 4 L5.5 5.5 L4 10 L2.5 5.5 L-2 4 L2.5 2.5 Z" fill="#fbbf24" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+</svg>

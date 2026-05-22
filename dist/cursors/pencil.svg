@@ -1,14 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
   <!-- 笔身 -->
-  <path d="M5 9 L21 25 L25 21 L9 5 Z" fill="#f0c040" stroke="#c49a20" stroke-width="1" stroke-linejoin="round"/>
-  <!-- 木质笔尖 -->
-  <path d="M5 9 L9 5 L8 4 L4 8 Z" fill="#e8c97a" stroke="#c49a20" stroke-width="1" stroke-linejoin="round"/>
-  <!-- 笔芯 -->
-  <path d="M4 8 L8 4 L5 5 L4 5 Z" fill="#333" stroke-linejoin="round"/>
-  <!-- 金属环 -->
-  <path d="M21 25 L25 21 L27 23 L23 27 Z" fill="#bbb" stroke="#888" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M5 9 L9 5 L24 20 L20 24 Z" fill="#fbbf24" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
+  <!-- 笔尖 -->
+  <path d="M4 4 L9 5 L5 9 Z" fill="#1a1a2e" stroke-linejoin="round"/>
   <!-- 橡皮 -->
-  <path d="M23 27 L27 23 L29 25 L25 29 Z" fill="#e07070" stroke="#b05050" stroke-width="1" stroke-linejoin="round"/>
-  <!-- 高光 -->
-  <path d="M6 8 L22 24" stroke="#fff" stroke-width="2" opacity="0.35" stroke-linecap="round"/>
+  <path d="M20 24 L24 20 L27 23 L23 27 Z" fill="#f472b6" stroke="#1a1a2e" stroke-width="1.5" stroke-linejoin="round"/>
 </svg>

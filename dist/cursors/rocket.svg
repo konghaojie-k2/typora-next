@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- 火焰 -->
+  <path d="M22 24 L24 22 L27 25 L25 27 Z" fill="#fbbf24" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 左尾翼 -->
+  <path d="M16 20 L20 24 L18 26 L14 22 Z" fill="#ef4444" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 火箭身体 -->
+  <path d="M6 10 L10 6 L24 20 L20 24 Z" fill="#e5e7eb" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 右尾翼 -->
+  <path d="M20 16 L24 20 L22 22 L18 18 Z" fill="#ef4444" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 窗口 -->
+  <circle cx="12" cy="12" r="2.5" fill="#60a5fa" stroke="#1a1a2e" stroke-width="1.5"/>
+  <!-- 头部 -->
+  <path d="M4 4 L10 6 L6 10 Z" fill="#e5e7eb" stroke="#1a1a2e" stroke-width="2" stroke-linejoin="round"/>
+  <!-- 高光 -->
+  <ellipse cx="7" cy="7" rx="1" ry="1.5" fill="#fff" opacity="0.5" transform="rotate(-45 7 7)"/>
+</svg>

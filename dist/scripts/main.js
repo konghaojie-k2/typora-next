@@ -2556,7 +2556,7 @@
   }
 
   function applyCustomCursor(cursorType) {
-    document.body.classList.remove('cursor-pencil', 'cursor-highlighter', 'cursor-pen', 'cursor-cat');
+    document.body.classList.remove('cursor-pencil', 'cursor-highlighter', 'cursor-pen', 'cursor-cat', 'cursor-microphone', 'cursor-rocket', 'cursor-wand');
     if (cursorType) {
       document.body.classList.add('cursor-' + cursorType);
     }

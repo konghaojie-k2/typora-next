@@ -2024,7 +2024,7 @@ body.cursor-pencil * {
 
 body.cursor-highlighter,
 body.cursor-highlighter * {
-  cursor: url('../cursors/highlighter.svg') 4 3, auto !important;
+  cursor: url('../cursors/highlighter.svg') 4 4, auto !important;
 }
 
 body.cursor-pen,
@@ -2035,6 +2035,21 @@ body.cursor-pen * {
 body.cursor-cat,
 body.cursor-cat * {
   cursor: url('../cursors/cat.svg') 12 12, auto !important;
+}
+
+body.cursor-microphone,
+body.cursor-microphone * {
+  cursor: url('../cursors/microphone.svg') 8 8, auto !important;
+}
+
+body.cursor-rocket,
+body.cursor-rocket * {
+  cursor: url('../cursors/rocket.svg') 4 4, auto !important;
+}
+
+body.cursor-wand,
+body.cursor-wand * {
+  cursor: url('../cursors/wand.svg') 4 4, auto !important;
 }
 
 /* ============================================
