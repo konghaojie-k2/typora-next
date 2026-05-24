@@ -272,19 +272,170 @@
     }
 
     // 5. Mermaid diagrams
-    if (typeof mermaid !== 'undefined') {
+    // Convert <pre class="mermaid"> to <div class="mermaid"> before rendering
+    // <pre> default styles interfere with SVG height calculation
+    // Reveal hides inactive slides with display:none, which breaks Mermaid sizing.
+    if (typeof mermaid !== 'undefined' && typeof Reveal !== 'undefined') {
       try {
         mermaid.initialize({
           startOnLoad: false,
           theme: 'dark',
-          securityLevel: 'loose'
+          securityLevel: 'loose',
+          themeVariables: {
+            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
+            fontSize: '16px'
+          }
         });
-        var mermaidBlocks = container.querySelectorAll('.mermaid');
-        if (mermaidBlocks.length > 0) {
-          mermaid.init(undefined, mermaidBlocks);
+
+        // Convert <pre class="mermaid"> to <div class="mermaid">
+        var preMermaids = container.querySelectorAll('pre.mermaid');
+        for (var k = 0; k < preMermaids.length; k++) {
+          var pre = preMermaids[k];
+          var div = document.createElement('div');
+          div.className = 'mermaid';
+          div.textContent = pre.textContent;
+          pre.parentNode.replaceChild(div, pre);
         }
+
+        function renderMermaidForSlide(slide) {
+          if (!slide) return;
+          var blocks = slide.querySelectorAll('.mermaid:not([data-mermaid-rendered])');
+          for (var j = 0; j < blocks.length; j++) {
+            (function(block) {
+              var code = block.textContent.trim();
+              if (!code) return;
+              var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+
+              mermaid.render(id, code).then(function(result) {
+                block.innerHTML = result.svg;
+                block.setAttribute('data-mermaid-rendered', 'true');
+                var svg = block.querySelector('svg');
+                if (svg) {
+                  var vb = svg.getAttribute('viewBox') || '';
+                  var vbParts = vb.split(/\s+/).map(parseFloat);
+                  var vbW = vbParts[2] || 1;
+                  var vbH = vbParts[3] || 1;
+                  if (vbW > 0 && vbH > 0) {
+                    svg.removeAttribute('width');
+                    svg.removeAttribute('height');
+                    svg.style.width = '100%';
+                    svg.style.height = 'auto';
+                    svg.style.maxWidth = vbW + 'px';
+                    svg.style.aspectRatio = vbW + ' / ' + vbH;
+                  }
+                  // Force correct font-size on all text elements
+                  var texts = svg.querySelectorAll('text');
+                  for (var t = 0; t < texts.length; t++) {
+                    texts[t].setAttribute('font-size', '18px');
+                    texts[t].style.fontSize = '18px';
+                  }
+
+                  // Increase node dimensions for HTML content (foreignObject)
+                  var foreignObjects = svg.querySelectorAll('.node foreignObject');
+                  for (var f = 0; f < foreignObjects.length; f++) {
+                    var fo = foreignObjects[f];
+                    var origHeight = parseFloat(fo.getAttribute('height')) || 0;
+                    var origWidth = parseFloat(fo.getAttribute('width')) || 0;
+                    if (origHeight > 0) {
+                      fo.setAttribute('height', (origHeight + 12).toString());
+                    }
+                    if (origWidth > 0) {
+                      fo.setAttribute('width', (origWidth + 8).toString());
+                    }
+                  }
+
+                  // Increase edge label dimensions
+                  var edgeLabels = svg.querySelectorAll('.edgeLabel foreignObject');
+                  for (var e = 0; e < edgeLabels.length; e++) {
+                    var fo = edgeLabels[e];
+                    var origHeight = parseFloat(fo.getAttribute('height')) || 0;
+                    var origWidth = parseFloat(fo.getAttribute('width')) || 0;
+                    if (origHeight > 0) {
+                      fo.setAttribute('height', (origHeight + 10).toString());
+                    }
+                    if (origWidth > 0) {
+                      fo.setAttribute('width', (origWidth + 8).toString());
+                    }
+                  }
+
+                  // Also increase surrounding rect
+                  var rects = svg.querySelectorAll('.node rect');
+                  for (var r = 0; r < rects.length; r++) {
+                    var rect = rects[r];
+                    var origHeight = parseFloat(rect.getAttribute('height')) || 0;
+                    var origWidth = parseFloat(rect.getAttribute('width')) || 0;
+                    if (origHeight > 0) {
+                      rect.setAttribute('height', (origHeight + 12).toString());
+                    }
+                    if (origWidth > 0) {
+                      rect.setAttribute('width', (origWidth + 8).toString());
+                    }
+                  }
+
+                  // Fix arrow/edge colors for dark theme - force white
+                  // Fix all edge/connection paths
+                  var edgePaths = svg.querySelectorAll('.edgePath path, .edges path, g[class*="edge"] path');
+                  for (var p = 0; p < edgePaths.length; p++) {
+                    edgePaths[p].setAttribute('stroke', '#ffffff');
+                    edgePaths[p].style.stroke = '#ffffff';
+                  }
+                  // Also fix any path that looks like a connection (not inside .node)
+                  var allPaths = svg.querySelectorAll('path');
+                  for (var p = 0; p < allPaths.length; p++) {
+                    var path = allPaths[p];
+                    var parent = path.parentElement;
+                    if (parent && !parent.classList.contains('node') && !parent.closest('.node')) {
+                      path.setAttribute('stroke', '#ffffff');
+                      path.style.stroke = '#ffffff';
+                    }
+                  }
+
+                  // Fix arrow markers (defs)
+                  var markers = svg.querySelectorAll('marker');
+                  for (var m = 0; m < markers.length; m++) {
+                    var markerPaths = markers[m].querySelectorAll('path, polygon');
+                    for (var mp = 0; mp < markerPaths.length; mp++) {
+                      markerPaths[mp].setAttribute('fill', '#ffffff');
+                      markerPaths[mp].style.fill = '#ffffff';
+                    }
+                  }
+
+                  // Fix edge label rect background
+                  var edgeRects = svg.querySelectorAll('.edgeLabel rect');
+                  for (var er = 0; er < edgeRects.length; er++) {
+                    edgeRects[er].setAttribute('fill', '#1e1e2e');
+                    edgeRects[er].setAttribute('stroke', '#ffffff');
+                  }
+                }
+              }).catch(function(err) {
+                console.error('[slides] Mermaid render failed:', err);
+                block.innerHTML = '<div style="color:#f44;padding:8px;border:1px dashed #f44;border-radius:4px;">' +
+                  '<strong>Mermaid 渲染失败</strong><br>' + String(err.message || err) + '</div>';
+              });
+            })(blocks[j]);
+          }
+        }
+
+        function tryRenderCurrentSlide() {
+          var slide = Reveal.getCurrentSlide ? Reveal.getCurrentSlide() : null;
+          if (slide) {
+            renderMermaidForSlide(slide);
+          }
+        }
+
+        // Try immediately, then again after Reveal layout settles
+        tryRenderCurrentSlide();
+        setTimeout(tryRenderCurrentSlide, 200);
+        setTimeout(tryRenderCurrentSlide, 600);
+
+        // Render on slide change
+        Reveal.on('slidechanged', function(event) {
+          setTimeout(function() {
+            renderMermaidForSlide(event.currentSlide);
+          }, 100);
+        });
       } catch (err) {
-        console.error('Mermaid init failed:', err);
+        console.error('Mermaid setup failed:', err);
       }
     }
   }

@@ -241,3 +241,8 @@
   .reveal h2 { font-size: 1.5em; }
   .reveal h3 { font-size: 1.2em; }
 }
+
+/* Mermaid diagrams - force correct font-size in SVG text elements */
+.reveal .mermaid svg text {
+  font-size: 16px !important;
+}
