@@ -29,6 +29,7 @@ tauri-plugin-single-instance = "2"
 
 # Core markdown processing
 pulldown-cmark = "0.12"
+regex = "1"
 thiserror = "2.0"
 
 # File watching
@@ -36,6 +37,10 @@ notify = "8"
 
 # HTTP client for AI API
 ureq = { version = "2", features = ["json"] }
+
+# ZIP archive for sharing documents
+zip = "2"
+walkdir = "2"
 
 # Base64 encoding for file downloads
 base64 = "0.22"

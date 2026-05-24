@@ -127,7 +127,7 @@
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   display: block;
-  margin: 0.5em auto;
+  margin: 0.5em 0;
 }
 
 /* Horizontal rule */

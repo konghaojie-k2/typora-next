@@ -3,6 +3,8 @@ use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::Mutex;
+use regex::Regex;
+use std::io::Write;
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
@@ -414,7 +416,7 @@ fn escape_html(text: &str) -> String {
 /// Simple markdown to HTML renderer (body content only)
 /// Now includes math preprocessing to protect LaTeX from markdown parsing
 fn render_markdown_body(text: &str) -> String {
-    use pulldown_cmark::{Parser, Options, html::push_html};
+    use pulldown_cmark::{Parser, Options, Event, Tag, TagEnd, html::push_html};
 
     let (frontmatter, body) = extract_frontmatter(text);
 
@@ -440,8 +442,49 @@ fn render_markdown_body(text: &str) -> String {
     options.insert(Options::ENABLE_SMART_PUNCTUATION);
 
     let parser = Parser::new_ext(&protected_body, options);
+
+    // Collect events and add fragment class to + list items for Reveal.js slides
+    let mut events: Vec<Event> = Vec::new();
+    let mut plus_list_stack: Vec<bool> = Vec::new();
+
+    for (event, range) in parser.into_offset_iter() {
+        match &event {
+            Event::Start(Tag::List(None)) => {
+                let is_plus = range.start < protected_body.len()
+                    && protected_body[range.start..].starts_with("+ ");
+                plus_list_stack.push(is_plus);
+                events.push(event);
+            }
+            Event::Start(Tag::List(Some(_))) => {
+                plus_list_stack.push(false);
+                events.push(event);
+            }
+            Event::End(TagEnd::List(_)) => {
+                plus_list_stack.pop();
+                events.push(event);
+            }
+            Event::Start(Tag::Item) => {
+                if plus_list_stack.last().copied().unwrap_or(false) {
+                    events.push(Event::Html(r#"<li class="fragment">"#.into()));
+                } else {
+                    events.push(event);
+                }
+            }
+            Event::End(TagEnd::Item) => {
+                if plus_list_stack.last().copied().unwrap_or(false) {
+                    events.push(Event::Html("</li>".into()));
+                } else {
+                    events.push(event);
+                }
+            }
+            _ => {
+                events.push(event);
+            }
+        }
+    }
+
     let mut html = String::new();
-    push_html(&mut html, parser);
+    push_html(&mut html, events.into_iter());
 
     // Step 3: Post-process to restore math blocks
     html = postprocess_math(&html, &math_blocks);
@@ -825,6 +868,54 @@ fn show_in_folder(path: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| format!("无法打开文件夹: {}", e))
 }
 
+/// Resolve Obsidian WikiLink image path (mirrors frontend initObsidianEmbeds logic)
+fn resolve_wikilink_path(target: &str, base_dir: &str) -> Option<PathBuf> {
+    let base_normalized = base_dir.replace("\\", "/");
+    let base_parts: Vec<&str> = base_normalized.split('/').filter(|s| !s.is_empty()).collect();
+    let target_normalized = target.replace("\\", "/");
+    let target_parts: Vec<&str> = target_normalized.split('/').filter(|s| !s.is_empty()).collect();
+
+    if target_parts.is_empty() {
+        return None;
+    }
+
+    for i in (0..base_parts.len()).rev() {
+        if base_parts[i] == target_parts[0] {
+            let mut match_len = 0;
+            for j in 0..target_parts.len() {
+                if i + j < base_parts.len() && base_parts[i + j] == target_parts[j] {
+                    match_len += 1;
+                } else {
+                    break;
+                }
+            }
+            if match_len > 0 {
+                let vault_root = base_parts[..i].join("/");
+                return Some(PathBuf::from(format!("{}/{}", vault_root, target)));
+            }
+        }
+    }
+
+    Some(PathBuf::from(base_dir).join(target))
+}
+
+/// Compute a relative path for an image within the share bundle
+fn compute_share_relative_path(source: &std::path::Path, base_dir: &str, md_dir: &str) -> String {
+    let source_str = source.to_string_lossy().replace("\\", "/");
+    let base_str = base_dir.replace("\\", "/").trim_end_matches('/').to_string();
+    let md_dir_str = md_dir.replace("\\", "/").trim_end_matches('/').to_string();
+
+    if !base_str.is_empty() && source_str.starts_with(&base_str) {
+        source_str[base_str.len()..].trim_start_matches('/').to_string()
+    } else if !md_dir_str.is_empty() && source_str.starts_with(&md_dir_str) {
+        source_str[md_dir_str.len()..].trim_start_matches('/').to_string()
+    } else {
+        source.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "image".to_string())
+    }
+}
+
 /// Export markdown to Word document via md2docx_service
 #[tauri::command]
 async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
@@ -855,6 +946,140 @@ async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle)
             Ok(path_ref.display().to_string())
         }
         None => Err("用户取消了保存".to_string()),
+    }
+}
+
+/// Share a markdown document with its embedded local images as a ZIP archive
+#[tauri::command]
+async fn share_document(content: String, file_path: String, base_dir: String, app: tauri::AppHandle) -> Result<String, String> {
+    let md_path = PathBuf::from(&file_path);
+    let md_name = md_path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "document.md".to_string());
+    let md_dir = md_path.parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| base_dir.clone());
+
+    // Extract image references from markdown
+    let md_img_re = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").map_err(|e| e.to_string())?;
+    let wiki_img_re = Regex::new(r"!\[\[([^\]]+)\]\]").map_err(|e| e.to_string())?;
+
+    let mut image_refs: Vec<(String, String, String)> = Vec::new(); // (original, source_path, dest_relative)
+
+    // Standard markdown images: ![alt](path)
+    for cap in md_img_re.captures_iter(&content) {
+        let original = cap[0].to_string();
+        let path_str = cap[2].trim().to_string();
+        if path_str.starts_with("http://") || path_str.starts_with("https://") {
+            continue;
+        }
+        let source = if PathBuf::from(&path_str).is_absolute() {
+            PathBuf::from(&path_str)
+        } else {
+            PathBuf::from(&md_dir).join(&path_str)
+        };
+        if source.exists() {
+            let rel = compute_share_relative_path(&source, &base_dir, &md_dir);
+            image_refs.push((original, source.to_string_lossy().to_string(), rel));
+        }
+    }
+
+    // Obsidian WikiLink images: ![[path]]
+    for cap in wiki_img_re.captures_iter(&content) {
+        let original = cap[0].to_string();
+        let target = cap[1].trim().to_string();
+        if let Some(source) = resolve_wikilink_path(&target, &base_dir) {
+            if source.exists() {
+                let rel = compute_share_relative_path(&source, &base_dir, &md_dir);
+                image_refs.push((original, source.to_string_lossy().to_string(), rel));
+            }
+        }
+    }
+
+    // Create temp directory
+    let temp_dir = std::env::temp_dir().join(format!("typora-share-{}", std::process::id()));
+    fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
+
+    // Copy images to temp directory maintaining relative structure
+    for (_, source_path, dest_rel) in &image_refs {
+        let source = PathBuf::from(source_path);
+        let dest = temp_dir.join(dest_rel);
+        if let Some(parent) = dest.parent() {
+            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        fs::copy(&source, &dest).map_err(|e| format!("复制文件失败 {}: {}", source_path, e))?;
+    }
+
+    // Rewrite markdown content with relative image paths
+    let mut rewritten = content.clone();
+    for (original, _, dest_rel) in &image_refs {
+        if original.starts_with("![[") {
+            let target = &original[3..original.len()-2];
+            let name = PathBuf::from(target)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "image".to_string());
+            let replacement = format!("![{}]({})", name, dest_rel);
+            rewritten = rewritten.replace(original, &replacement);
+        } else {
+            let alt_end = original.find("](").unwrap_or(0);
+            let alt = if alt_end > 2 { &original[2..alt_end] } else { "" };
+            let replacement = format!("![{}]({})", alt, dest_rel);
+            rewritten = rewritten.replace(original, &replacement);
+        }
+    }
+
+    // Write rewritten markdown to temp directory
+    let md_dest = temp_dir.join(&md_name);
+    fs::write(&md_dest, rewritten).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    // Create zip archive
+    let zip_name = format!("{}.zip", md_name.replace(".md", "").replace(".markdown", ""));
+    let zip_path = temp_dir.join(&zip_name);
+    let zip_file = fs::File::create(&zip_path).map_err(|e| format!("创建zip文件失败: {}", e))?;
+    let mut zip = zip::ZipWriter::new(zip_file);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    use std::io::Read;
+    for entry in walkdir::WalkDir::new(&temp_dir) {
+        let entry = entry.map_err(|e| format!("遍历目录失败: {}", e))?;
+        let path = entry.path();
+        if path == temp_dir || path == zip_path {
+            continue;
+        }
+        let name = path.strip_prefix(&temp_dir)
+            .map_err(|e| format!("路径处理失败: {}", e))?
+            .to_string_lossy();
+        if path.is_file() {
+            zip.start_file(name, options).map_err(|e| format!("添加文件到zip失败: {}", e))?;
+            let mut file = fs::File::open(path).map_err(|e| format!("打开文件失败: {}", e))?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer).map_err(|e| format!("读取文件失败: {}", e))?;
+            zip.write_all(&buffer).map_err(|e| format!("写入zip失败: {}", e))?;
+        }
+    }
+    zip.finish().map_err(|e| format!("完成zip失败: {}", e))?;
+
+    // Show save dialog
+    use tauri_plugin_dialog::DialogExt;
+    let save_path = app.dialog()
+        .file()
+        .add_filter("ZIP 文件", &["zip"])
+        .set_file_name(&zip_name)
+        .blocking_save_file();
+
+    match save_path {
+        Some(path_ref) => {
+            let dest = path_ref.as_path().unwrap_or(std::path::Path::new(""));
+            fs::copy(&zip_path, dest).map_err(|e| format!("保存文件失败: {}", e))?;
+            let _ = fs::remove_dir_all(&temp_dir);
+            Ok(dest.display().to_string())
+        }
+        None => {
+            let _ = fs::remove_dir_all(&temp_dir);
+            Err("用户取消保存".to_string())
+        }
     }
 }
 
@@ -1563,7 +1788,7 @@ pub fn run() {
             open_folder_dialog, list_directory, watch_file, unwatch_file,
             fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
-            open_slides_window, get_platform, show_in_folder,
+            open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation
         ])
         .build(tauri::generate_context!())

@@ -64,6 +64,7 @@
     sourceToggle: document.getElementById('sourceToggle'),
     exportPdfBtn: document.getElementById('exportPdfBtn'),
     exportWordBtn: document.getElementById('exportWordBtn'),
+    shareBtn: document.getElementById('shareBtn'),
     slidesBtn: document.getElementById('slidesBtn'),
     translateBtn: document.getElementById('translateBtn'),
     themeToggle: document.getElementById('themeToggle'),
@@ -437,6 +438,7 @@
           });
         }
       }},
+      { label: '分享打包', action: () => shareDocument(index) },
       { label: '关闭', action: () => closeTab(index) },
       { label: '关闭其他', action: () => closeOtherTabs(index) },
       { label: '关闭全部', action: () => closeAllTabs() }
@@ -1506,7 +1508,7 @@
     overlay.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;z-index:99999;background:#000;';
 
     const iframe = document.createElement('iframe');
-    iframe.src = 'slides.html';
+    iframe.src = 'slides.html?v=' + Date.now();
     iframe.style.cssText = 'width:100%;height:100%;border:none;';
 
     iframe.addEventListener('load', () => {
@@ -2196,6 +2198,31 @@
   }
 
   // ============================================
+  // Share Document (ZIP with embedded images)
+  // ============================================
+  async function shareDocument(tabIndex) {
+    const idx = tabIndex !== undefined ? tabIndex : state.activeTab;
+    const tab = state.tabs[idx];
+    if (!tab || !tab.content) {
+      showToast('请先打开一个 Markdown 文件');
+      return;
+    }
+
+    try {
+      showToast('正在打包分享...');
+      const result = await invoke('share_document', {
+        content: tab.content,
+        filePath: tab.path || '',
+        baseDir: tab.baseDir || ''
+      });
+      showToast('分享打包成功: ' + result);
+    } catch (err) {
+      console.error('Share failed:', err);
+      showError('分享打包失败: ' + err);
+    }
+  }
+
+  // ============================================
   // PDF Export
   // ============================================
   function exportToPDF() {
@@ -2617,6 +2644,9 @@
     elements.exportPdfBtn.addEventListener('click', exportToPDF);
     if (elements.exportWordBtn) {
       elements.exportWordBtn.addEventListener('click', exportWord);
+    }
+    if (elements.shareBtn) {
+      elements.shareBtn.addEventListener('click', () => shareDocument());
     }
     if (elements.slidesBtn) {
       elements.slidesBtn.addEventListener('click', openSlides);
