@@ -1517,6 +1517,7 @@
         if (cw) {
           cw.__slides_sections = renderedSections;
           cw.__slides_baseDir = tab.baseDir || '';
+          cw.__slides_filePath = tab.path || '';
           if (typeof cw.__reloadSlides === 'function') {
             cw.__reloadSlides();
           } else {

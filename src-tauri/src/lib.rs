@@ -78,19 +78,6 @@ fn kill_md2docx_service_processes() {
     let _ = cmd.status();
 }
 
-/// Kill a process by PID (Windows only)
-#[cfg(windows)]
-fn kill_process_by_pid(pid: u32) {
-    let mut cmd = std::process::Command::new("taskkill");
-    cmd.args(["/F", "/PID", &pid.to_string()])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let _ = cmd.status();
-}
-
 /// File result containing path and content
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileResult {
@@ -265,7 +252,6 @@ fn extract_math_blocks(text: &str) -> Vec<(usize, usize, MathBlock)> {
                         let byte_end = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(text.len());
                         let content = text[byte_content_start..byte_end].to_string();
                         let content = content.trim_end().to_string();
-                        let byte_end_plus_two = if byte_end + 2 <= text.len() { byte_end + 2 } else { text.len() };
                         results.push((start, i + 2, MathBlock::Block(content)));
                         i += 2;
                         break;
@@ -1220,15 +1206,14 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
         resource_dir.join("../../dist/slides.html"),      // from target/release/
         resource_dir.join("dist/slides.html"),            // from project root
     ];
-    let mut found_path = None;
-    for (i, path) in possible_paths.iter().enumerate() {
+    let slides_path = possible_paths.iter().find(|path| {
         let clean = path.to_string_lossy().replace("\\\\?\\", "");
-        log_to_file(&format!("[SLIDES] trying path[{}]={}", i, clean));
-        if path.exists() {
-            found_path = Some(clean);
-            log_to_file(&format!("[SLIDES] found slides.html at path[{}]", i));
-            break;
-        }
+        log_to_file(&format!("[SLIDES] trying path={}", clean));
+        path.exists()
+    }).map(|p| p.to_string_lossy().replace("\\\\?\\", ""));
+
+    if let Some(ref p) = slides_path {
+        log_to_file(&format!("[SLIDES] found slides.html at {}", p));
     }
 
     // Build window with App URL (file:// crashes WebView2)

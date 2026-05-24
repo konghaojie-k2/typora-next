@@ -221,6 +221,64 @@
   }
 
   /**
+   * Process standard Markdown images: ![alt](path) - already rendered as <img>
+   * Convert relative paths to Tauri convertFileSrc for local file access.
+   */
+  function processStandardImages(container, baseDir) {
+    var convertFileSrc = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc;
+    if (!convertFileSrc) return;
+
+    var imgs = container.querySelectorAll('img');
+    var mdPath = window.__slides_filePath || '';
+    var mdDir = mdPath ? mdPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/') : baseDir;
+
+    for (var i = 0; i < imgs.length; i++) {
+      var img = imgs[i];
+      var src = img.getAttribute('src');
+      if (!src) continue;
+
+      // Skip http/https URLs
+      if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) continue;
+
+      // Skip already converted Tauri URLs
+      if (src.startsWith('asset://') || src.startsWith('tauri://')) continue;
+
+      // Resolve relative path
+      var resolvedPath;
+      if (src.startsWith('/') || src.match(/^[A-Za-z]:\\/)) {
+        // Absolute path
+        resolvedPath = src;
+      } else {
+        // Relative path - resolve from md file directory
+        if (mdDir) {
+          resolvedPath = mdDir + '/' + src;
+        } else if (baseDir) {
+          resolvedPath = baseDir + '/' + src;
+        } else {
+          resolvedPath = src;
+        }
+      }
+
+      // Normalize path
+      resolvedPath = resolvedPath.replace(/\\/g, '/');
+
+      var finalSrc = convertFileSrc(resolvedPath);
+      // Fix double-encoding issue
+      if (finalSrc && finalSrc.includes('%25')) {
+        finalSrc = decodeURIComponent(finalSrc);
+      }
+
+      console.log('[slides stdImg] src:', src, 'resolved:', resolvedPath, 'finalSrc:', finalSrc);
+      img.src = finalSrc;
+
+      img.onerror = function() {
+        img.alt = '图片加载失败: ' + src;
+        img.style.border = '1px dashed #f44';
+      };
+    }
+  }
+
+  /**
    * Post-process slide content: KaTeX math, Prism code highlighting, Mermaid diagrams, fragments, WikiLink images.
    */
   function postProcessSlides() {
@@ -233,6 +291,10 @@
     // 2. WikiLink images: ![[image.png]]
     var baseDir = window.__slides_baseDir || '';
     processWikiLinkImages(container, baseDir);
+
+    // 2.5 Standard Markdown images: ![alt](path) - already rendered as <img>
+    // Need to convert relative paths to Tauri convertFileSrc
+    processStandardImages(container, baseDir);
 
     // 3. KaTeX math rendering
     if (typeof renderMathInElement !== 'undefined') {
