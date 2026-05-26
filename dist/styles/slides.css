@@ -14,7 +14,7 @@
 }
 
 .reveal .slides section {
-  padding: 30px 50px;
+  padding: 30px 40px;
 }
 
 /* Headings */
@@ -244,5 +244,12 @@
 
 /* Mermaid diagrams - force correct font-size in SVG text elements */
 .reveal .mermaid svg text {
+  font-size: 16px !important;
+}
+
+/* Mermaid foreignObject internal HTML must not inherit .reveal font-size:28px */
+.reveal .mermaid svg foreignObject,
+.reveal .mermaid svg foreignObject div,
+.reveal .mermaid svg foreignObject span {
   font-size: 16px !important;
 }

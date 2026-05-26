@@ -88,7 +88,7 @@
       Reveal.initialize({
         width: 1280,
         height: 720,
-        margin: 0.06,
+        margin: 0.22,
         minScale: 0.2,
         maxScale: 2.0,
         transition: 'slide',
@@ -392,17 +392,38 @@
                     texts[t].style.fontSize = '18px';
                   }
 
-                  // Increase node dimensions for HTML content (foreignObject)
-                  var foreignObjects = svg.querySelectorAll('.node foreignObject');
+                  // Fix font-size inheritance inside foreignObject and sync inner div dimensions
+                  var foreignObjects = svg.querySelectorAll('foreignObject');
                   for (var f = 0; f < foreignObjects.length; f++) {
                     var fo = foreignObjects[f];
+                    fo.style.fontSize = '16px';
+                    var innerDiv = fo.querySelector('div');
+                    if (innerDiv) {
+                      innerDiv.style.fontSize = '16px';
+                      innerDiv.style.overflow = 'visible';
+                      // Mermaid sets fixed inline width/height on inner div; must sync with FO expansion
+                      var divW = parseFloat(innerDiv.style.width) || 0;
+                      var divH = parseFloat(innerDiv.style.height) || 0;
+                      if (divW > 0) innerDiv.style.width = (divW + 24) + 'px';
+                      if (divH > 0) innerDiv.style.height = (divH + 12) + 'px';
+                      var spans = innerDiv.querySelectorAll('span, p, b, i, strong, em');
+                      for (var s = 0; s < spans.length; s++) {
+                        spans[s].style.fontSize = '16px';
+                      }
+                    }
+                  }
+
+                  // Increase node dimensions for HTML content (foreignObject)
+                  var nodeForeignObjects = svg.querySelectorAll('.node foreignObject');
+                  for (var f = 0; f < nodeForeignObjects.length; f++) {
+                    var fo = nodeForeignObjects[f];
                     var origHeight = parseFloat(fo.getAttribute('height')) || 0;
                     var origWidth = parseFloat(fo.getAttribute('width')) || 0;
                     if (origHeight > 0) {
                       fo.setAttribute('height', (origHeight + 12).toString());
                     }
                     if (origWidth > 0) {
-                      fo.setAttribute('width', (origWidth + 8).toString());
+                      fo.setAttribute('width', (origWidth + 24).toString());
                     }
                   }
 
@@ -416,7 +437,7 @@
                       fo.setAttribute('height', (origHeight + 10).toString());
                     }
                     if (origWidth > 0) {
-                      fo.setAttribute('width', (origWidth + 8).toString());
+                      fo.setAttribute('width', (origWidth + 20).toString());
                     }
                   }
 
@@ -430,7 +451,7 @@
                       rect.setAttribute('height', (origHeight + 12).toString());
                     }
                     if (origWidth > 0) {
-                      rect.setAttribute('width', (origWidth + 8).toString());
+                      rect.setAttribute('width', (origWidth + 24).toString());
                     }
                   }
 
