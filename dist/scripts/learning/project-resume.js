@@ -231,6 +231,28 @@
           }
         };
 
+        // Bind "Generate" button → start chapter generation
+        ui.onGenerateClick = () => {
+          const genBtn = container.querySelector('#learningGenerateBtn');
+          if (genBtn) {
+            genBtn.disabled = true;
+            genBtn.textContent = '生成中...';
+          }
+          if (window.__TAURI__) {
+            const { invoke } = window.__TAURI__.core;
+            invoke('generate_chapters', {
+              projectPath: basePath,
+              outline: { chapters: project.chapters }
+            }).catch(err => {
+              console.error('[ProjectResume] Failed to start generation:', err);
+              if (genBtn) {
+                genBtn.disabled = false;
+                genBtn.textContent = '🔄 开始生成';
+              }
+            });
+          }
+        };
+
         // Enter learning mode
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
           window.TyporaNext.setLearningMode(true);
@@ -238,15 +260,6 @@
 
         const bridge = new AgentEventBridge(manager, ui);
         bridge.bind();
-
-        // Add "继续生成" button if there are chapters to generate
-        const toGenerate = project.chapters.filter(ch =>
-          ch.status === '未生成' || ch.status === 'not_generated' || ch.status === '失败' || ch.status === 'failed'
-        );
-
-        if (toGenerate.length > 0) {
-          addResumeButton(container, project, basePath, manager, ui);
-        }
 
         // Click outside to close panel → show orb
         const onClickOutside = (e) => {

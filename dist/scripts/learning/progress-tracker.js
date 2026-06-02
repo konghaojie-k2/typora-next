@@ -227,6 +227,7 @@
       this.onRetryClick = null;
       this.onAbortClick = null;
       this.onStartLearningClick = null;
+      this.onGenerateClick = null;
       this.onExitLearningClick = null;
       this.projectPath = null;
     }
@@ -254,16 +255,25 @@
         ch.status === 'ready' || ch.status === 'completed'
       );
       const hasReadable = firstReadableIndex >= 0;
+      const hasNotGenerated = this.manager.chapters.some(ch =>
+        ch.status === 'not_generated' || ch.status === 'failed'
+      );
+
+      // Determine primary action button
+      let actionBtn = '';
+      if (hasReadable) {
+        actionBtn = `<button class="learning-start-btn" id="learningStartBtn">📖 开始学习</button>`;
+      } else if (hasNotGenerated) {
+        actionBtn = `<button class="learning-start-btn" id="learningGenerateBtn">🔄 开始生成</button>`;
+      } else {
+        actionBtn = `<button class="learning-start-btn disabled" id="learningStartBtn" disabled>⏳ 先生成内容</button>`;
+      }
 
       this.container.innerHTML = `
         <div class="learning-progress-header-row">
           <div class="learning-progress-title">学习进度</div>
           <div style="display:flex;gap:8px;align-items:center;">
-            <button class="learning-start-btn ${hasReadable ? '' : 'disabled'}"
-                    id="learningStartBtn"
-                    ${hasReadable ? '' : 'disabled'}>
-              ${hasReadable ? '📖 开始学习' : '⏳ 先生成内容'}
-            </button>
+            ${actionBtn}
             <button class="learning-exit-btn" id="learningExitBtn" title="退出学习模式">退出</button>
             <button class="learning-progress-close-btn" id="learningProgressClose">×</button>
           </div>
@@ -328,6 +338,14 @@
       if (startBtn && !startBtn.disabled) {
         startBtn.addEventListener('click', () => {
           if (this.onStartLearningClick) this.onStartLearningClick();
+        });
+      }
+
+      // "Generate" button
+      const genBtn = this.container.querySelector('#learningGenerateBtn');
+      if (genBtn) {
+        genBtn.addEventListener('click', () => {
+          if (this.onGenerateClick) this.onGenerateClick();
         });
       }
 
@@ -489,6 +507,28 @@
           );
           if (firstIndex >= 0) {
             ui.onChapterClick(firstIndex);
+          }
+        };
+
+        // Bind "Generate" button → start chapter generation
+        ui.onGenerateClick = () => {
+          const genBtn = container.querySelector('#learningGenerateBtn');
+          if (genBtn) {
+            genBtn.disabled = true;
+            genBtn.textContent = '生成中...';
+          }
+          if (window.__TAURI__) {
+            const { invoke } = window.__TAURI__.core;
+            invoke('generate_chapters', {
+              projectPath,
+              outline: { chapters: manager.chapters }
+            }).catch(err => {
+              console.error('[ProgressTracker] Failed to start generation:', err);
+              if (genBtn) {
+                genBtn.disabled = false;
+                genBtn.textContent = '🔄 开始生成';
+              }
+            });
           }
         };
 

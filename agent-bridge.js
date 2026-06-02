@@ -36,12 +36,9 @@ function log(level, message, data = null) {
 // Output Helpers (stdout = JSON lines for Rust, stderr = logs)
 // ============================================
 function emit(type, data) {
-  const line = JSON.stringify({ type, data }) + '\n';
-  // Log to stderr before writing to stdout for debugging
-  process.stderr.write(`[emit-debug] type=${type} line_len=${line.length}\n`);
-  // Use process.stdout.write with explicit flush to avoid pipe buffering
-  const ok = process.stdout.write(line);
-  process.stderr.write(`[emit-debug] write returned: ${ok}\n`);
+  const line = JSON.stringify({ type, data });
+  // console.log is synchronous and flushes stdout immediately
+  console.log(line);
   log('event', `Emitted: ${type}`, data);
 }
 
@@ -334,18 +331,22 @@ async function main() {
         log('info', 'Starting plan stage', { goal: taskArgs.goal, level: taskArgs.level, hours: taskArgs.hours });
         await planCourse(queryFn, config, taskArgs);
         log('info', 'Plan stage completed');
+        process.exit(0);
         break;
       case 'generate':
         log('info', 'Starting generate stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length });
         await generateChapters(queryFn, config, taskArgs);
         log('info', 'Generate stage completed');
+        process.exit(0);
         break;
       default:
         emitError(`未知阶段: ${stage}`);
+        process.exit(1);
     }
   } catch (e) {
     log('error', 'Stage execution failed', { error: e.message, stack: e.stack });
     emitError(e.message);
+    process.exit(1);
   }
 }
 
