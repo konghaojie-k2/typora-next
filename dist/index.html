@@ -10,6 +10,8 @@
   <link href="vendor/prism/prism-tomorrow.min.css" rel="stylesheet">
   <!-- Main styles -->
   <link rel="stylesheet" href="styles/main.css">
+  <!-- Learning mode styles -->
+  <link rel="stylesheet" href="styles/learning.css">
 </head>
 <body>
   <div class="app-container">
@@ -75,6 +77,13 @@
           <button class="btn-icon" id="openFolderToolbarBtn" title="Open Folder (Ctrl+Shift+O)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+            </svg>
+          </button>
+          <button class="btn-icon" id="newLearningProjectBtn" title="学习模式">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5"/>
+              <path d="M2 12l10 5 10-5"/>
             </svg>
           </button>
         </div>
@@ -253,12 +262,110 @@
     </div>
   </div>
 
+  <!-- Learning Project Modal -->
+  <div class="modal-overlay" id="learningProjectModal" style="display: none;">
+    <div class="modal-content learning-modal">
+      <div class="modal-header">
+        <h2 id="learningModalTitle">新建学习项目</h2>
+        <button class="modal-close" id="learningModalClose">×</button>
+      </div>
+      <div class="modal-body" id="learningModalBody">
+        <!-- Step 1: Input Form -->
+        <div id="learningStepInput" class="learning-step">
+          <div class="learning-form-group">
+            <label class="learning-label" for="learningGoal">你想学什么？</label>
+            <input type="text" id="learningGoal" class="learning-input" placeholder="例如：理解 Transformer 的工作原理">
+          </div>
+          <div class="learning-form-group">
+            <label class="learning-label">难度级别</label>
+            <div class="learning-radio-group">
+              <label class="learning-radio">
+                <input type="radio" name="learningLevel" value="beginner">
+                <span>小白</span>
+              </label>
+              <label class="learning-radio">
+                <input type="radio" name="learningLevel" value="intermediate" checked>
+                <span>有编程基础</span>
+              </label>
+              <label class="learning-radio">
+                <input type="radio" name="learningLevel" value="advanced">
+                <span>专业进阶</span>
+              </label>
+            </div>
+          </div>
+          <div class="learning-form-group">
+            <label class="learning-label" for="learningHours">预计投入时间</label>
+            <select id="learningHours" class="learning-select">
+              <option value="1">1 小时</option>
+              <option value="2">2 小时</option>
+              <option value="3" selected>3 小时</option>
+              <option value="5">5 小时</option>
+              <option value="8">8 小时</option>
+              <option value="16">16 小时</option>
+            </select>
+          </div>
+          <div class="learning-error" id="learningError" style="display: none;"></div>
+        </div>
+
+        <!-- Step 2: Planning Loading -->
+        <div id="learningStepPlanning" class="learning-step" style="display: none;">
+          <div class="learning-loading">
+            <div class="learning-spinner"></div>
+            <p>AI 正在设计学习路径...</p>
+            <p class="learning-loading-hint">根据你的目标和难度，规划最佳学习路线</p>
+          </div>
+        </div>
+
+        <!-- Step 3: Outline Preview -->
+        <div id="learningStepOutline" class="learning-step" style="display: none;">
+          <div class="learning-outline-header">
+            <span class="learning-outline-info" id="learningOutlineInfo"></span>
+          </div>
+          <div class="learning-outline-list" id="learningOutlineList"></div>
+        </div>
+      </div>
+      <div class="modal-footer" id="learningModalFooter">
+        <button class="modal-btn modal-btn-secondary" id="learningModalCancel">取消</button>
+        <button class="modal-btn modal-btn-primary" id="learningModalAction">开始设计</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Learning Progress Panel (shown during chapter generation) -->
+  <div id="learningProgressPanel" class="learning-progress-panel" style="display: none;">
+    <div class="learning-progress-header">
+      <h3>学习进度</h3>
+      <button id="learningProgressClose" class="learning-progress-close-btn">×</button>
+    </div>
+    <div class="learning-progress-bar-container">
+      <div class="learning-progress-bar">
+        <div class="learning-progress-fill" style="width: 0%"></div>
+      </div>
+      <span class="learning-progress-text">0/0 章已完成</span>
+    </div>
+    <div class="learning-chapter-list" id="learningChapterList"></div>
+  </div>
+
+  <!-- Learning Mode Floating Orb (collapsed progress panel) -->
+  <div id="learningModeOrb" class="learning-mode-orb" style="display: none;" title="学习进度">
+    🎓
+  </div>
+
   <!-- Scripts (local vendor) -->
   <script src="vendor/katex/katex.min.js"></script>
   <script src="vendor/katex/auto-render.min.js"></script>
   <script src="vendor/prism/prism.min.js"></script>
   <script src="vendor/prism/prism-autoloader.min.js" data-autoloader-path="vendor/prism/"></script>
   <script src="vendor/mermaid/mermaid.min.js"></script>
+  <script src="scripts/learning/project-manager.js"></script>
+  <script src="scripts/learning/progress-tracker.js"></script>
+  <script src="scripts/learning/learning-renderer.js"></script>
+  <script src="scripts/learning/project-resume.js"></script>
+  <script src="scripts/learning/learning-hub.js"></script>
   <script src="scripts/main.js"></script>
+  <script>
+    // Learning mode: toolbar button opens hub (project list)
+    // No auto-resume on startup — user explicitly enters learning mode
+  </script>
 </body>
 </html>

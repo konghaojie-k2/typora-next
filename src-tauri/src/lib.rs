@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
+pub mod ai_agent;
+
 /// AI provider type
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -63,6 +65,7 @@ pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
     watched_path: Mutex<Option<String>>,
     md2docx_pid: Mutex<Option<u32>>,
+    agent_process: ai_agent::AgentProcess,
 }
 
 /// Kill all existing md2docx_service processes (Windows only)
@@ -1686,6 +1689,65 @@ async fn update_annotation(
     save_annotations_file(&app, &file_path, &annotations)
 }
 
+/// Create .learning/project.json for a learning project
+#[tauri::command]
+fn create_learning_project(
+    project_path: String,
+    outline: serde_json::Value,
+    goal: Option<String>,
+) -> Result<String, String> {
+    let path = std::path::PathBuf::from(&project_path);
+    let learning_dir = path.join(".learning");
+    let json_path = learning_dir.join("project.json");
+
+    // Don't overwrite existing project
+    if json_path.exists() {
+        return Ok(json_path.to_string_lossy().to_string());
+    }
+
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("Failed to create .learning directory: {}", e))?;
+
+    let chapters = outline["chapters"]
+        .as_array()
+        .ok_or("outline.chapters must be an array")?;
+
+    let project = serde_json::json!({
+        "name": goal.unwrap_or_else(|| {
+            chapters.first()
+                .and_then(|c| c["title"].as_str())
+                .unwrap_or("Learning Project")
+                .to_string()
+        }),
+        "created": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        "chapters": chapters.iter().enumerate().map(|(i, ch)| {
+            serde_json::json!({
+                "title": ch["title"].as_str().unwrap_or(&format!("第 {} 章", i + 1)),
+                "duration_minutes": ch["duration_minutes"].as_u64().unwrap_or(0),
+                "concepts": ch["concepts"].as_array().map(|arr| {
+                    arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
+                }).unwrap_or_default(),
+                "status": "not_generated",
+                "file": null
+            })
+        }).collect::<Vec<_>>(),
+        "total_duration": outline["total_duration"].as_u64().unwrap_or_else(|| {
+            chapters.iter().map(|c| c["duration_minutes"].as_u64().unwrap_or(0)).sum()
+        })
+    });
+
+    let json_str = serde_json::to_string_pretty(&project)
+        .map_err(|e| format!("Failed to serialize project: {}", e))?;
+
+    std::fs::write(&json_path, json_str)
+        .map_err(|e| format!("Failed to write project.json: {}", e))?;
+
+    Ok(json_path.to_string_lossy().to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1705,7 +1767,9 @@ pub fn run() {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
             md2docx_pid: Mutex::new(None),
+            agent_process: ai_agent::AgentProcess::default(),
         })
+        .manage(ai_agent::AgentProcess::default())
         .setup(|app| {
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -1774,7 +1838,9 @@ pub fn run() {
             fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,
             open_slides_window, get_platform, show_in_folder, share_document,
-            get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation
+            get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
+            ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
+            create_learning_project
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

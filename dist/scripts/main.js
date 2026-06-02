@@ -855,6 +855,55 @@
     }
   }
 
+  /**
+   * Load a folder directly (without dialog) - used by learning mode
+   */
+  async function loadFolderPath(folderPath) {
+    if (!folderPath) return;
+    try {
+      state.currentFolder = folderPath;
+      await loadFileTree(folderPath);
+      // Switch to files tab
+      switchSidebarTab('files');
+    } catch (err) {
+      console.error('[loadFolderPath] Failed:', err);
+    }
+  }
+
+  /**
+   * Unload current folder and clear file tree - used when exiting learning mode
+   */
+  function unloadFolder() {
+    state.currentFolder = null;
+    if (elements.fileTree) {
+      elements.fileTree.innerHTML = '<p class="file-tree-empty">未打开文件夹</p>';
+    }
+  }
+
+  /**
+   * Toggle learning mode visual indicator
+   */
+  function setLearningMode(enabled) {
+    document.body.classList.toggle('learning-mode', enabled);
+
+    // Insert/remove badge in toolbar
+    let badge = document.getElementById('learningModeBadge');
+    if (enabled) {
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.id = 'learningModeBadge';
+        badge.className = 'learning-mode-badge';
+        badge.textContent = '🎓 学习模式';
+        const toolbarRight = document.querySelector('.toolbar-right');
+        if (toolbarRight) {
+          toolbarRight.insertBefore(badge, toolbarRight.firstChild);
+        }
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+  }
+
   function renderFileTree(entries, container = null, depth = 0) {
     const target = container || elements.fileTree;
 
@@ -3751,6 +3800,9 @@
     state,
     openFile,
     openFolder,
+    loadFolderPath,
+    unloadFolder,
+    setLearningMode,
     addTab,
     switchTab,
     closeTab,
