@@ -100,6 +100,61 @@ cd /c/CODE/typora-next/src-tauri/target/release
 ./app.exe
 ```
 
+## Testing Standards (BDD + TDD)
+
+本项目所有功能按 **Scrum + BDD + TDD** 流程开发。
+
+### 目录结构
+
+```
+tests/
+├── features/           # BDD Gherkin 场景
+├── step_defs/          # BDD Step Definitions
+├── integration/        # JS Integration Tests
+├── e2e/                # CLI 端到端测试
+├── unit/               # JS 单元测试
+└── mock-agent-sdk/     # Mock Agent SDK
+
+src-tauri/tests/        # Rust Integration Tests
+```
+
+### 开发顺序（强制）
+
+1. 写 BDD feature 文件 → 2. 写 Step Definitions → 3. 写 TDD 测试 → 4. 运行测试（红）→ 5. 实现 → 6. 运行测试（绿）→ 7. BDD 验收
+
+### BDD Step Pattern 规范
+
+**禁止在 pattern 中写引号**：
+
+```javascript
+// ✅ 正确
+steps.when('用户输入{string}', ...)
+steps.when('点击第{int}章', ...)
+
+// ❌ 错误  
+steps.when('用户输入"{string}"', ...)
+```
+
+原因：`{string}` 自动匹配中英文引号，pattern 中写引号会导致双重匹配失败。
+
+### TDD 规范
+
+- **JS 测试**：使用 `tests/unit/test-runner.js`（原生 JS，零外部依赖）
+- **Rust 测试**：使用 `tests/*_test.rs`（integration test 格式），主仓库运行：`cargo test --test xxx`
+- **Mock**：Agent SDK 必须可注入，禁止硬编码 `require('@anthropic-ai/claude-agent-sdk')`
+
+### 验收标准
+
+一个 Sprint 完成当且仅当：
+- [ ] BDD 场景全绿
+- [ ] JS TDD 全绿
+- [ ] Rust test 全绿（主仓库执行）
+- [ ] `cargo check` 无错误
+
+详细规范见 `tests/README.md`。
+
+---
+
 ## Important Notes
 
 ### Release 模式前端嵌入
@@ -138,3 +193,15 @@ Tauri release 模式下，前端资源（dist/）在编译时嵌入 exe。修改
 - `archive/` — 归档历史
 
 **不再使用 project harness**（已移除 `.project/` 目录）。
+
+### Worktree 与 daily-reflection 联动
+
+**创建新 worktree 时，必须将 `.daily_reflection/` 替换为指向主仓库的符号链接**，否则 worktree 中的状态更新不会同步回主仓库：
+
+```bash
+# 在 worktree 根目录执行
+rm -rf .daily_reflection
+ln -s "$(git -C <主仓库路径> rev-parse --show-toplevel)/.daily_reflection" .daily_reflection
+```
+
+此规则确保所有 worktree 共享同一份 `context-sync.json` 和 `decisions.md`。
