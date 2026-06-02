@@ -129,6 +129,108 @@ Tauri release 模式下，前端资源（dist/）在编译时嵌入 exe。修改
 - 前端：匹配现有原生 JS 风格，不引入框架
 - 最小代码解决问题，不做过度抽象
 
+## Testing Standards (BDD + TDD)
+
+本项目所有功能按 **Scrum + BDD + TDD** 流程开发。
+
+### 目录结构
+
+```
+tests/
+├── features/           # BDD Gherkin 场景
+├── step_defs/          # BDD Step Definitions（内存模拟层）
+├── bdd-acceptance/     # BDD 可用性验收测试（真实文件系统层）★ 新增
+├── integration/        # JS Integration Tests
+├── e2e/                # CLI 端到端测试
+├── unit/               # JS 单元测试
+└── mock-agent-sdk/     # Mock Agent SDK
+
+src-tauri/tests/        # Rust Integration Tests
+```
+
+### 三层测试金字塔
+
+```
+┌─────────────────────────────────────────┐
+│  单元测试（test_*.js）                    │ ← 验证逻辑对不对
+│  - ChapterStatusManager 状态机           │
+│  - ProjectList CRUD                      │
+│  - generateFilename 纯函数               │
+└─────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────┐
+│  验收测试（bdd-acceptance/）              │ ← 验证能不能用 ★ 关键
+│  - 真实文件系统（Node.js fs）            │
+│  - 真实前端模块（require 实际代码）       │
+│  - 验证 Windows 路径 / ACL 权限          │
+│  - 验证跨模块一致性（如文件名生成）       │
+└─────────────────────────────────────────┘
+           ↓
+┌─────────────────────────────────────────┐
+│  手动验收（运行 app.exe 点一点）          │ ← 验证体验好不好
+│  - 创建 → 导入 → 进入 → 阅读 全链路      │
+└─────────────────────────────────────────┘
+```
+
+### 编译前必跑清单（强制）
+
+**任何代码修改后，release 编译前必须依次执行：**
+
+```bash
+# 1. 单元测试（快速验证逻辑层）
+cd tests/unit
+node test_progress_tracker.js
+node test_learning_hub.js
+node test_project_resume.js
+
+# 2. 可用性验收测试（真实文件系统）
+cd tests/bdd-acceptance
+node runner.js
+
+# 3. Rust 编译检查
+cd src-tauri
+cargo check
+```
+
+**验收测试必须全绿才能编译。** 这是 Sprint 2 的教训：
+> Sprint 1 只有内存模拟的 step definitions，没有真实文件系统验证，
+> 导致 Windows 路径 bug、ACL 权限缺失、状态不同步等问题全部漏到 Sprint 2 才发现。
+
+### BDD Step Pattern 规范
+
+**禁止在 pattern 中写引号**：
+
+```javascript
+// ✅ 正确
+steps.when('用户输入{string}', ...)
+steps.when('点击第{int}章', ...)
+
+// ❌ 错误  
+steps.when('用户输入"{string}"', ...)
+```
+
+原因：`{string}` 自动匹配中英文引号，pattern 中写引号会导致双重匹配失败。
+
+### TDD 规范
+
+- **JS 测试**：使用 `tests/unit/test-runner.js`（原生 JS，零外部依赖）
+- **Rust 测试**：使用 `tests/*_test.rs`（integration test 格式），主仓库运行：`cargo test --test xxx`
+- **Mock**：Agent SDK 必须可注入，禁止硬编码 `require('@anthropic-ai/claude-agent-sdk')`
+
+### 验收标准
+
+一个 Sprint 完成当且仅当：
+- [ ] BDD 场景全绿（bdd-acceptance 层）
+- [ ] JS TDD 全绿（unit 层）
+- [ ] Rust test 全绿（主仓库执行）
+- [ ] `cargo check` 无错误
+- [ ] **UX 状态机检查**（Sprint 2 教训）：
+  - [ ] 功能有明确的进入/退出路径
+  - [ ] 用户能感知当前所处状态（视觉标识或明确提示）
+  - [ ] 异常退出后有恢复机制
+
+---
+
 ## 上下文管理
 
 本项目使用 **daily-reflection** skill 进行跨会话状态同步，数据存放在 `.daily_reflection/`：
