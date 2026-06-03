@@ -825,36 +825,47 @@ fn show_in_folder(path: String) -> Result<(), String> {
     result.map(|_| ()).map_err(|e| format!("无法打开文件夹: {}", e))
 }
 
-/// Export markdown to Word document via md2docx_service
+/// Export markdown to Word document via md2docx_service (Windows only)
 #[tauri::command]
 async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
-    let resp = ureq::post("http://127.0.0.1:6007/convert")
-        .set("Content-Type", "text/plain; charset=utf-8")
-        .send_string(&markdown)
-        .map_err(|e| format!("md2docx_service 请求失败: {}", e))?;
+    #[cfg(not(windows))]
+    {
+        let _ = markdown;
+        let _ = file_name;
+        let _ = app;
+        return Err("Word 导出功能当前仅支持 Windows 平台".to_string());
+    }
 
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("读取响应失败: {}", e))?;
+    #[cfg(windows)]
+    {
+        let resp = ureq::post("http://127.0.0.1:6007/convert")
+            .set("Content-Type", "text/plain; charset=utf-8")
+            .send_string(&markdown)
+            .map_err(|e| format!("md2docx_service 请求失败: {}", e))?;
 
-    let default_name = file_name.replace(".md", ".docx").replace(".markdown", ".docx");
+        let mut bytes = Vec::new();
+        resp.into_reader()
+            .read_to_end(&mut bytes)
+            .map_err(|e| format!("读取响应失败: {}", e))?;
 
-    use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog()
-        .file()
-        .add_filter("Word Document", &["docx"])
-        .set_file_name(&default_name)
-        .blocking_save_file();
+        let default_name = file_name.replace(".md", ".docx").replace(".markdown", ".docx");
 
-    match file_path {
-        Some(path) => {
-            let path_ref = path.as_path().unwrap_or(std::path::Path::new(""));
-            std::fs::write(path_ref, &bytes)
-                .map_err(|e| format!("写入文件失败: {}", e))?;
-            Ok(path_ref.display().to_string())
+        use tauri_plugin_dialog::DialogExt;
+        let file_path = app.dialog()
+            .file()
+            .add_filter("Word Document", &["docx"])
+            .set_file_name(&default_name)
+            .blocking_save_file();
+
+        match file_path {
+            Some(path) => {
+                let path_ref = path.as_path().unwrap_or(std::path::Path::new(""));
+                std::fs::write(path_ref, &bytes)
+                    .map_err(|e| format!("写入文件失败: {}", e))?;
+                Ok(path_ref.display().to_string())
+            }
+            None => Err("用户取消了保存".to_string()),
         }
-        None => Err("用户取消了保存".to_string()),
     }
 }
 
