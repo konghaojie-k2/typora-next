@@ -575,9 +575,32 @@
       initWikiLinks();
       initObsidianEmbeds(baseDir);
       initDownloadButtons();
+
+      // Sprint 3: Enhance learning elements (concept/question/quiz cards)
+      if (window.LearningModeIntegration) {
+        try {
+          window.LearningModeIntegration.enhanceLearningElements();
+        } catch (e) {
+          console.warn('[Sprint3] enhanceLearningElements failed:', e);
+        }
+      }
+
       console.log('[DEBUG renderMarkdown] about to call applyAnnotations');
       await applyAnnotations();
       console.log('[DEBUG renderMarkdown] applyAnnotations done');
+
+      // Sprint 3: Setup quiz panel + selection explainer (only in learning mode)
+      if (document.body.classList.contains('learning-mode') && window.LearningModeIntegration) {
+        try {
+          // Get current chapter file path
+          const activeTab = state.tabs[state.activeTab];
+          const chapterFile = activeTab ? activeTab.path : '';
+          window.LearningModeIntegration.setupQuizPanel(chapterFile);
+          window.LearningModeIntegration.setupSelectionExplainer();
+        } catch (e) {
+          console.warn('[Sprint3] mode integration setup failed:', e);
+        }
+      }
 
       // Reset translation state on re-render
       state.isTranslated = false;
