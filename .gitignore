@@ -18,6 +18,10 @@ Thumbs.db
 *.dll
 *.so
 
+# Node.js (Agent SDK 本地依赖)
+/node_modules/
+/package-lock.json
+
 # Claude / AI assistant files
 .claude/
 
