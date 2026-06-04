@@ -28,6 +28,8 @@ const mockInvoke = async (cmd, args) => {
       return _generateChapters(args);
     case 'plan_course':
       return _planCourse(args);
+    case 'persist_quiz_result':
+      return _persistQuizResult(args);
     default:
       throw new Error(`Mock invoke not implemented: ${cmd}`);
   }
@@ -116,6 +118,54 @@ function _generateChapters({ projectPath, outline }) {
 function _planCourse({ goal, level, hours }) {
   // Return a mock outline immediately
   return { status: 'planning' };
+}
+
+function _persistQuizResult({ projectPath, chapterFile, rating, score, weakConcepts, answers, timestamp }) {
+  const learningDir = path.join(projectPath, '.learning');
+  fs.mkdirSync(learningDir, { recursive: true });
+
+  // Update project.json
+  const projectJsonPath = path.join(learningDir, 'project.json');
+  let project = { name: 'Test', chapters: [], concepts: {} };
+  if (fs.existsSync(projectJsonPath)) {
+    project = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
+  }
+
+  const basename = path.basename(chapterFile);
+  if (project.chapters) {
+    project.chapters.forEach(ch => {
+      if (ch.file === basename || ch.file === chapterFile) {
+        ch.status = 'completed';
+        ch.last_quiz_rating = rating;
+        ch.last_quiz_at = timestamp;
+      }
+    });
+  }
+
+  project.concepts = project.concepts || {};
+  (weakConcepts || []).forEach(c => {
+    project.concepts[c] = { status: rating === 'struggling' ? 'struggling' : 'learning', source_chapter: basename };
+  });
+
+  fs.writeFileSync(projectJsonPath, JSON.stringify(project, null, 2), 'utf-8');
+
+  // Append to quiz-history.json
+  const historyPath = path.join(learningDir, 'quiz-history.json');
+  let history = { version: '1.0', entries: [] };
+  if (fs.existsSync(historyPath)) {
+    history = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+  }
+  history.entries.push({
+    chapter_file: basename,
+    timestamp,
+    score,
+    rating,
+    weak_concepts: weakConcepts || [],
+    answers: answers || []
+  });
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
+
+  return true;
 }
 
 // ============================================

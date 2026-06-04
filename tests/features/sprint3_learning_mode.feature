@@ -60,3 +60,19 @@ Feature: 学习模式下的文档渲染和测验
     Then 调用 AI 获取解释
     And 显示弹窗，内容为深入浅出的解释
     And 解释包含生活化类比
+
+  Scenario: 关闭测验模态框后持久化结果并显示结果卡
+    Given 用户提交第 2 章测验
+    When 用户作答并点击"提交"
+    And AI 评估答案
+    And 用户关闭测验模态框
+    Then project.json 中本章状态更新为"completed"
+    And quiz-history.json 中新增一条测验记录
+    And 章节末尾显示"测验结果"折叠卡
+
+  Scenario: 关闭未提交的测验模态框后可再次开始测验
+    Given 用户提交第 2 章测验
+    When 用户关闭测验模态框
+    And 用户再次点击"开始测验"
+    Then 测验模态框重新打开
+    And 用户可以正常作答

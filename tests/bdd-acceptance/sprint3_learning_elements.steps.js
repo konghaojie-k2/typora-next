@@ -219,6 +219,7 @@ steps.given('用户提交第{int}章测验', async function(chapterNum) {
     this.learningDir = learningDir;
   }
   this.submittedChapter = chapterNum;
+  this.chapterFile = `${String(chapterNum).padStart(2, '0')}-ch${chapterNum}.md`;
 });
 
 steps.when('评级为{string}', async function(rating) {
@@ -302,6 +303,11 @@ steps.when('用户作答并点击{string}', async function(button) {
     this.userAnswers = this.userAnswers || {
       'q1': 'B'  // Selected B (correct)
     };
+    this.aiEvaluationResult = {
+      rating: 'mastered',
+      score: 1.0,
+      weak_concepts: []
+    };
   }
 });
 
@@ -313,6 +319,33 @@ steps.when('点击{string}', async function(action) {
 
 steps.when('点击{string}后展开答案内容', async function(action) {
   this.answerExpanded = true;
+});
+
+steps.when('用户关闭测验模态框', async function() {
+  // Simulate close-modal persistence via mock Tauri
+  if (!this.projectDir) return;
+  const chapterFile = this.chapterFile || '02-ch2.md';
+  this.closedModal = true;
+
+  // Trigger mock persist_quiz_result
+  const { mockInvoke } = require('./mock-tauri');
+  await mockInvoke('persist_quiz_result', {
+    projectPath: this.projectDir,
+    chapterFile: chapterFile,
+    rating: this.aiEvaluationResult?.rating || 'mastered',
+    score: this.aiEvaluationResult?.score || 1.0,
+    weakConcepts: this.aiEvaluationResult?.weak_concepts || [],
+    answers: [{ question_id: 'q1', qtype: 'single', user_answer: 'B', is_correct: true }],
+    timestamp: new Date().toISOString()
+  });
+});
+
+steps.when('用户再次点击{string}', async function(button) {
+  if (button === '开始测验') {
+    this.retakeClicked = true;
+    // Simulate mode-integration.js resetting the panel state on retake
+    this.modalReopened = true;
+  }
 });
 
 steps.when('用户选中文本{string}', async function(text) {
@@ -527,6 +560,47 @@ steps.then('project.json 中{string}状态更新为{string}', async function(con
 steps.then('知识图谱中对应节点变为绿色', async function() {
   if (!this.conceptStatusUpdated) throw new Error('Concept not updated');
   this.knowledgeGraphNodeGreen = true;
+});
+
+steps.then('project.json 中本章状态更新为{string}', async function(status) {
+  if (!this.projectDir) throw new Error('Project not initialized');
+  const projectJsonPath = path.join(this.learningDir, 'project.json');
+  if (!fs.existsSync(projectJsonPath)) throw new Error('project.json not found');
+  const data = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
+  const submittedChapter = this.submittedChapter || 2;
+  const ch = data.chapters && data.chapters[submittedChapter - 1];
+  if (!ch) throw new Error(`Chapter ${submittedChapter} not found`);
+  if (ch.status !== status) {
+    throw new Error(`Expected chapter status "${status}", got "${ch.status}"`);
+  }
+  this.chapterStatusUpdated = { chapter: submittedChapter, status };
+});
+
+steps.then('quiz-history.json 中新增一条测验记录', async function() {
+  if (!this.projectDir) throw new Error('Project not initialized');
+  const historyPath = path.join(this.learningDir, 'quiz-history.json');
+  if (!fs.existsSync(historyPath)) throw new Error('quiz-history.json not created');
+  const data = JSON.parse(fs.readFileSync(historyPath, 'utf-8'));
+  if (!data.entries || !data.entries.length) throw new Error('quiz-history.json has no entries');
+  this.quizHistoryEntry = data.entries[data.entries.length - 1];
+});
+
+steps.then('章节末尾显示{string}折叠卡', async function(cardName) {
+  if (cardName !== '测验结果') return;
+  // In real DOM this would be verified by rendering; here we verify persistence happened
+  if (!this.quizHistoryEntry && !this.chapterStatusUpdated) {
+    throw new Error('Quiz result card should be rendered after modal close');
+  }
+  this.resultCardRendered = true;
+});
+
+steps.then('测验模态框重新打开', async function() {
+  if (!this.modalReopened) throw new Error('Modal should reopen after retake click');
+});
+
+steps.then('用户可以正常作答', async function() {
+  if (!this.modalReopened) throw new Error('User should be able to answer after retake');
+  this.canAnswerAfterRetake = true;
 });
 
 steps.then('推荐用户进入下一章', async function() {

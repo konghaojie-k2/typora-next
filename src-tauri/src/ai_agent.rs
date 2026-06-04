@@ -483,11 +483,13 @@ use std::collections::HashMap;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuizQuestion {
     pub id: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "qtype")]
     pub qtype: String,           // "single" | "multiple" | "short"
     pub question: String,
     pub options: Vec<QuizOption>,
     pub correct: Value,          // String for single, Vec<String> for multiple, null for short
+    #[serde(default)]
+    pub weak_concepts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -505,7 +507,7 @@ pub struct QuizResult {
     pub suggestions: Vec<String>,
 }
 
-/// Generate 3-5 quiz questions for a chapter (calls Agent SDK)
+/// Read quiz questions from pre-generated .quiz.json (Sprint 3 refactored: no real-time AI)
 #[tauri::command]
 pub async fn generate_chapter_quiz(
     chapter_file: String,
@@ -513,38 +515,49 @@ pub async fn generate_chapter_quiz(
 ) -> Result<Vec<QuizQuestion>, String> {
     log::info!("[Sprint3] generate_chapter_quiz for: {}", chapter_file);
 
-    // Read chapter content (for prompt context)
-    let chapter_content = std::fs::read_to_string(&chapter_file)
-        .map_err(|e| format!("Failed to read chapter: {}", e))?;
+    // Infer quiz.json path: replace .md with .quiz.json
+    // Normalize path separators for Windows
+    let chapter_file_norm = chapter_file.replace('/', "\\");
+    let quiz_path = if chapter_file_norm.ends_with(".md") {
+        format!("{}.quiz.json", &chapter_file_norm[..chapter_file_norm.len() - 3])
+    } else {
+        format!("{}.quiz.json", chapter_file_norm)
+    };
+    log::info!("[Sprint3] reading quiz.json: {}", quiz_path);
 
-    // Spawn agent-bridge.js with stage=quiz
-    let bridge_path = get_agent_bridge_path()?;
-    let mut cmd = std::process::Command::new("node");
-    cmd.arg(&bridge_path)
-        .arg("quiz")
-        .arg(&chapter_file)
-        .arg("--context")
-        .arg(&chapter_content)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let output = cmd.output()
-        .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        // Sprint 3 decision: no silent fallback — propagate Agent failure
-        return Err(format!("Agent SDK failed: {}", stderr));
+    // Also log what files exist in the parent directory for debugging
+    let parent = std::path::Path::new(&quiz_path).parent();
+    if let Some(p) = parent {
+        match std::fs::read_dir(p) {
+            Ok(entries) => {
+                let files: Vec<String> = entries.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect();
+                log::info!("[Sprint3] files in dir {:?}: {:?}", p, files);
+            }
+            Err(e) => log::warn!("[Sprint3] cannot read dir {:?}: {}", p, e),
+        }
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let questions: Vec<QuizQuestion> = serde_json::from_str(&stdout)
-        .map_err(|e| format!("Failed to parse quiz JSON: {}", e))?;
+    let quiz_content = std::fs::read_to_string(&quiz_path)
+        .map_err(|e| format!("找不到测验文件 '{}': {}。请先生成 quiz.json 或检查文件路径。", quiz_path, e))?;
+
+    let quiz_json: serde_json::Value = serde_json::from_str(&quiz_content)
+        .map_err(|e| format!("解析 quiz.json 失败: {}", e))?;
+
+    let questions: Vec<QuizQuestion> = quiz_json["questions"]
+        .as_array()
+        .ok_or("quiz.json 缺少 questions 字段")?
+        .iter()
+        .map(|q| serde_json::from_value(q.clone()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| format!("解析题目失败: {}", e))?;
 
     if questions.is_empty() || questions.len() > 5 {
         return Err(format!("Invalid question count: {} (expected 3-5)", questions.len()));
     }
 
+    log::info!("[Sprint3] loaded {} questions from quiz.json", questions.len());
     Ok(questions)
 }
 
@@ -571,6 +584,13 @@ pub async fn evaluate_quiz(
         .arg(payload.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
 
     let output = cmd.output()
         .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
@@ -600,23 +620,38 @@ pub async fn evaluate_quiz(
 pub async fn explain_selection(
     text: String,
     context: String,
+    app_handle: AppHandle,
     _agent_process: State<'_, AgentProcess>,
 ) -> Result<String, String> {
-    log::info!("[Sprint3] explain_selection: {} chars", text.len());
+    log::info!("[Sprint3] explain_selection START: text_len={}, context_len={}", text.len(), context.len());
 
     // Limit input size to prevent abuse
     let text = if text.len() > 200 {
+        log::info!("[Sprint3] explain_selection: text truncated from {} to 200 chars", text.len());
         text.chars().take(200).collect()
     } else {
         text
     };
 
+    let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
+    log::info!("[Sprint3] explain_selection: bridge_path={:?}", bridge_path);
+
+    // Use nested { config, args } format consistent with plan/generate stages
     let payload = serde_json::json!({
-        "text": text,
-        "context": context,
-        "maxLength": 300,
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "text": text,
+            "context": context,
+            "maxLength": 300,
+        }
     });
+    log::info!("[Sprint3] explain_selection: payload={}", payload);
 
     let mut cmd = std::process::Command::new("node");
     cmd.arg(&bridge_path)
@@ -625,20 +660,38 @@ pub async fn explain_selection(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[Sprint3] explain_selection: spawning node process...");
     let output = cmd.output()
-        .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
+        .map_err(|e| {
+            log::error!("[Sprint3] explain_selection: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    log::info!("[Sprint3] explain_selection: exit_code={:?}, stdout_len={}, stderr_len={}",
+        output.status.code(), output.stdout.len(), output.stderr.len());
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[Sprint3] explain_selection: agent failed: stderr={}", stderr);
         return Err(format!("Agent explanation failed: {}", stderr));
     }
 
     let explanation = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::info!("[Sprint3] explain_selection: explanation_len={}", explanation.len());
 
     if explanation.is_empty() {
+        log::error!("[Sprint3] explain_selection: agent returned empty output");
         return Err("Agent returned empty explanation".to_string());
     }
 
+    log::info!("[Sprint3] explain_selection SUCCESS");
     Ok(explanation)
 }
 
