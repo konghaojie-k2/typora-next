@@ -27,11 +27,9 @@
 
   function formatLocalTime(date) {
     const d = date || new Date();
-    // WebView toLocaleString may use UTC; force UTC+8 (Beijing/Shanghai)
     const pad = n => String(n).padStart(2, '0');
-    const utcMs = d.getTime() + (d.getTimezoneOffset() * 60000);
-    const cst = new Date(utcMs + (8 * 60 * 60000));
-    return `${cst.getFullYear()}-${pad(cst.getMonth() + 1)}-${pad(cst.getDate())} ${pad(cst.getHours())}:${pad(cst.getMinutes())}:${pad(cst.getSeconds())}`;
+    // getFullYear/getHours etc use system timezone (UTC+8), no offset needed
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
   }
 
   // ============================================
@@ -507,7 +505,7 @@
         score: historyPayload.result.score,
         weakConcepts: historyPayload.result.weak_concepts || [],
         answers: answerRecords,
-        timestamp: historyPayload.timestamp
+        timestamp: formatLocalTime()
       };
 
       await window.__TAURI__.core.invoke('persist_quiz_result', payload);
@@ -854,11 +852,9 @@
       _quizPanel.setResult({ rating, score, weak_concepts: weakList, suggestions: [] }); // submitting → graded
     }
 
-    // Hide footer after submission; user can close via header ✕ or clicking outside
+    // Hide footer completely (only keep toast)
     const footer = _quizModal.querySelector('div:last-child');
-    footer.innerHTML = '';
-    footer.style.padding = '0';
-    footer.style.borderTop = 'none';
+    if (footer) footer.style.display = 'none';
 
     // Show rating toast card instead of legacy toast
     showQuizToast(rating, score, weakList);
