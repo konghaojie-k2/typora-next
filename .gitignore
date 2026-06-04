@@ -36,3 +36,6 @@ progress.md
 .project/
 00-meta/
 90-inbox/
+
+# Agent bridge logs
+agent-bridge.log
