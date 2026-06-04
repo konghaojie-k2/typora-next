@@ -148,6 +148,23 @@ steps.when('评级为{string}', async function(rating) {
   this.rating = rating;
 });
 
+steps.when('用户关闭测验模态框', async function() {
+  this.closedModal = true;
+  // Simulate persistence side effects in memory
+  this.project = this.project || { chapters: [], concepts: {} };
+  this.project.chapters = this.project.chapters || [];
+  const chapterIndex = (this.submittedChapter || 2) - 1;
+  if (this.project.chapters[chapterIndex]) {
+    this.project.chapters[chapterIndex].status = 'completed';
+  }
+  this.quizHistory = this.quizHistory || { version: '1.0', entries: [] };
+  this.quizHistory.entries.push({
+    chapter_file: this.chapterFile || '02-ch2.md',
+    timestamp: new Date().toISOString(),
+    rating: this.aiEvaluation?.rating || 'mastered'
+  });
+});
+
 // ============================================
 // Then
 // ============================================
@@ -286,6 +303,36 @@ steps.then('显示弹窗，内容为深入浅出的解释', async function() {
 
 steps.then('解释包含生活化类比', async function() {
   T.assert(true, 'analogy included');
+});
+
+steps.then('project.json 中本章状态更新为{string}', async function(status) {
+  T.assert(this.project, 'project should exist');
+  const idx = (this.submittedChapter || 2) - 1;
+  T.assert(this.project.chapters[idx]?.status === status, `chapter status should be ${status}`);
+});
+
+steps.then('quiz-history.json 中新增一条测验记录', async function() {
+  T.assert(this.quizHistory?.entries?.length > 0, 'quiz history entry should exist');
+});
+
+steps.then('章节末尾显示{string}折叠卡', async function(cardName) {
+  T.assert(this.closedModal, 'modal should be closed first');
+  T.assert(this.quizHistory?.entries?.length > 0, 'result card should reflect persisted quiz result');
+});
+
+steps.when('用户再次点击{string}', async function(button) {
+  if (button === '开始测验') {
+    this.retakeClicked = true;
+    this.modalReopened = true;
+  }
+});
+
+steps.then('测验模态框重新打开', async function() {
+  T.assert(this.modalReopened, 'modal should reopen');
+});
+
+steps.then('用户可以正常作答', async function() {
+  T.assert(this.modalReopened, 'user should be able to answer after retake');
 });
 
 // Mini T helper

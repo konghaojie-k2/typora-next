@@ -577,6 +577,7 @@
       initDownloadButtons();
 
       // Sprint 3: Enhance learning elements (concept/question/quiz cards)
+      console.log('[Sprint3-MAIN] checking LearningModeIntegration:', typeof window.LearningModeIntegration, 'learning-mode:', document.body.classList.contains('learning-mode'));
       if (window.LearningModeIntegration) {
         try {
           window.LearningModeIntegration.enhanceLearningElements();
@@ -592,10 +593,11 @@
       // Sprint 3: Setup quiz panel + selection explainer (only in learning mode)
       if (document.body.classList.contains('learning-mode') && window.LearningModeIntegration) {
         try {
-          // Get current chapter file path
+          // Get current chapter file path and project base dir
           const activeTab = state.tabs[state.activeTab];
           const chapterFile = activeTab ? activeTab.path : '';
-          window.LearningModeIntegration.setupQuizPanel(chapterFile);
+          const projectPath = activeTab ? activeTab.baseDir : '';
+          window.LearningModeIntegration.setupQuizPanel(chapterFile, projectPath);
           window.LearningModeIntegration.setupSelectionExplainer();
         } catch (e) {
           console.warn('[Sprint3] mode integration setup failed:', e);
@@ -1766,7 +1768,9 @@
 
       // Add icon and title
       const calloutMeta = getCalloutMeta(calloutType);
-      const titleText = firstP.textContent.trim() || calloutMeta.title;
+      let titleText = firstP.textContent.trim() || calloutMeta.title;
+      // Strip inline markdown (e.g. **text**) from callout titles
+      titleText = titleText.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1');
 
       // Rebuild the callout header
       const header = document.createElement('div');
@@ -1805,6 +1809,8 @@
       'TODO': { icon: '☐', title: 'Todo' },
       'SUCCESS': { icon: '✅', title: 'Success' },
       'QUESTION': { icon: '❓', title: 'Question' },
+      'QUIZ': { icon: '📝', title: 'Quiz' },
+      'ANSWER': { icon: '💡', title: 'Answer' },
       'FAILURE': { icon: '❌', title: 'Failure' },
       'DANGER': { icon: '⚡', title: 'Danger' },
       'BUG': { icon: '🐛', title: 'Bug' },
@@ -3171,6 +3177,7 @@
         <button id="annotateBtn" title="添加批注">💬</button>
         <button id="deleteAnnotationBtn" title="删除">🗑️</button>
         <button id="translateSelectionBtn" title="翻译">译</button>
+        <button id="aiExplainBtn" title="AI 解释" style="display:none">🤖</button>
       </div>
     `;
     document.body.appendChild(selectionToolbar);

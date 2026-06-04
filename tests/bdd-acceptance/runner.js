@@ -76,6 +76,18 @@ async function runAcceptanceTests() {
   totalFailed += resumeResult.failed;
   if (resumeSteps._cleanup) resumeSteps._cleanup.call({});
 
+  // Sprint 3: Learning Elements & Quiz
+  console.log(`\n${YELLOW}▶ Sprint 3: Learning Elements & Quiz${RESET}`);
+  const sprint3FeaturesDir = path.join(__dirname, '../sprint3/features');
+  const sprint3Steps = require('./sprint3_learning_elements.steps');
+  const sprint3Result = await runFeatureFile(
+    path.join(sprint3FeaturesDir, 'sprint3_learning_mode.feature'),
+    sprint3Steps
+  );
+  totalPassed += sprint3Result.passed;
+  totalFailed += sprint3Result.failed;
+  if (sprint3Steps._cleanup) sprint3Steps._cleanup.call({});
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

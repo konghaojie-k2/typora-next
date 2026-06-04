@@ -1748,6 +1748,166 @@ fn create_learning_project(
     Ok(json_path.to_string_lossy().to_string())
 }
 
+/// Single quiz answer record for persistence
+#[derive(Debug, Serialize, Deserialize)]
+struct QuizAnswerRecord {
+    question_id: String,
+    qtype: String,
+    user_answer: Option<serde_json::Value>,
+    is_correct: Option<bool>,
+}
+
+/// Persist quiz result: update project.json concepts + append quiz-history.json
+#[tauri::command]
+async fn persist_quiz_result(
+    project_path: String,
+    chapter_file: String,
+    rating: String,
+    score: f32,
+    weak_concepts: Vec<String>,
+    answers: Vec<QuizAnswerRecord>,
+    timestamp: String,
+) -> Result<(), String> {
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+
+    // Extract basename for matching against project.json "file" field
+    let chapter_basename = std::path::Path::new(&chapter_file)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| chapter_file.clone());
+
+    // 1. Update project.json
+    let project_json_path = learning_dir.join("project.json");
+    let mut project: serde_json::Value = if project_json_path.exists() {
+        let content = std::fs::read_to_string(&project_json_path)
+            .map_err(|e| format!("读取 project.json 失败: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("解析 project.json 失败: {}", e))?
+    } else {
+        serde_json::json!({
+            "name": "Learning Project",
+            "created": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0),
+            "chapters": [],
+            "concepts": {}
+        })
+    };
+
+    // Mark chapter completed + record last quiz info
+    if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
+        let mut chapter_concepts: Vec<String> = Vec::new();
+        for ch in chapters.iter_mut() {
+            let ch_file = ch.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            if ch_file == chapter_basename || ch_file == chapter_file {
+                ch["status"] = serde_json::json!("completed");
+                ch["last_quiz_rating"] = serde_json::json!(&rating);
+                ch["last_quiz_at"] = serde_json::json!(&timestamp);
+                if let Some(concepts) = ch.get("concepts").and_then(|v| v.as_array()) {
+                    chapter_concepts = concepts.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
+                }
+                break;
+            }
+        }
+
+        // Update concept mastery states
+        if project.get("concepts").is_none() {
+            project["concepts"] = serde_json::json!({});
+        }
+        let concepts_obj = project.get_mut("concepts")
+            .and_then(|v| v.as_object_mut())
+            .ok_or("project.json concepts 字段必须是对象")?;
+
+        // Weak concepts get status based on rating (never mastered if explicitly weak)
+        for concept in &weak_concepts {
+            let status = match rating.as_str() {
+                "mastered" | "learning" => "learning",
+                "struggling" => "struggling",
+                _ => "learning",
+            };
+            concepts_obj.insert(concept.clone(), serde_json::json!({
+                "status": status,
+                "source_chapter": chapter_basename,
+                "updated_at": timestamp
+            }));
+        }
+
+        // Non-weak chapter concepts: mastered if overall mastered, otherwise learning
+        let non_weak_status = if rating == "mastered" { "mastered" } else { "learning" };
+        for concept in chapter_concepts {
+            if !weak_concepts.contains(&concept) {
+                concepts_obj.insert(concept.clone(), serde_json::json!({
+                    "status": non_weak_status,
+                    "source_chapter": chapter_basename,
+                    "updated_at": timestamp
+                }));
+            }
+        }
+    }
+
+    let project_str = serde_json::to_string_pretty(&project)
+        .map_err(|e| format!("序列化 project.json 失败: {}", e))?;
+    std::fs::write(&project_json_path, project_str)
+        .map_err(|e| format!("写入 project.json 失败: {}", e))?;
+
+    // 2. Append to quiz-history.json
+    let history_path = learning_dir.join("quiz-history.json");
+    let mut history: serde_json::Value = if history_path.exists() {
+        let content = std::fs::read_to_string(&history_path)
+            .map_err(|e| format!("读取 quiz-history.json 失败: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({ "version": "1.0", "entries": [] })
+        })
+    } else {
+        serde_json::json!({ "version": "1.0", "entries": [] })
+    };
+
+    let entries = history.get_mut("entries").and_then(|v| v.as_array_mut())
+        .ok_or("quiz-history.json entries 字段必须是数组")?;
+
+    let answer_json: Vec<serde_json::Value> = answers.into_iter().map(|a| {
+        serde_json::json!({
+            "question_id": a.question_id,
+            "qtype": a.qtype,
+            "user_answer": a.user_answer,
+            "is_correct": a.is_correct,
+        })
+    }).collect();
+
+    entries.push(serde_json::json!({
+        "chapter_file": chapter_basename,
+        "timestamp": timestamp,
+        "score": score,
+        "rating": rating,
+        "weak_concepts": weak_concepts,
+        "answers": answer_json,
+    }));
+
+    let history_str = serde_json::to_string_pretty(&history)
+        .map_err(|e| format!("序列化 quiz-history.json 失败: {}", e))?;
+    std::fs::write(&history_path, history_str)
+        .map_err(|e| format!("写入 quiz-history.json 失败: {}", e))?;
+
+    Ok(())
+}
+
+/// Read quiz history for a project
+#[tauri::command]
+async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, String> {
+    let path = std::path::PathBuf::from(&project_path).join(".learning").join("quiz-history.json");
+    if !path.exists() {
+        return Ok(serde_json::json!({ "version": "1.0", "entries": [] }));
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取 quiz-history.json 失败: {}", e))?;
+    let value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 quiz-history.json 失败: {}", e))?;
+    Ok(value)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1771,13 +1931,14 @@ pub fn run() {
         })
         .manage(ai_agent::AgentProcess::default())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
+            // Log plugin: always active (debug + release) so users can diagnose issues
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .build(),
+            )?;
 
+            if cfg!(debug_assertions) {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
             }
@@ -1840,7 +2001,8 @@ pub fn run() {
             open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
-            create_learning_project
+            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
+            create_learning_project, persist_quiz_result, read_quiz_history
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

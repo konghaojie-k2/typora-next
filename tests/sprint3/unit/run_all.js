@@ -10,7 +10,8 @@ async function runOne(label, filePath) {
     if (key.includes('test-runner') ||
         key.includes('test_element_renderer') ||
         key.includes('test_quiz_panel') ||
-        key.includes('test_selection_explainer')) {
+        key.includes('test_selection_explainer') ||
+        key.includes('test_agent_bridge_explain')) {
       delete require.cache[key];
     }
   });
@@ -28,10 +29,11 @@ async function runAll() {
   const r1 = await runOne('Element Renderer', path.join(__dirname, 'test_element_renderer.js'));
   const r2 = await runOne('Quiz Panel', path.join(__dirname, 'test_quiz_panel.js'));
   const r3 = await runOne('Selection Explainer', path.join(__dirname, 'test_selection_explainer.js'));
+  const r4 = await runOne('Agent Bridge Explain', path.join(__dirname, 'test_agent_bridge_explain.js'));
 
-  const totalPassed = r1.passed + r2.passed + r3.passed;
-  const totalFailed = r1.failed + r2.failed + r3.failed;
-  const total = r1.total + r2.total + r3.total;
+  const totalPassed = r1.passed + r2.passed + r3.passed + r4.passed;
+  const totalFailed = r1.failed + r2.failed + r3.failed + r4.failed;
+  const total = r1.total + r2.total + r3.total + r4.total;
 
   console.log('═══════════════════════════════════════');
   console.log(`  TOTAL: ${totalPassed} passed, ${totalFailed} failed, ${total} total`);

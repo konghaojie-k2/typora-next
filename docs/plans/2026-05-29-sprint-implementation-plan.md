@@ -60,10 +60,10 @@
 - **功能**：
   - 实现 `stage=generate`，接收 `outline` JSON 和 `project_path`
   - 逐章调用 Agent SDK 生成 Markdown
-  - 每章生成内容必须包含 `!concept`、`!question`、`!quiz` 学习元素
   - 每章完成后输出：`{"type": "chapter_complete", "data": {"index": N, "file": "..."}}`
   - 中间输出进度：`{"type": "progress", "data": {"current": N, "total": M}}`
   - 支持接收 `feedback` 参数调整后续章节
+  - **格式规范见** `docs/specs/content-format-spec.md`（章节格式 + quiz.json 标准）
 
 ### 任务 2：Rust — 进程管理与事件转发
 - **文件**：`src-tauri/src/ai_agent.rs`
@@ -175,6 +175,8 @@
   - 调用 Rust `explain_selection(text, context)`
   - AI 返回深入浅出的解释，渲染为弹窗
 
+**格式规范见** `docs/specs/content-format-spec.md`（章节格式 + quiz.json 标准）
+
 **验证标准**：
 - [ ] 学习模式下 `!concept` 渲染为精美卡片
 - [ ] `!quiz` 可以正常作答和提交
@@ -264,6 +266,8 @@
 | `plan_course` | goal, level, hours | Result<(), String> | 1 |
 | `generate_chapters` | project_path, outline | Result<(), String> | 2 |
 | `abort_generation` | - | Result<(), String> | 2 |
+| `evaluate_quiz` | chapter, questions, answers | Result<QuizResult, String> | 3 |
+| `generate_chapter_quiz` | chapter_file | Result<Vec<QuizQuestion>, String> | 3 |
 | `evaluate_quiz` | chapter, questions, answers | Result<QuizResult, String> | 3 |
 | `explain_selection` | text, context | Result<String, String> | 3 |
 | `read_project_state` | project_path | Result<ProjectState, String> | 4 |

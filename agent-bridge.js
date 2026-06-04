@@ -276,6 +276,61 @@ ${prevContext}
   emit('complete', { total_generated: total });
 }
 
+/**
+ * Explain selected text using Agent SDK (Sprint 3 task 3.5)
+ * @param {Function} queryFn - Agent SDK query function or mock
+ * @param {object} config - API config
+ * @param {object} args - { text, context, maxLength }
+ * @returns {Promise<string>} explanation text
+ */
+async function explainText(queryFn, config, args) {
+  const { text, context, maxLength } = args;
+
+  if (!text || text.trim().length === 0) {
+    throw new Error('解释文本不能为空');
+  }
+
+  // Truncate text to prevent abuse
+  const limitedText = text.length > 200 ? text.substring(0, 200) : text;
+  const maxLen = maxLength || 300;
+
+  // NOTE: Do NOT use emit() here — explain is a synchronous call (cmd.output()),
+  // and emit() writes JSON to stdout via console.log, which pollutes the result.
+  // Status updates are not needed for this short-lived operation.
+
+  const stream = queryFn({
+    prompt: `你是一个擅长用生活化类比解释技术概念的导师。
+
+请用通俗易懂的语言解释以下概念，长度控制在 ${maxLen} 字以内。
+要求：
+1. 使用生活化类比（比如用日常现象比喻技术原理）
+2. 深入浅出：先讲"是什么"，再讲"为什么"
+3. 避免过于学术化的术语，必要时用括号注明
+4. 如果有上下文，请结合上下文解释
+
+需要解释的概念：${limitedText}
+${context ? `上下文：${context}` : ''}
+
+直接输出解释文本，不要包含任何 JSON 格式或代码块。`,
+    options: {
+      allowedTools: []
+    }
+  });
+
+  const output = await collectAgentOutput(stream);
+
+  if (!output || output.trim().length === 0) {
+    throw new Error('Agent 返回了解释为空');
+  }
+
+  // Truncate if over max length
+  if (output.length > maxLen) {
+    return output.substring(0, maxLen) + '…';
+  }
+
+  return output.trim();
+}
+
 // ============================================
 // Load Agent SDK
 // ============================================
@@ -339,6 +394,14 @@ async function main() {
         log('info', 'Generate stage completed');
         process.exit(0);
         break;
+      case 'explain':
+        log('info', 'Starting explain stage', { text_length: taskArgs.text?.length, context_length: taskArgs.context?.length });
+        const explanation = await explainText(queryFn, config, taskArgs);
+        // Output explanation as plain text to stdout for Rust to capture
+        console.log(explanation);
+        log('info', 'Explain stage completed', { explanation_length: explanation.length });
+        process.exit(0);
+        break;
       default:
         emitError(`未知阶段: ${stage}`);
         process.exit(1);
@@ -359,6 +422,7 @@ module.exports = {
   generateFilename,
   planCourse,
   generateChapters,
+  explainText,
   emit,
   emitError,
   log
