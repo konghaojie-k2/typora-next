@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.0] - 2026-06-04
+
+### Features — AI 学习设计师（3 个 Sprint）
+
+- **Sprint 1: 学习项目创建与大纲生成**
+  - 前端新建学习项目对话框（目标 / 难度 / 时长）
+  - Agent SDK 桥接 — `plan` stage 自动生成课程大纲
+  - Rust 子进程管理 Node.js Agent SDK，stdout JSON 行通信
+  - 大纲实时展示与章节导航
+
+- **Sprint 2: 学习模式状态机与进度追踪**
+  - 六状态状态机（hidden → generating → active → reviewing → completed → error）
+  - `ChapterStatusManager` + `ProgressUI` + `AgentEventBridge`
+  - 项目文件夹创建（Windows 路径安全处理）
+  - 章节导航、标记完成、生成进度可视化
+
+- **Sprint 3: 学习元素渲染 + AI 解释 + 测验集成**
+  - `> [!concept]` / `> [!question]` / `> [!quiz]` 学习元素卡片渲染
+  - AI 解释功能：选中文本 → 浮窗工具栏 → AI 生活化类比解释
+  - 章末测验系统：预置 `.quiz.json` + 模态框考试 + 本地评分
+  - 测验结果持久化（`quiz-history.json` + `project.json` 原子更新）
+  - 评级系统：mastered / learning / struggling
+
+### Infrastructure
+
+- `docs/specs/content-format-spec.md` — AI 生成章节的内容格式规范
+- 三层测试金字塔：单元测试 + BDD 验收测试（真实文件系统）+ 手动验收
+- Worktree 标准做法文档化（`.claude/worktrees/` + junction 链接）
+
 ## [0.1.2] - 2026-05-20
 
 ### Features

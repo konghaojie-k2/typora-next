@@ -88,6 +88,18 @@ async function runAcceptanceTests() {
   totalFailed += sprint3Result.failed;
   if (sprint3Steps._cleanup) sprint3Steps._cleanup.call({});
 
+  // Sprint 4: Review System (遗忘曲线复习)
+  console.log(`\n${YELLOW}▶ Sprint 4: Review System${RESET}`);
+  const sprint4FeaturesDir = path.join(__dirname, '../features');
+  const sprint4Steps = require('./sprint4_review.steps');
+  const sprint4Result = await runFeatureFile(
+    path.join(sprint4FeaturesDir, 'sprint4_review_system.feature'),
+    sprint4Steps
+  );
+  totalPassed += sprint4Result.passed;
+  totalFailed += sprint4Result.failed;
+  if (sprint4Steps._cleanup) sprint4Steps._cleanup.call({});
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

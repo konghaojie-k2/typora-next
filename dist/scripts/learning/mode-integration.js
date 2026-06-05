@@ -24,6 +24,7 @@
   let _scrollListenerBound = false;
   let _projectPath = '';
   let _lastQuizSubmission = null;
+  let _reviewModal = null;
 
   function formatLocalTime(date) {
     const d = date || new Date();
@@ -959,6 +960,49 @@
   }
 
   // ============================================
+  // 4. Daily Review (Sprint 4: 遗忘曲线提醒)
+  // ============================================
+
+  async function checkDailyReview(projectPath) {
+    if (!window.ReviewScheduler || !window.ReviewModal) {
+      console.warn('[Sprint4] ReviewScheduler or ReviewModal not loaded');
+      return;
+    }
+    if (!document.body.classList.contains('learning-mode')) return;
+    if (_reviewModal && _reviewModal.getState() !== 'hidden') return;
+
+    try {
+      const scheduler = new window.ReviewScheduler();
+      const items = await scheduler.getDueItems(projectPath);
+
+      if (!items || items.length === 0) return;
+
+      // Load review cards (prompts + key points)
+      const cards = await scheduler.getReviewCards(projectPath);
+
+      _reviewModal = new window.ReviewModal({
+        items,
+        cards,
+        onComplete: async (answers) => {
+          for (const ans of answers) {
+            await scheduler.syncMarkReviewed(projectPath, ans.concept, ans.rating);
+          }
+          _reviewModal = null;
+        },
+        onPostpone: async () => {
+          for (const item of items) {
+            await scheduler.syncPostpone(projectPath, item.concept);
+          }
+          _reviewModal = null;
+        }
+      });
+      _reviewModal.show();
+    } catch (err) {
+      console.error('[Sprint4] checkDailyReview error:', err);
+    }
+  }
+
+  // ============================================
   // Public API
   // ============================================
 
@@ -966,6 +1010,7 @@
     enhanceLearningElements,
     setupQuizPanel,
     setupSelectionExplainer,
+    checkDailyReview,
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }
       closeQuizModal();
@@ -976,6 +1021,7 @@
       _selectionExplainer = null;
       _scrollListenerBound = false;
       _currentQuizQuestions = [];
+      if (_reviewModal) { _reviewModal.teardown(); _reviewModal = null; }
     }
   };
 })();

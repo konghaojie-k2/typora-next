@@ -88,7 +88,25 @@ class StepRegistry {
       .replace(/\{word\}/g, '(\\S+)');
     regexStr = '^' + regexStr + '$';
     const regex = new RegExp(regexStr);
-    return text.match(regex);
+    const match = text.match(regex);
+    if (!match) return null;
+    // Convert captured {int} groups from strings to numbers
+    const intPattern = /\{int\}/g;
+    const intMatches = pattern.match(intPattern);
+    if (intMatches) {
+      let captureIndex = 1;
+      // Walk pattern to find which capture groups are {int}
+      const parts = pattern.split(/(\{string\}|\{int\}|\{word\})/);
+      for (const part of parts) {
+        if (part === '{int}') {
+          match[captureIndex] = parseInt(match[captureIndex], 10);
+        }
+        if (part === '{string}' || part === '{int}' || part === '{word}') {
+          captureIndex++;
+        }
+      }
+    }
+    return match;
   }
 }
 

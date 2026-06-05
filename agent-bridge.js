@@ -211,7 +211,7 @@ async function generateChapters(queryFn, config, args) {
       : '这是第一章。';
 
     const stream = queryFn({
-      prompt: `你是一个资深的技术写作专家。请生成以下章节的 Markdown 内容。
+      prompt: `你是一个资深的技术写作专家。请生成以下章节的完整学习材料，包括 Markdown 内容、章末测验和概念依赖关系。
 
 第 ${i + 1} 章：${chapter.title}
 预计时长：${chapter.duration_minutes} 分钟
@@ -219,40 +219,98 @@ async function generateChapters(queryFn, config, args) {
 
 ${prevContext}
 
-写作风格要求：
-1. 深入浅出：用生活化类比解释复杂概念
-2. 逻辑连贯：每章结尾引出下一章的内容（如果有）
-3. 有自己的思考：不仅罗列知识点，还要解释"为什么"
-4. 适度总结：关键概念后给出简洁总结
-5. 可视化：鼓励使用 Mermaid 图表、表格
+请严格按以下格式输出三个部分，每个部分用标记行分隔：
 
-内容格式要求：
-- 使用标准 Markdown 语法
-- 数学公式用 $...$ 和 $$...$$
-- 代码块标注语言
+---MARKDOWN_START---
+[Markdown 章节内容，要求：]
+- 深入浅出：用生活化类比解释复杂概念
+- 逻辑连贯：每章结尾引出下一章的内容（如果有）
+- 有自己的思考：不仅罗列知识点，还要解释"为什么"
+- 适度总结：关键概念后给出简洁总结
+- 可视化：鼓励使用 Mermaid 图表、表格
 - 每章必须包含：
   - 至少 2 个 \`> [!concept]\` 概念卡片
   - 至少 1 个 \`> [!question]\` 思考题（带 \`> [!answer]\` 答案）
   - 至少 1 个 \`> [!quiz]\` 测验题
+---MARKDOWN_END---
 
-直接输出 Markdown 内容，不要包裹在代码块中。`,
+---QUIZ_JSON_START---
+[章末综合测验 JSON，格式如下：]
+{
+  "chapter_file": "${generateFilename(i, chapter.title)}",
+  "chapter_title": "${chapter.title}",
+  "questions": [
+    {
+      "id": "q1",
+      "qtype": "single",
+      "question": "...",
+      "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}],
+      "correct": "A",
+      "weak_concepts": ["概念名"],
+      "related_section": "1.2 节标题",
+      "suggestion": "答错时的建议"
+    }
+  ],
+  "adaptive_rules": { "mastered_threshold": 0.8, "learning_threshold": 0.5, "max_questions": 5 }
+}
+要求：3-5 题，覆盖本章核心概念，单选 60% + 多选 20% + 开放题 20%
+---QUIZ_JSON_END---
+
+---CONCEPTS_JSON_START---
+[本章概念及依赖关系 JSON，格式如下：]
+{
+  "chapter": "${generateFilename(i, chapter.title)}",
+  "concepts": [
+    {
+      "id": "concept-slug",
+      "name": "概念中文名",
+      "depends_on": ["上游概念id1", "上游概念id2"]
+    }
+  ]
+}
+要求：提取本章所有核心概念，depends_on 只列出本章首次引入但依赖前面章节的概念
+---CONCEPTS_JSON_END---`,
       options: {
         allowedTools: []
       }
     });
 
     try {
-      const content = await collectAgentOutput(stream);
+      const raw = await collectAgentOutput(stream);
 
-      if (!content || content.trim().length < 100) {
+      if (!raw || raw.trim().length < 100) {
         throw new Error('Generated content is too short');
+      }
+
+      // Parse three sections
+      const mdMatch = raw.match(/---MARKDOWN_START---\n?([\s\S]*?)---MARKDOWN_END---/);
+      const quizMatch = raw.match(/---QUIZ_JSON_START---\n?([\s\S]*?)---QUIZ_JSON_END---/);
+      const conceptsMatch = raw.match(/---CONCEPTS_JSON_START---\n?([\s\S]*?)---CONCEPTS_JSON_END---/);
+
+      const markdown = mdMatch ? mdMatch[1].trim() : raw.trim();
+      const quizJson = quizMatch ? quizMatch[1].trim() : '';
+      const conceptsJson = conceptsMatch ? conceptsMatch[1].trim() : '';
+
+      if (markdown.length < 100) {
+        throw new Error('Markdown content is too short');
       }
 
       const filename = generateFilename(i, chapter.title);
       const filepath = path.join(project_path, filename);
+      const baseName = filename.replace(/\.md$/, '');
 
-      // Write file
-      fs.writeFileSync(filepath, content, 'utf-8');
+      // Write Markdown
+      fs.writeFileSync(filepath, markdown, 'utf-8');
+
+      // Write quiz.json
+      if (quizJson) {
+        fs.writeFileSync(path.join(project_path, `${baseName}.quiz.json`), quizJson, 'utf-8');
+      }
+
+      // Write concepts.json
+      if (conceptsJson) {
+        fs.writeFileSync(path.join(project_path, `${baseName}.concepts.json`), conceptsJson, 'utf-8');
+      }
 
       emit('chapter_complete', {
         index: i,

@@ -1908,6 +1908,417 @@ async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, St
     Ok(value)
 }
 
+// ============================================
+// Sprint 4: Forgetting Curve Review System
+// ============================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewItem {
+    pub concept: String,
+    pub source_chapter: String,
+    pub review_count: u32,
+    pub last_reviewed: String,
+    pub next_review_at: String,
+    pub last_rating: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewSchedule {
+    version: String,
+    items: Vec<ReviewItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewCard {
+    concept: String,
+    prompt: String,
+    key_points: Vec<String>,
+    hint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ReviewCards {
+    version: String,
+    items: Vec<ReviewCard>,
+}
+
+fn read_review_schedule(project_path: &str) -> Result<ReviewSchedule, String> {
+    let path = std::path::PathBuf::from(project_path).join(".learning").join("review-schedule.json");
+    if !path.exists() {
+        return Ok(ReviewSchedule {
+            version: "1.0".to_string(),
+            items: vec![],
+        });
+    }
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取 review-schedule.json 失败: {}", e))?;
+    let schedule: ReviewSchedule = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 review-schedule.json 失败: {}", e))?;
+    Ok(schedule)
+}
+
+fn write_review_schedule(project_path: &str, schedule: &ReviewSchedule) -> Result<(), String> {
+    let learning_dir = std::path::PathBuf::from(project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+    let path = learning_dir.join("review-schedule.json");
+    let json = serde_json::to_string_pretty(schedule)
+        .map_err(|e| format!("序列化 review-schedule.json 失败: {}", e))?;
+    std::fs::write(&path, json)
+        .map_err(|e| format!("写入 review-schedule.json 失败: {}", e))?;
+    Ok(())
+}
+
+fn now_local_string() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+    let days = now / 86400;
+    let secs = (now % 86400) as u32;
+    let hour = secs / 3600;
+    let minute = (secs % 3600) / 60;
+    let second = secs % 60;
+
+    let (year, month, day) = days_to_ymd(days);
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, minute, second)
+}
+
+fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
+    let mut year = 1970i32;
+    loop {
+        let yd = if is_leap_year(year) { 366 } else { 365 };
+        if days < yd { break; }
+        days -= yd;
+        year += 1;
+    }
+    let md = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut month = 1u32;
+    for (i, &d) in md.iter().enumerate() {
+        let d = if i == 1 && is_leap_year(year) { 29 } else { d };
+        if days < d {
+            month = (i + 1) as u32;
+            break;
+        }
+        days -= d;
+        month = (i + 2) as u32;
+    }
+    (year, month, (days + 1) as u32)
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || (year % 400 == 0)
+}
+
+fn add_days_to_string(date_str: &str, days: i32) -> String {
+    // Parse "YYYY-MM-DD HH:MM:SS"
+    let parts: Vec<&str> = date_str.split(|c| c == '-' || c == ' ' || c == ':').collect();
+    if parts.len() != 6 {
+        return now_local_string();
+    }
+    let y: i32 = parts[0].parse().unwrap_or(2024);
+    let m: u32 = parts[1].parse().unwrap_or(1);
+    let d: u32 = parts[2].parse().unwrap_or(1);
+    let h: u32 = parts[3].parse().unwrap_or(0);
+    let min: u32 = parts[4].parse().unwrap_or(0);
+    let s: u32 = parts[5].parse().unwrap_or(0);
+
+    // Approximate: add days
+    let ts = ymd_to_days(y, m, d) + days as i64;
+    let (ny, nm, nd) = days_to_ymd(ts);
+    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", ny, nm, nd, h, min, s)
+}
+
+fn ymd_to_days(year: i32, month: u32, day: u32) -> i64 {
+    let mut days = 0i64;
+    for y in 1970..year {
+        days += if is_leap_year(y) { 366 } else { 365 };
+    }
+    let md = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    for m in 1..month {
+        let d = if m == 2 && is_leap_year(year) { 29 } else { md[(m - 1) as usize] };
+        days += d as i64;
+    }
+    days += (day - 1) as i64;
+    days
+}
+
+fn compute_next_interval(review_count: u32, rating: &str) -> u32 {
+    let intervals = [1u32, 2, 4, 7, 15, 30];
+    let base = intervals[std::cmp::min(review_count as usize, intervals.len() - 1)];
+    match rating {
+        "struggling" => std::cmp::max(1, base / 2),
+        "learning" => std::cmp::max(1, (base as f32 * 0.75) as u32),
+        _ => base,
+    }
+}
+
+fn is_due(next_review_at: &str) -> bool {
+    next_review_at <= now_local_string().as_str()
+}
+
+/// Get review items that are due today
+#[tauri::command]
+async fn get_review_items(project_path: String) -> Result<Vec<ReviewItem>, String> {
+    let mut schedule = read_review_schedule(&project_path)?;
+
+    // If no schedule exists, try to generate one from quiz history + project.json
+    if schedule.items.is_empty() {
+        schedule = generate_schedule_from_project(&project_path)?;
+        if !schedule.items.is_empty() {
+            write_review_schedule(&project_path, &schedule)?;
+        }
+    }
+
+    // Filter due items
+    let due_items: Vec<ReviewItem> = schedule.items
+        .into_iter()
+        .filter(|item| item.status == "due" || is_due(&item.next_review_at))
+        .collect();
+
+    Ok(due_items)
+}
+
+/// Update a review item after reviewing
+#[tauri::command]
+async fn update_review_schedule(
+    project_path: String,
+    concept: String,
+    rating: String,
+) -> Result<(), String> {
+    let mut schedule = read_review_schedule(&project_path)?;
+
+    if let Some(item) = schedule.items.iter_mut().find(|i| i.concept == concept) {
+        item.review_count += 1;
+        item.last_rating = rating.clone();
+        item.last_reviewed = now_local_string();
+        let interval = compute_next_interval(item.review_count, &rating);
+        item.next_review_at = add_days_to_string(&item.last_reviewed, interval as i32);
+        item.status = "upcoming".to_string();
+    }
+
+    write_review_schedule(&project_path, &schedule)?;
+    Ok(())
+}
+
+/// Postpone a review item to tomorrow
+#[tauri::command]
+async fn postpone_review_item(project_path: String, concept: String) -> Result<(), String> {
+    let mut schedule = read_review_schedule(&project_path)?;
+
+    if let Some(item) = schedule.items.iter_mut().find(|i| i.concept == concept) {
+        item.next_review_at = add_days_to_string(&now_local_string(), 1);
+        item.status = "upcoming".to_string();
+    }
+
+    write_review_schedule(&project_path, &schedule)?;
+    Ok(())
+}
+
+fn generate_schedule_from_project(project_path: &str) -> Result<ReviewSchedule, String> {
+    // Read project.json for concepts
+    let project_json_path = std::path::PathBuf::from(project_path).join(".learning").join("project.json");
+    if !project_json_path.exists() {
+        return Ok(ReviewSchedule { version: "1.0".to_string(), items: vec![] });
+    }
+    let project_content = std::fs::read_to_string(&project_json_path)
+        .map_err(|e| format!("读取 project.json 失败: {}", e))?;
+    let project: serde_json::Value = serde_json::from_str(&project_content)
+        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
+
+    // Read quiz-history.json for review counts
+    let quiz_path = std::path::PathBuf::from(project_path).join(".learning").join("quiz-history.json");
+    let quiz_history: serde_json::Value = if quiz_path.exists() {
+        let content = std::fs::read_to_string(&quiz_path)
+            .map_err(|e| format!("读取 quiz-history.json 失败: {}", e))?;
+        serde_json::from_str(&content)
+            .map_err(|e| format!("解析 quiz-history.json 失败: {}", e))?
+    } else {
+        serde_json::json!({ "entries": [] })
+    };
+
+    let mut items = vec![];
+    if let Some(concepts) = project.get("concepts").and_then(|v| v.as_object()) {
+        for (concept_name, concept_data) in concepts {
+            let source_chapter = concept_data.get("source_chapter")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let status = concept_data.get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("learning")
+                .to_string();
+            let updated_at = concept_data.get("updated_at")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Count matching quiz entries
+            let entries = quiz_history.get("entries")
+                .and_then(|v| v.as_array())
+                .unwrap_or(&vec![])
+                .clone();
+            let chapter_entries: Vec<_> = entries.iter()
+                .filter(|e| {
+                    let cf = e.get("chapter_file").and_then(|v| v.as_str()).unwrap_or("");
+                    cf == source_chapter || source_chapter.ends_with(cf) || cf.ends_with(&source_chapter)
+                })
+                .collect();
+            // Quiz entries are not review records — only use them for last_rating
+            // review_count should start from 0 (new concept) or 1 (just quizzed)
+            let review_count = if chapter_entries.is_empty() { 0u32 } else { 1u32 };
+            let last_rating = if let Some(last) = chapter_entries.last() {
+                last.get("rating").and_then(|v| v.as_str()).unwrap_or(&status).to_string()
+            } else {
+                status.clone()
+            };
+
+            let next_review_at = if let Some(last) = chapter_entries.last() {
+                let ts = last.get("timestamp").and_then(|v| v.as_str()).unwrap_or(&updated_at);
+                let interval = compute_next_interval(review_count, &last_rating);
+                add_days_to_string(ts, interval as i32)
+            } else {
+                add_days_to_string(&updated_at, 1)
+            };
+
+            let status_str = if is_due(&next_review_at) { "due".to_string() } else { "upcoming".to_string() };
+            items.push(ReviewItem {
+                concept: concept_name.clone(),
+                source_chapter,
+                review_count,
+                last_reviewed: if chapter_entries.is_empty() { updated_at } else { chapter_entries.last().unwrap().get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string() },
+                next_review_at,
+                last_rating,
+                status: status_str,
+            });
+        }
+    }
+
+    // Generate review-cards.json with prompts for each concept
+    let mut cards = vec![];
+    if let Some(concepts) = project.get("concepts").and_then(|v| v.as_object()) {
+        for (concept_name, _concept_data) in concepts {
+            cards.push(ReviewCard {
+                concept: concept_name.clone(),
+                prompt: format!("请回忆：{} 是什么？它的核心要点有哪些？", concept_name),
+                key_points: vec![],
+                hint: "".to_string(),
+            });
+        }
+    }
+    let review_cards = ReviewCards { version: "1.0".to_string(), items: cards };
+    let cards_path = std::path::PathBuf::from(project_path).join(".learning").join("review-cards.json");
+    if let Ok(json) = serde_json::to_string_pretty(&review_cards) {
+        let _ = std::fs::write(&cards_path, json);
+    }
+
+    Ok(ReviewSchedule { version: "1.0".to_string(), items })
+}
+
+// ============================================
+// Sprint 4: Knowledge Graph Data
+// ============================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KnowledgeGraph {
+    version: String,
+    generated_at: String,
+    nodes: Vec<KnowledgeNode>,
+    edges: Vec<KnowledgeEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KnowledgeNode {
+    id: String,
+    name: String,
+    chapter: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct KnowledgeEdge {
+    from: String,
+    to: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChapterConcepts {
+    chapter: String,
+    concepts: Vec<ChapterConcept>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ChapterConcept {
+    id: String,
+    name: String,
+    #[serde(default)]
+    depends_on: Vec<String>,
+}
+
+/// Scan project for *.concepts.json files and merge into knowledge-graph.json
+#[tauri::command]
+async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
+    let project_dir = std::path::PathBuf::from(&project_path);
+    let mut nodes = vec![];
+    let mut edges = vec![];
+    let mut seen_ids = std::collections::HashSet::new();
+
+    // Scan for *.concepts.json files
+    for entry in std::fs::read_dir(&project_dir)
+        .map_err(|e| format!("读取项目目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("目录条目错误: {}", e))?;
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.ends_with(".concepts.json") {
+                let content = std::fs::read_to_string(&path)
+                    .map_err(|e| format!("读取 {} 失败: {}", name, e))?;
+                let chapter_concepts: ChapterConcepts = serde_json::from_str(&content)
+                    .map_err(|e| format!("解析 {} 失败: {}", name, e))?;
+
+                // Extract chapter number from filename
+                let chapter = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.replace(".concepts", ""))
+                    .unwrap_or_default();
+
+                for concept in chapter_concepts.concepts {
+                    if seen_ids.insert(concept.id.clone()) {
+                        nodes.push(KnowledgeNode {
+                            id: concept.id.clone(),
+                            name: concept.name,
+                            chapter: chapter.clone(),
+                        });
+                    }
+                    for dep in concept.depends_on {
+                        edges.push(KnowledgeEdge {
+                            from: dep,
+                            to: concept.id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    let graph = KnowledgeGraph {
+        version: "1.0".to_string(),
+        generated_at: now_local_string(),
+        nodes,
+        edges,
+    };
+
+    let learning_dir = project_dir.join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+    let graph_path = learning_dir.join("knowledge-graph.json");
+    let json = serde_json::to_string_pretty(&graph)
+        .map_err(|e| format!("序列化 knowledge-graph.json 失败: {}", e))?;
+    std::fs::write(&graph_path, json)
+        .map_err(|e| format!("写入 knowledge-graph.json 失败: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2002,7 +2413,8 @@ pub fn run() {
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
-            create_learning_project, persist_quiz_result, read_quiz_history
+            create_learning_project, persist_quiz_result, read_quiz_history,
+            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

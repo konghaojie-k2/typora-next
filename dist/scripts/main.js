@@ -591,6 +591,7 @@
       console.log('[DEBUG renderMarkdown] applyAnnotations done');
 
       // Sprint 3: Setup quiz panel + selection explainer (only in learning mode)
+      // Sprint 4: Check daily review (遗忘曲线提醒)
       if (document.body.classList.contains('learning-mode') && window.LearningModeIntegration) {
         try {
           // Get current chapter file path and project base dir
@@ -599,6 +600,8 @@
           const projectPath = activeTab ? activeTab.baseDir : '';
           window.LearningModeIntegration.setupQuizPanel(chapterFile, projectPath);
           window.LearningModeIntegration.setupSelectionExplainer();
+          // Sprint 4: Auto-trigger daily review check
+          window.LearningModeIntegration.checkDailyReview(projectPath);
         } catch (e) {
           console.warn('[Sprint3] mode integration setup failed:', e);
         }
