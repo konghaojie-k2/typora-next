@@ -984,10 +984,19 @@
         items,
         cards,
         onComplete: async (answers) => {
+          // Record status before review
+          const beforeStatus = {};
+          for (const item of items) {
+            beforeStatus[item.concept] = item.status || 'due';
+          }
+
           for (const ans of answers) {
             await scheduler.syncMarkReviewed(projectPath, ans.concept, ans.rating);
           }
           _reviewModal = null;
+
+          // Show review summary modal with status changes
+          showReviewSummary(projectPath, items, answers, beforeStatus);
         },
         onPostpone: async () => {
           for (const item of items) {
@@ -999,6 +1008,46 @@
       _reviewModal.show();
     } catch (err) {
       console.error('[Sprint4] checkDailyReview error:', err);
+    }
+  }
+
+  // ============================================
+  // 5. Review Summary Modal (Sprint 4: 知识图谱)
+  // ============================================
+
+  async function showReviewSummary(projectPath, items, answers, beforeStatus) {
+    if (!window.ReviewSummaryModal || !window.KnowledgeGraphManager) return;
+
+    try {
+      // Build changes array
+      const changes = answers.map(ans => ({
+        concept: ans.concept,
+        fromStatus: beforeStatus[ans.concept] || 'due',
+        toStatus: ans.rating,
+        chapter: items.find(i => i.concept === ans.concept)?.source_chapter || ''
+      }));
+
+      // Load mini graph for the summary modal
+      const kgm = new window.KnowledgeGraphManager(projectPath);
+      const graph = await kgm.loadGraph();
+
+      // Show modal
+      const modal = new window.ReviewSummaryModal({
+        onViewFullGraph: () => {
+          modal.close();
+          // Re-show full dashboard
+          if (window.LearningProjectResume && window.LearningProjectResume.showDashboard) {
+            window.LearningProjectResume.showDashboard(projectPath);
+          }
+        }
+      });
+
+      modal.show({
+        reviewResult: { changes, reviewedCount: answers.length, totalCount: items.length },
+        miniGraph: graph
+      });
+    } catch (e) {
+      console.warn('[Sprint4] showReviewSummary error:', e);
     }
   }
 

@@ -229,6 +229,7 @@
       this.onStartLearningClick = null;
       this.onGenerateClick = null;
       this.onExitLearningClick = null;
+      this.onOpenDashboard = null;
       this.projectPath = null;
     }
 
@@ -274,6 +275,7 @@
           <div class="learning-progress-title">学习进度</div>
           <div style="display:flex;gap:8px;align-items:center;">
             ${actionBtn}
+            <button class="learning-kg-btn" id="learningKGBtn" title="知识图谱">🧠 图谱</button>
             <button class="learning-exit-btn" id="learningExitBtn" title="退出学习模式">退出</button>
             <button class="learning-progress-close-btn" id="learningProgressClose">×</button>
           </div>
@@ -330,6 +332,14 @@
       if (exitBtn) {
         exitBtn.addEventListener('click', () => {
           if (this.onExitLearningClick) this.onExitLearningClick();
+        });
+      }
+
+      // Knowledge graph dashboard button
+      const kgBtn = this.container.querySelector('#learningKGBtn');
+      if (kgBtn) {
+        kgBtn.addEventListener('click', () => {
+          if (this.onOpenDashboard) this.onOpenDashboard();
         });
       }
 

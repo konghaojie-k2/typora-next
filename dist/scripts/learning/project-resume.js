@@ -104,6 +104,11 @@
           window.TyporaNext.loadFolderPath(path);
         }
 
+        // Show knowledge graph dashboard modal (non-blocking)
+        showProjectDashboard(project, path).catch(e =>
+          console.warn('[ProjectDashboard] Error:', e)
+        );
+
         loadProjectUI(project, path);
         return project;
       }
@@ -161,6 +166,89 @@
       }
     } catch (e) {
       console.warn('[ProjectResume] syncProjectStatus error:', e);
+    }
+  }
+
+  /**
+   * Show knowledge graph dashboard modal for a project.
+   * Loads graph data (builds if needed), computes stats, shows modal.
+   * Returns a promise that resolves when the user closes the modal or clicks "进入阅读".
+   */
+  async function showProjectDashboard(project, basePath) {
+    console.log('[ProjectDashboard] showProjectDashboard called, modules:',
+      !!window.KnowledgeGraphManager, !!window.KnowledgeGraphDashboard);
+    if (!window.KnowledgeGraphManager || !window.KnowledgeGraphDashboard) {
+      console.warn('[ProjectDashboard] Modules not loaded, skipping');
+      return;
+    }
+
+    try {
+      const kgm = new window.KnowledgeGraphManager(basePath);
+
+      // Check if graph needs rebuild
+      console.log('[ProjectDashboard] Checking freshness...');
+      const needsRebuild = await kgm.needsRebuild();
+      console.log('[ProjectDashboard] needsRebuild:', needsRebuild);
+      if (needsRebuild) {
+        console.log('[ProjectDashboard] Building graph...');
+        await kgm.buildGraph();
+      }
+
+      // Load graph
+      console.log('[ProjectDashboard] Loading graph...');
+      const graph = await kgm.loadGraph();
+      console.log('[ProjectDashboard] Graph loaded:', graph ? graph.nodes.length + ' nodes' : 'null');
+
+      // Load review schedule
+      let reviewSchedule = null;
+      if (window.__TAURI__) {
+        try {
+          const { exists, readTextFile } = window.__TAURI__.fs;
+          const schedulePath = basePath + '/.learning/review-schedule.json';
+          if (await exists(schedulePath)) {
+            reviewSchedule = JSON.parse(await readTextFile(schedulePath));
+          }
+        } catch (e) {
+          // no schedule yet, that's fine
+        }
+      }
+
+      // Compute stats and merge status
+      let mergedGraph = graph;
+      let stats = null;
+      if (graph) {
+        stats = kgm.computeStats(graph, reviewSchedule);
+        mergedGraph = kgm.mergeReviewStatus(graph, reviewSchedule);
+      }
+
+      // Build chapters list from project
+      const chapters = (project.chapters || []).map((ch, i) => ({
+        file: ch.file || '',
+        title: ch.title || ('第' + (i + 1) + '章'),
+        status: ch.status || 'not_generated'
+      }));
+
+      // Show dashboard modal
+      console.log('[ProjectDashboard] Showing dashboard, stats:', stats);
+      return new Promise((resolve) => {
+        const dashboard = new window.KnowledgeGraphDashboard({
+          onEnterReading: () => {
+            dashboard.close();
+            resolve();
+          },
+          onClose: () => {
+            resolve();
+          }
+        });
+        dashboard.show({
+          graph: mergedGraph,
+          stats,
+          chapters,
+          projectName: project.name || '学习项目'
+        });
+      });
+    } catch (e) {
+      console.warn('[ProjectResume] showProjectDashboard error:', e);
     }
   }
 
@@ -281,6 +369,11 @@
           };
         }
 
+        // Knowledge graph dashboard button
+        ui.onOpenDashboard = () => {
+          showProjectDashboard(project, basePath);
+        };
+
         // Exit learning mode handler
         ui.onExitLearningClick = () => {
           container.style.display = 'none';
@@ -357,7 +450,8 @@
   window.LearningProjectResume = {
     ProjectDetector,
     loadProject,
-    loadProjectUI
+    loadProjectUI,
+    showDashboard: showProjectDashboard
   };
 
   // Export for Node.js testing

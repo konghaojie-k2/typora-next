@@ -1188,6 +1188,24 @@ body.learning-mode .toolbar {
   border-bottom: 2px solid #4f46e5;
 }
 
+/* Knowledge graph button in progress panel */
+.learning-kg-btn {
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(129, 140, 248, 0.3);
+  background: rgba(129, 140, 248, 0.08);
+  color: #818cf8;
+  transition: all 0.15s ease;
+}
+
+.learning-kg-btn:hover {
+  background: rgba(129, 140, 248, 0.15);
+  border-color: rgba(129, 140, 248, 0.5);
+}
+
 /* Dark theme */
 [data-theme="dark"] .learning-exit-btn {
   color: #aaa;
@@ -1202,4 +1220,381 @@ body.learning-mode .toolbar {
 
 [data-theme="dark"] body.learning-mode .toolbar {
   border-bottom: 2px solid #6366f1;
+}
+
+/* ============================================
+   Knowledge Graph Dashboard Modal
+   ============================================ */
+
+/* ============================================
+   Knowledge Graph Dashboard
+   Design: 背景统一跟随主应用主题，紫色仅用于学习模式强调元素
+   ============================================ */
+
+.kg-dashboard-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.3s ease;
+}
+
+.kg-dashboard-modal {
+  position: relative;
+  width: 780px;
+  max-width: 92vw;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4), 0 0 40px rgba(79, 70, 229, 0.06);
+  padding: 32px;
+  animation: cardIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kg-dashboard-modal::-webkit-scrollbar {
+  width: 6px;
+}
+.kg-dashboard-modal::-webkit-scrollbar-track {
+  background: transparent;
+}
+.kg-dashboard-modal::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 3px;
+}
+
+/* Header — 紫色强调 */
+.kg-dashboard-header {
+  margin-bottom: 24px;
+  position: relative;
+}
+.kg-dashboard-header::after {
+  content: '';
+  position: absolute;
+  bottom: -12px;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #818cf8 40%, #4f46e5 60%, transparent);
+}
+
+.kg-dashboard-title {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+/* Stats row */
+.kg-stats-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.kg-stat-item {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--color-bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  text-align: center;
+}
+
+.kg-stat-number {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  /* 默认用 accent，JS 会按状态覆盖 inline color */
+  color: var(--color-accent);
+}
+
+.kg-stat-label {
+  display: block;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+}
+
+/* Graph canvas (D3 force-directed) */
+.kg-graph-canvas {
+  min-height: 400px;
+  margin-bottom: 24px;
+  background: var(--color-bg-secondary);
+  border-radius: 14px;
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+.kg-graph-canvas svg {
+  display: block;
+}
+
+/* Chapter list (initial state) */
+.kg-chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.kg-chapter-item {
+  padding: 12px 16px;
+  background: var(--color-bg-secondary);
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.kg-chapter-item:hover {
+  background: rgba(129, 140, 248, 0.08);
+  border-color: rgba(129, 140, 248, 0.25);
+}
+
+/* Action buttons */
+.kg-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.kg-action-btn {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  transition: all 0.15s ease;
+}
+
+.kg-action-btn:hover {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+}
+
+/* 紫色主按钮 — 学习模式强调色 */
+.kg-action-btn.kg-action-primary {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border-color: transparent;
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(79, 70, 229, 0.25);
+}
+
+.kg-action-btn.kg-action-primary:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(79, 70, 229, 0.35);
+}
+
+/* Detail drawer */
+.kg-detail-drawer {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 280px;
+  background: var(--color-bg-primary);
+  border-left: 1px solid var(--color-border);
+  padding: 24px;
+  border-radius: 0 20px 20px 0;
+  animation: slideInRight 0.25s ease;
+}
+
+.kg-detail-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.kg-detail-close:hover {
+  color: #818cf8;
+}
+
+.kg-detail-name {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin: 0 0 12px 0;
+}
+
+.kg-detail-status {
+  font-size: 14px;
+  color: #818cf8;
+  margin-bottom: 8px;
+}
+
+.kg-detail-review-count,
+.kg-detail-chapter {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+@keyframes slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* ============================================
+   Review Summary Modal
+   ============================================ */
+
+.review-summary-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  animation: fadeIn 0.3s ease;
+}
+
+.review-summary-modal {
+  width: 520px;
+  max-width: 90vw;
+  max-height: 85vh;
+  overflow-y: auto;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 20px;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+  padding: 32px;
+  animation: cardIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.review-summary-header {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.review-change-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.review-change-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.review-change-card.status-improved {
+  border-color: rgba(16, 185, 129, 0.3);
+  background: rgba(16, 185, 129, 0.05);
+}
+
+.review-change-card.status-regressed {
+  border-color: rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.review-change-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.review-change-arrow {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.review-no-change {
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  padding: 24px;
+}
+
+.review-mini-graph {
+  padding: 16px;
+  background: var(--color-bg-secondary);
+  border-radius: 12px;
+  border: 1px solid var(--color-border);
+  margin-bottom: 20px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.kg-mini-node {
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
+.kg-mini-node.pulse,
+.kg-mini-node.updated {
+  animation: pulse 1.5s ease-in-out infinite;
+  background: rgba(129, 140, 248, 0.2);
+  color: #818cf8;
+  border-color: rgba(129, 140, 248, 0.4);
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(129, 140, 248, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(129, 140, 248, 0); }
+}
+
+.review-summary-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.review-action-btn {
+  padding: 10px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  transition: all 0.15s ease;
+}
+
+.review-action-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.review-action-btn.review-action-primary {
+  background: linear-gradient(135deg, #4f46e5, #7c3aed);
+  border-color: transparent;
+  color: #fff;
+}
+
+.review-action-btn.review-action-primary:hover {
+  opacity: 0.9;
 }

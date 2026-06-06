@@ -2255,6 +2255,39 @@ struct ChapterConcept {
     depends_on: Vec<String>,
 }
 
+/// Check if knowledge-graph.json needs rebuild (any .concepts.json is newer)
+#[tauri::command]
+async fn check_graph_freshness(project_path: String) -> Result<bool, String> {
+    let project_dir = std::path::PathBuf::from(&project_path);
+    let graph_path = project_dir.join(".learning").join("knowledge-graph.json");
+
+    // If graph doesn't exist, needs rebuild
+    let graph_meta = match std::fs::metadata(&graph_path) {
+        Ok(m) => m,
+        Err(_) => return Ok(true),
+    };
+    let graph_mtime = graph_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+
+    // Scan for *.concepts.json files newer than graph
+    for entry in std::fs::read_dir(&project_dir)
+        .map_err(|e| format!("读取项目目录失败: {}", e))? {
+        let entry = entry.map_err(|e| format!("目录条目错误: {}", e))?;
+        let path = entry.path();
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+            if name.ends_with(".concepts.json") {
+                if let Ok(meta) = std::fs::metadata(&path) {
+                    if let Ok(mtime) = meta.modified() {
+                        if mtime > graph_mtime {
+                            return Ok(true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(false)
+}
+
 /// Scan project for *.concepts.json files and merge into knowledge-graph.json
 #[tauri::command]
 async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
@@ -2414,7 +2447,7 @@ pub fn run() {
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
             create_learning_project, persist_quiz_result, read_quiz_history,
-            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph
+            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
