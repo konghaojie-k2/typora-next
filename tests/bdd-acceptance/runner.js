@@ -100,6 +100,17 @@ async function runAcceptanceTests() {
   totalFailed += sprint4Result.failed;
   if (sprint4Steps._cleanup) sprint4Steps._cleanup.call({});
 
+  // Sprint 5: Mermaid Fix Apply (AI 修复持久化)
+  console.log(`\n${YELLOW}▶ Sprint 5: Mermaid Fix Apply${RESET}`);
+  const sprint5Steps = require('./sprint5_mermaid_apply_fix.steps');
+  const sprint5Result = await runFeatureFile(
+    path.join(sprint4FeaturesDir, 'sprint5_mermaid_apply_fix.feature'),
+    sprint5Steps
+  );
+  totalPassed += sprint5Result.passed;
+  totalFailed += sprint5Result.failed;
+  if (sprint5Steps._cleanup) sprint5Steps._cleanup.call({});
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

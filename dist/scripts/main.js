@@ -1304,12 +1304,7 @@
         });
 
         if (fixed) {
-          const newPre = document.createElement('pre');
-          newPre.className = 'mermaid';
-          newPre.textContent = fixed;
-          wrapper.parentNode.replaceChild(newPre, wrapper);
-          mermaid.run({ nodes: [newPre] });
-          showToast('Mermaid 已修复');
+          renderMermaidFixSuccess(wrapper, code.trim(), fixed);
         }
       } catch (err) {
         btn.textContent = '🤖 AI 修复';
@@ -1317,6 +1312,120 @@
         showError('AI 修复失败: ' + err);
       }
     });
+  }
+
+  /**
+   * Sprint 5: 修复成功后展示双按钮 — 应用到源文件 / 仅本次会话
+   * 修复 [[feedback_brainstorm_ux_gap]]：补上状态机的退出路径 + 持久化机制
+   */
+  function renderMermaidFixSuccess(wrapper, brokenCode, fixedCode) {
+    const inner = wrapper.querySelector('.mermaid-error-code code');
+    inner.textContent = fixedCode;
+
+    // 替换按钮区为双按钮
+    const oldBtn = wrapper.querySelector('.mermaid-fix-btn');
+    if (oldBtn) oldBtn.remove();
+
+    const actions = document.createElement('div');
+    actions.className = 'mermaid-fix-actions';
+    actions.innerHTML = `
+      <button class="mermaid-fix-btn mermaid-fix-btn-primary">✓ 应用到源文件</button>
+      <button class="mermaid-fix-btn mermaid-fix-btn-secondary">仅本次会话</button>
+    `;
+    wrapper.appendChild(actions);
+
+    const sourcePath = (state.tabs[state.activeTab] && state.tabs[state.activeTab].path) || '';
+
+    actions.querySelector('.mermaid-fix-btn-primary').addEventListener('click', async (e) => {
+      const btn = e.target;
+      btn.textContent = '保存中...';
+      btn.disabled = true;
+      try {
+        await applyMermaidFixToSource(sourcePath, brokenCode, fixedCode, wrapper);
+      } catch (err) {
+        // applyMermaidFixToSource 内部已处理错误并恢复 DOM/按钮
+        console.error('applyMermaidFixToSource failed:', err);
+      }
+    });
+
+    actions.querySelector('.mermaid-fix-btn-secondary').addEventListener('click', () => {
+      // 仅本次会话：替换 DOM 但不写源文件
+      const newPre = document.createElement('pre');
+      newPre.className = 'mermaid';
+      newPre.textContent = fixedCode;
+      wrapper.parentNode.replaceChild(newPre, wrapper);
+      if (typeof mermaid !== 'undefined' && mermaid.run) {
+        mermaid.run({ nodes: [newPre] });
+      }
+      showToast('Mermaid 已修复（仅本次会话）');
+    });
+  }
+
+  /**
+   * 将修复写回源文件，并同步 tab.content。
+   * 失败时回滚按钮状态，由 showError 展示原因。
+   */
+  async function applyMermaidFixToSource(sourcePath, brokenCode, fixedCode, wrapper) {
+    // 1. 校验 tab 仍在（防用户切换）
+    const tab = state.tabs[state.activeTab];
+    if (!tab || tab.path !== sourcePath) {
+      showError('文件已被切换，请重新打开');
+      return;
+    }
+
+    if (!window.MermaidSourceReplace) {
+      showError('修复模块未加载');
+      return;
+    }
+
+    // 2. 在 tab.content 中定位并替换
+    const result = window.MermaidSourceReplace.replaceMermaidInSource(
+      tab.content, brokenCode, fixedCode
+    );
+
+    if (!result.ok) {
+      // 找不到：降级为仅本次会话 + 警告
+      showError('源文件已变更，无法定位原 Mermaid 块');
+      const newPre = document.createElement('pre');
+      newPre.className = 'mermaid';
+      newPre.textContent = fixedCode;
+      wrapper.parentNode.replaceChild(newPre, wrapper);
+      if (typeof mermaid !== 'undefined' && mermaid.run) {
+        mermaid.run({ nodes: [newPre] });
+      }
+      return;
+    }
+
+    // 3. 写文件
+    if (result.warning) showToast(result.warning);
+
+    try {
+      state.selfChangePending = true;
+      await invoke('write_file', { path: tab.path, content: result.newSource });
+    } catch (err) {
+      // 写失败：回滚按钮可点状态
+      showError('保存失败: ' + err);
+      const primary = wrapper.querySelector('.mermaid-fix-btn-primary');
+      if (primary) {
+        primary.textContent = '✓ 应用到源文件';
+        primary.disabled = false;
+      }
+      return;
+    }
+
+    // 4. 同步 tab.content + 替换 DOM
+    tab.content = result.newSource;
+    if (elements.sourceCode) elements.sourceCode.textContent = result.newSource;
+
+    const newPre = document.createElement('pre');
+    newPre.className = 'mermaid';
+    newPre.textContent = fixedCode;
+    wrapper.parentNode.replaceChild(newPre, wrapper);
+    if (typeof mermaid !== 'undefined' && mermaid.run) {
+      mermaid.run({ nodes: [newPre] });
+    }
+
+    showToast('已修复并保存到源文件');
   }
 
   function replaceBrokenImage(img) {

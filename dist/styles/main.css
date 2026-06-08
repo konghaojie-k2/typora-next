@@ -1826,6 +1826,29 @@ mark {
   transform: none;
 }
 
+/* Sprint 5: 双按钮 — 应用到源文件 / 仅本次会话 */
+.mermaid-fix-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 14px 14px;
+}
+
+.mermaid-fix-actions .mermaid-fix-btn {
+  width: auto;
+  flex: 1;
+  margin: 10px 0 0;
+}
+
+.mermaid-fix-btn-primary {
+  background: var(--color-accent);
+}
+
+.mermaid-fix-btn-secondary {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
 /* ============================================
    Settings Modal
    ============================================ */
