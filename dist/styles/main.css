@@ -559,6 +559,12 @@ main {
   overflow: hidden;
 }
 
+.content-main-wrapper {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
 /* ============================================
    Toolbar
    ============================================ */

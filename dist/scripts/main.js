@@ -3503,6 +3503,17 @@
         spinner.remove();
       }
     });
+
+    selectionToolbar.querySelector('#aiExplainBtn').addEventListener('click', () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const text = selection.toString().trim();
+      if (!text || text.length < 2) return;
+      hideSelectionToolbar();
+      if (window.LearningModeIntegration && window.LearningModeIntegration.createCue) {
+        window.LearningModeIntegration.createCue(text);
+      }
+    });
   }
 
   function findTextRange(container, searchText) {
@@ -3626,6 +3637,10 @@
 
   function showSelectionToolbar(rect) {
     if (!selectionToolbar) createSelectionToolbar();
+    const aiBtn = selectionToolbar.querySelector('#aiExplainBtn');
+    if (aiBtn) {
+      aiBtn.style.display = document.body.classList.contains('learning-mode') ? 'inline-flex' : 'none';
+    }
     selectionToolbar.style.display = 'flex';
     selectionToolbar.style.left = (rect.left + rect.width / 2 - 60) + 'px';
     selectionToolbar.style.top = (rect.top - 40) + 'px';

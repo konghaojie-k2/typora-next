@@ -181,18 +181,24 @@
         </button>
       </div>
 
-      <!-- Markdown Content -->
-      <article class="markdown-body" id="markdownBody">
-        <div class="welcome-message">
-          <h1>Typora Next</h1>
-          <p>一个现代化的 Markdown 编辑器</p>
-          <p>按 <kbd>Ctrl+O</kbd> 打开文件，或拖拽文件到此处</p>
-        </div>
-      </article>
+      <!-- Content Main Wrapper: markdown + source + cornell sidebar -->
+      <div class="content-main-wrapper" id="contentMainWrapper">
+        <!-- Markdown Content -->
+        <article class="markdown-body" id="markdownBody">
+          <div class="welcome-message">
+            <h1>Typora Next</h1>
+            <p>一个现代化的 Markdown 编辑器</p>
+            <p>按 <kbd>Ctrl+O</kbd> 打开文件，或拖拽文件到此处</p>
+          </div>
+        </article>
 
-      <!-- Source Code View (hidden by default) -->
-      <div class="source-view" id="sourceView" style="display: none;">
-        <pre class="source-code" id="sourceCode"></pre>
+        <!-- Source Code View (hidden by default) -->
+        <div class="source-view" id="sourceView" style="display: none;">
+          <pre class="source-code" id="sourceCode"></pre>
+        </div>
+
+        <!-- Cornell Sidebar (learning mode only, Sprint 6 PB2) -->
+        <aside class="cornell-sidebar" id="cornellSidebar" style="display: none;"></aside>
       </div>
     </main>
   </div>
@@ -359,6 +365,7 @@
   <script src="vendor/mermaid/mermaid.min.js"></script>
   <script src="vendor/d3.v7.min.js"></script>
   <script src="scripts/mermaid-source-replace.js"></script>
+  <script src="scripts/explain-conversation.js"></script>
   <script src="scripts/learning/project-manager.js"></script>
   <script src="scripts/learning/progress-tracker.js"></script>
   <script src="scripts/learning/learning-renderer.js"></script>

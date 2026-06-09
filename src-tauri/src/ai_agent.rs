@@ -507,10 +507,35 @@ pub struct QuizResult {
     pub suggestions: Vec<String>,
 }
 
+/// Build an extra quiz question from a concept + its AI explanation (Sprint 6 PB4)
+/// Pure function — extracted for testability
+pub fn build_extra_question(idx: usize, concept: &str, explanation: &str) -> QuizQuestion {
+    let summary = if explanation.chars().count() > 100 {
+        explanation.chars().take(100).collect::<String>() + "..."
+    } else {
+        explanation.to_string()
+    };
+    QuizQuestion {
+        id: format!("extra_{}", idx + 1),
+        qtype: "single".to_string(),
+        question: format!("你在本章中询问过「{}」的含义。以下哪项描述最准确？", concept),
+        options: vec![
+            QuizOption { label: "A".to_string(), text: summary },
+            QuizOption { label: "B".to_string(), text: "这是一种数据压缩算法".to_string() },
+            QuizOption { label: "C".to_string(), text: "这是数据库查询优化技术".to_string() },
+            QuizOption { label: "D".to_string(), text: "这是前端 UI 渲染框架".to_string() },
+        ],
+        correct: serde_json::Value::String("A".to_string()),
+        weak_concepts: vec![concept.to_string()],
+    }
+}
+
 /// Read quiz questions from pre-generated .quiz.json (Sprint 3 refactored: no real-time AI)
+/// Sprint 6 PB4: append 1-2 extra questions based on explanations/<chapter>.json
 #[tauri::command]
 pub async fn generate_chapter_quiz(
     chapter_file: String,
+    project_path: Option<String>,
     _agent_process: State<'_, AgentProcess>,
 ) -> Result<Vec<QuizQuestion>, String> {
     log::info!("[Sprint3] generate_chapter_quiz for: {}", chapter_file);
@@ -545,7 +570,7 @@ pub async fn generate_chapter_quiz(
     let quiz_json: serde_json::Value = serde_json::from_str(&quiz_content)
         .map_err(|e| format!("解析 quiz.json 失败: {}", e))?;
 
-    let questions: Vec<QuizQuestion> = quiz_json["questions"]
+    let mut questions: Vec<QuizQuestion> = quiz_json["questions"]
         .as_array()
         .ok_or("quiz.json 缺少 questions 字段")?
         .iter()
@@ -553,11 +578,74 @@ pub async fn generate_chapter_quiz(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("解析题目失败: {}", e))?;
 
-    if questions.is_empty() || questions.len() > 5 {
-        return Err(format!("Invalid question count: {} (expected 3-5)", questions.len()));
+    // Sprint 6 PB4: append extra questions from explanations
+    if let Some(proj) = project_path.as_ref().filter(|p| !p.is_empty()) {
+        if let Some(basename) = std::path::Path::new(&chapter_file).file_name() {
+            let basename_str = basename.to_string_lossy().to_string();
+            // Try project_path directly, then parent dir (in case baseDir is chapters/ subdir)
+            let start_dir = std::path::PathBuf::from(proj);
+            let mut exp_path = start_dir.join(".learning").join("explanations").join(format!("{}.json", basename_str));
+            if !exp_path.exists() {
+                if let Some(parent) = start_dir.parent() {
+                    exp_path = parent.join(".learning").join("explanations").join(format!("{}.json", basename_str));
+                }
+            }
+            log::info!("[Sprint6] checking explanations for extra quiz: {:?} exists={}", exp_path, exp_path.exists());
+            if exp_path.exists() {
+                match std::fs::read_to_string(&exp_path) {
+                    Ok(exp_content) => {
+                        match serde_json::from_str::<crate::explanation_persistence::ChapterExplanations>(&exp_content) {
+                            Ok(exp_data) => {
+                                let max_extra = std::cmp::min(2, 9usize.saturating_sub(questions.len()));
+                                log::info!("[Sprint6] found {} conversations, max_extra={}", exp_data.conversations.len(), max_extra);
+                                let extras: Vec<(String, String)> = exp_data.conversations
+                                    .iter()
+                                    .filter_map(|c| {
+                                        let concept = c.selected_text.trim();
+                                        if concept.is_empty() { return None; }
+                                        // Skip if existing quiz already mentions this concept
+                                        let concept_lower = concept.to_lowercase();
+                                        let already_covered = questions.iter().any(|q| {
+                                            q.question.to_lowercase().contains(&concept_lower)
+                                        });
+                                        if already_covered {
+                                            log::info!("[Sprint6] skipping extra for '{}': already in quiz", concept);
+                                            return None;
+                                        }
+                                        let ans = c.qa_history.first().map(|qa| qa.a.clone()).unwrap_or_default();
+                                        if !ans.is_empty() {
+                                            Some((concept.to_string(), ans))
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                    .take(max_extra)
+                                    .collect();
+                                log::info!("[Sprint6] selected {} extras from conversations", extras.len());
+                                for (idx, (concept, explanation)) in extras.iter().enumerate() {
+                                    let q = build_extra_question(idx, concept, explanation);
+                                    questions.push(q);
+                                    log::info!("[Sprint6] appended extra quiz question for concept: {}", concept);
+                                }
+                            }
+                            Err(e) => log::warn!("[Sprint6] failed to parse explanations json: {}", e),
+                        }
+                    }
+                    Err(e) => log::warn!("[Sprint6] failed to read explanations file: {}", e),
+                }
+            }
+        } else {
+            log::warn!("[Sprint6] could not extract basename from chapter_file: {}", chapter_file);
+        }
+    } else {
+        log::info!("[Sprint6] project_path is empty or None, skipping extra questions");
     }
 
-    log::info!("[Sprint3] loaded {} questions from quiz.json", questions.len());
+    if questions.is_empty() || questions.len() > 9 {
+        return Err(format!("Invalid question count: {} (expected 3-9)", questions.len()));
+    }
+
+    log::info!("[Sprint3] loaded {} questions (including extras)", questions.len());
     Ok(questions)
 }
 
@@ -695,6 +783,200 @@ pub async fn explain_selection(
     Ok(explanation)
 }
 
+// ============================================
+// Sprint 6 PB1/PB2: explain_selection_v2
+// Replaces explain_selection with ureq direct LLM call
+// ============================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QAItem {
+    pub q: String,
+    pub a: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplainV2Response {
+    pub explanation: String,
+    pub suggested_questions: Vec<String>,
+}
+
+/// Build LLM prompt for explain_selection_v2
+/// Pure function — extracted for testability
+pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Option<&[QAItem]>) -> String {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(ctx) = context {
+        parts.push(format!("当前章节：{}", ctx));
+    }
+
+    if let Some(qa_list) = previous_qa {
+        parts.push("之前的对话：".to_string());
+        for (i, qa) in qa_list.iter().enumerate() {
+            parts.push(format!("  Q{}: {}", i + 1, qa.q));
+            parts.push(format!("  A{}: {}", i + 1, qa.a));
+        }
+    }
+
+    parts.push(String::new());
+    parts.push("请用学术摘要风格简洁解释以下概念（严格150字以内）：".to_string());
+    parts.push("要求：".to_string());
+    parts.push("- 直接给出定义 + 核心机制 + 为什么重要".to_string());
+    parts.push("- 禁止讲故事、禁止层层递进比喻、禁止冗余修饰".to_string());
+    parts.push("- 一句话说完的事不要拆成三段".to_string());
+    parts.push(String::new());
+    parts.push("同时给出3-4个用户可能想追问的问题（作为JSON数组）。".to_string());
+    parts.push(String::new());
+    parts.push("返回格式（合法JSON）：".to_string());
+    parts.push("{\"explanation\": \"...\", \"suggestedQuestions\": [\"...\", \"...\"]}".to_string());
+    parts.push(String::new());
+
+    let truncated = if text.chars().count() > 197 {
+        text.chars().take(197).collect::<String>() + "..."
+    } else {
+        text.to_string()
+    };
+    parts.push(format!("概念：{}", truncated));
+
+    parts.join("\n")
+}
+
+/// Parse LLM response into structured ExplainV2Response
+/// Pure function — extracted for testability
+pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
+    // Strip markdown code block wrappers if present (LLM sometimes wraps JSON in ```json ... ```)
+    let cleaned = raw.trim();
+    let cleaned = if cleaned.starts_with("```") {
+        cleaned.lines()
+            .skip(1) // skip ```json or ```
+            .take_while(|l| !l.trim_start().starts_with("```"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    } else {
+        cleaned.to_string()
+    };
+
+    // Try to parse as JSON
+    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&cleaned) {
+        let mut explanation = parsed
+            .get("explanation")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        // Hard truncate to 200 chars as safety net (prompt asks for 150)
+        if explanation.chars().count() > 200 {
+            explanation = explanation.chars().take(197).collect::<String>() + "...";
+        }
+        let suggested_questions = parsed
+            .get("suggestedQuestions")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        return ExplainV2Response {
+            explanation,
+            suggested_questions,
+        };
+    }
+
+    // Fallback: treat raw as explanation, use hardcoded questions
+    let fallback = vec![
+        "这是什么意思？".to_string(),
+        "举个例子".to_string(),
+        "有什么应用场景？".to_string(),
+        "需要注意什么陷阱？".to_string(),
+    ];
+    ExplainV2Response {
+        explanation: raw.to_string(),
+        suggested_questions: fallback,
+    }
+}
+
+#[tauri::command]
+pub async fn explain_selection_v2(
+    text: String,
+    context: Option<String>,
+    previous_qa: Option<Vec<QAItem>>,
+    app_handle: AppHandle,
+) -> Result<ExplainV2Response, String> {
+    log::info!("[Sprint6] explain_selection_v2 START: text_len={}", text.len());
+
+    // Get config
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let api_key = config.api_key
+        .filter(|k| !k.is_empty())
+        .ok_or("未设置 API Key，请在设置中配置")?;
+
+    let provider = config.ai_provider.unwrap_or_default();
+    let base_url = config.ai_base_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| match provider {
+            crate::AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
+            crate::AiProvider::Openai => "https://api.openai.com".to_string(),
+        });
+
+    let model = config.model
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| match provider {
+            crate::AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
+            crate::AiProvider::Openai => "gpt-4o-mini".to_string(),
+        });
+
+    // Build prompt
+    let prompt = build_explain_prompt(&text, context.as_deref(), previous_qa.as_deref());
+
+    // Call LLM via ureq (mirrors fix_mermaid pattern)
+    let (response, is_anthropic) = match provider {
+        crate::AiProvider::Anthropic => {
+            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, true)
+        }
+        crate::AiProvider::Openai => {
+            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 1024,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, false)
+        }
+    };
+
+    let json: serde_json::Value = response.into_json()
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let raw_content = if is_anthropic {
+        json["content"][0]["text"].as_str()
+    } else {
+        json["choices"][0]["message"]["content"].as_str()
+    }.ok_or("响应中没有内容")?;
+
+    // Parse structured response
+    let result = parse_explain_response(raw_content);
+
+    log::info!("[Sprint6] explain_selection_v2 SUCCESS: explanation_len={}, questions={}",
+        result.explanation.len(), result.suggested_questions.len());
+    Ok(result)
+}
+
 /// Adapt subsequent chapters based on quiz result (Sprint 3 task 3.4)
 /// Decision: struggling/learning → request add-on chapter; mastered → no-op
 #[tauri::command]
@@ -744,4 +1026,25 @@ pub async fn adapt_subsequent_chapters(
         "addedChapter": result,
         "rating": rating,
     }))
+}
+
+// ============================================
+// Sprint 6 PB3: Explanation Persistence Commands
+// ============================================
+
+#[tauri::command]
+pub async fn persist_explanation(
+    project_path: String,
+    chapter: String,
+    conversation: crate::explanation_persistence::ExplanationConversation,
+) -> Result<(), String> {
+    crate::explanation_persistence::save(&project_path, &chapter, conversation)
+}
+
+#[tauri::command]
+pub async fn load_chapter_explanations(
+    project_path: String,
+    chapter: String,
+) -> Result<crate::explanation_persistence::ChapterExplanations, String> {
+    crate::explanation_persistence::load(&project_path, &chapter)
 }

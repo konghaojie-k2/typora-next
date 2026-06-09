@@ -1909,6 +1909,108 @@ async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, St
 }
 
 // ============================================
+// Sprint 6 PB3: Per-chapter Explanation Persistence
+// ============================================
+
+mod explanation_persistence {
+    use serde::{Deserialize, Serialize};
+
+    pub const MAX_CUES_PER_CHAPTER: usize = 20;
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ExplanationAnchor {
+        pub paragraph_index: i32,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ExplanationQAEntry {
+        pub q: String,
+        pub a: String,
+        pub ts: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ExplanationConversation {
+        pub id: String,
+        pub selected_text: String,
+        pub anchor: Option<ExplanationAnchor>,
+        pub qa_history: Vec<ExplanationQAEntry>,
+        pub created_at: String,
+    }
+
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    pub struct ChapterExplanations {
+        pub chapter: String,
+        pub conversations: Vec<ExplanationConversation>,
+    }
+
+    pub fn get_explanations_dir(project_path: &str) -> std::path::PathBuf {
+        std::path::PathBuf::from(project_path).join(".learning").join("explanations")
+    }
+
+    pub fn get_explanation_file_path(project_path: &str, chapter: &str) -> std::path::PathBuf {
+        get_explanations_dir(project_path).join(format!("{}.json", chapter))
+    }
+
+    /// Save a conversation to the chapter's explanation file.
+    pub fn save(project_path: &str, chapter: &str, conversation: ExplanationConversation) -> Result<(), String> {
+        let dir = get_explanations_dir(project_path);
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| format!("创建 explanations 目录失败: {}", e))?;
+
+        let path = get_explanation_file_path(project_path, chapter);
+
+        let mut data: ChapterExplanations = if path.exists() {
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("读取 explanations 文件失败: {}", e))?;
+            serde_json::from_str(&content)
+                .map_err(|e| format!("解析 explanations 文件失败: {}", e))?
+        } else {
+            ChapterExplanations {
+                chapter: chapter.to_string(),
+                conversations: vec![],
+            }
+        };
+
+        if let Some(idx) = data.conversations.iter().position(|c| c.id == conversation.id) {
+            data.conversations[idx] = conversation;
+        } else {
+            data.conversations.push(conversation);
+        }
+
+        if data.conversations.len() > MAX_CUES_PER_CHAPTER {
+            data.conversations.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            let excess = data.conversations.len() - MAX_CUES_PER_CHAPTER;
+            data.conversations.drain(0..excess);
+        }
+
+        let json = serde_json::to_string_pretty(&data)
+            .map_err(|e| format!("序列化 explanations 失败: {}", e))?;
+        std::fs::write(&path, json)
+            .map_err(|e| format!("写入 explanations 文件失败: {}", e))?;
+
+        Ok(())
+    }
+
+    /// Read all conversations for a chapter.
+    pub fn load(project_path: &str, chapter: &str) -> Result<ChapterExplanations, String> {
+        let path = get_explanation_file_path(project_path, chapter);
+        if !path.exists() {
+            return Ok(ChapterExplanations {
+                chapter: chapter.to_string(),
+                conversations: vec![],
+            });
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取 explanations 文件失败: {}", e))?;
+        let data: ChapterExplanations = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 explanations 文件失败: {}", e))?;
+        Ok(data)
+    }
+}
+
+// Commands defined in ai_agent.rs to avoid macro issues
+// ============================================
 // Sprint 4: Forgetting Curve Review System
 // ============================================
 
@@ -2445,8 +2547,9 @@ pub fn run() {
             open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
-            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
+            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::explain_selection_v2,
             create_learning_project, persist_quiz_result, read_quiz_history,
+            ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness
         ])
         .build(tauri::generate_context!())

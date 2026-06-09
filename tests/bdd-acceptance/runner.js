@@ -111,6 +111,16 @@ async function runAcceptanceTests() {
   totalFailed += sprint5Result.failed;
   if (sprint5Steps._cleanup) sprint5Steps._cleanup.call({});
 
+  // Sprint 6: Explain Conversation (AI 解释 + 追问)
+  console.log(`\n${YELLOW}▶ Sprint 6: Explain Conversation${RESET}`);
+  const sprint6Steps = require('./sprint6_explain_conversation.steps');
+  const sprint6Result = await runFeatureFile(
+    path.join(sprint4FeaturesDir, 'sprint6_explain_conversation.feature'),
+    sprint6Steps
+  );
+  totalPassed += sprint6Result.passed;
+  totalFailed += sprint6Result.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

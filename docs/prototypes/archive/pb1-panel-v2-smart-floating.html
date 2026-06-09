@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<!--
+  v2: Smart-Floating（智能避让）+ 追问流程
+  定位算法：
+    1. 默认：选区右 + 12px，垂直顶部对齐
+    2. 若右侧空间 < panel.width：选区下 + 12px，水平居中于选区
+    3. 若下侧空间也不足：选区上 - panel.height - 12px
+    4. 若上下都不足：夹在视口边（最少 8px padding）
+  追问时：面板原地向下扩展，若超出视口 → 切换到上方
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PB1 Panel v2 — Smart Floating + 追问</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background: #f5f5f7; margin: 0; padding: 30px; color: #333; }
+  .header { background: #fff; border-left: 4px solid #6b7280; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+  .header strong { color: #111827; }
+  .header .verdict { color: #047857; margin-top: 6px; font-size: 12px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .stage-col {
+    background: #fff;
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    padding: 16px 18px;
+    min-height: 580px;
+    position: relative;
+  }
+  .stage-col h3 { font-size: 12px; color: #6b7280; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+  .stage-col .note { font-size: 10px; color: #6b7280; font-style: italic; margin-bottom: 10px; }
+  .chapter-text { font-size: 13px; line-height: 1.7; color: #1f2937; }
+  .selection { background: #dbeafe; border-bottom: 2px solid #60a5fa; padding: 2px 0; }
+
+  .panel {
+    position: absolute;
+    width: 280px;
+    background: #fff;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.10);
+    padding: 11px 13px;
+    font-size: 12px;
+    box-sizing: border-box;
+  }
+  .panel-title { font-size: 13px; font-weight: 600; margin-bottom: 6px; display: flex; justify-content: space-between; }
+  .panel-title .close { color: #9ca3af; font-size: 15px; }
+  .panel-context { background: #f9fafb; border-left: 3px solid #d1d5db; padding: 5px 7px; margin-bottom: 9px; color: #4b5563; line-height: 1.5; font-size: 11px; }
+  .panel-context strong { color: #6b7280; font-size: 9px; text-transform: uppercase; display: block; margin-bottom: 2px; }
+  .qa-block { margin-bottom: 7px; padding: 6px 8px; background: #f3f4f6; border-radius: 5px; }
+  .qa-block .q { color: #1e40af; font-weight: 500; margin-bottom: 3px; font-size: 11px; }
+  .qa-block .a { color: #1f2937; line-height: 1.5; font-size: 11px; }
+  .chips-label { font-size: 9px; color: #6b7280; margin: 6px 0 3px; text-transform: uppercase; }
+  .chips { display: flex; flex-wrap: wrap; gap: 3px; }
+  .chip { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 2px 7px; border-radius: 10px; font-size: 10px; }
+  .chip::before { content: '? '; color: #6b7280; }
+  .actions { display: flex; gap: 4px; justify-content: flex-end; margin-top: 8px; padding-top: 6px; border-top: 1px solid #e5e7eb; }
+  .btn { padding: 3px 8px; font-size: 10px; border-radius: 3px; border: 1px solid #d1d5db; background: #fff; }
+  .btn-primary { background: #6b7280; color: #fff; border-color: #6b7280; }
+
+  /* Case A: 首次响应（右） */
+  .case-a .selection { display: inline-block; width: 160px; }
+  .case-a .panel { left: 230px; top: 30px; }
+
+  /* Case B: 1 次追问（右，原地扩展） */
+  .case-b .selection { display: inline-block; width: 160px; }
+  .case-b .panel { left: 230px; top: 30px; }
+
+  /* Case C: 多次追问（智能切换 → 下方） */
+  .case-c .selection { display: inline-block; width: 160px; }
+  .case-c .panel { left: 50%; transform: translateX(-50%); top: 200px; max-height: 360px; overflow-y: auto; }
+
+  .reposition-tag {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    background: #fef3c7;
+    border: 1px solid #fde68a;
+    color: #92400e;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+  }
+</style>
+</head>
+<body>
+  <div class="header">
+    <strong>v2 — Smart-Floating（智能避让） + 追问流程</strong><br>
+    算法：4 种位置 fallback；追问时面板扩展，超出视口时自动重定位<br>
+    <div class="verdict">✓ BDD 场景 5 全部满足；追问多了会自动从「右」切换到「下」（看 Case C）</div>
+  </div>
+
+  <div class="grid">
+    <!-- Case A: 首次响应（右） -->
+    <div class="stage-col case-a">
+      <h3>Case A · 首次响应（右侧）</h3>
+      <p class="note">选区右侧空间充足 → 浮在右</p>
+      <p class="chapter-text">用户选中
+        <span class="selection">注意力</span>。
+      </p>
+      <div class="panel">
+        <div class="panel-title"><span>📖 注意力</span><span class="close">×</span></div>
+        <div class="panel-explanation" style="line-height: 1.5; color: #1f2937; margin-bottom: 8px;">
+          注意力让模型在处理每个 token 时给其他 token 不同权重。比如"猫坐垫"处理"坐"时更关注"猫"和"垫子"。
+        </div>
+        <div class="chips-label">继续问？</div>
+        <div class="chips">
+          <span class="chip">举个例子</span>
+          <span class="chip">和 RNN 区别？</span>
+          <span class="chip">用在哪些？</span>
+        </div>
+        <div class="actions">
+          <button class="btn">关闭</button>
+          <button class="btn btn-primary">✓ 保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Case B: 1 次追问（右，原地扩展） -->
+    <div class="stage-col case-b">
+      <h3>Case B · 1 次追问后（右侧扩展）</h3>
+      <p class="note">面板在右，原地向下扩展。仍能放得下。</p>
+      <p class="chapter-text">用户点
+        <span class="chip" style="font-size: 9px; padding: 1px 5px;">? 举个例子</span>。
+      </p>
+      <div class="panel">
+        <div class="panel-title"><span>📖 注意力</span><span class="close">×</span></div>
+        <div class="panel-context">
+          <strong>原解释</strong>
+          注意力让模型给其他 token 不同权重。
+        </div>
+        <div class="qa-block">
+          <div class="q">Q: 举个例子</div>
+          <div class="a">比如"猫坐垫"处理"坐"时，会更关注"猫"和"垫子"（权重 0.8、0.7），而不是"的"（0.1）。</div>
+        </div>
+        <div class="chips-label">继续问？</div>
+        <div class="chips">
+          <span class="chip">权重怎么算？</span>
+          <span class="chip">和 Self-Attention 区别？</span>
+        </div>
+        <div class="actions">
+          <button class="btn">关闭</button>
+          <button class="btn btn-primary">✓ 保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Case C: 多次追问（智能切换 → 下方） -->
+    <div class="stage-col case-c">
+      <h3>Case C · 多次追问后（重定位 → 下方）</h3>
+      <p class="note">面板过长会超出右侧视口 → 智能切换到选区下方</p>
+      <p class="chapter-text">用户连续追问 3 次。</p>
+      <div class="panel">
+        <div class="reposition-tag">↻ 智能重定位</div>
+        <div class="panel-title"><span>📖 注意力</span><span class="close">×</span></div>
+        <div class="panel-context" style="padding: 3px 6px; font-size: 10px;">
+          <strong>原解释</strong>
+          注意力让模型给其他 token 不同权重。
+        </div>
+        <div class="qa-block" style="padding: 4px 7px;">
+          <div class="q">Q: 举个例子</div>
+          <div class="a">比如"猫坐垫"处理"坐"时，更关注"猫"和"垫子"。</div>
+        </div>
+        <div class="qa-block" style="padding: 4px 7px;">
+          <div class="q">Q: 权重怎么算？</div>
+          <div class="a">Softmax(QK^T / √d) 得到 0-1 权重，加权求和。</div>
+        </div>
+        <div class="qa-block" style="padding: 4px 7px;">
+          <div class="q">Q: Q/K/V 是啥？</div>
+          <div class="a">Q=查询、K=键、V=值。三个可学习矩阵对输入做线性变换。</div>
+        </div>
+        <div class="chips-label">继续问？</div>
+        <div class="chips">
+          <span class="chip">代码示例？</span>
+          <span class="chip">为啥除以 √d？</span>
+        </div>
+        <div class="actions">
+          <button class="btn">关闭</button>
+          <button class="btn btn-primary">✓ 保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

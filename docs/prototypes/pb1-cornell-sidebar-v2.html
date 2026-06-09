@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<!--
+  康奈尔笔记式侧栏 v2 — 补全"首次选词"流程
+  ============================================
+  旧版问题：只展示了"历史回顾"（3 条已存在），没有展示空状态和首次触发。
+  新版：3 个状态并排展示完整流程。
+  状态 1：空侧栏（没有任何 cue）→ 告诉用户"选中文字开始"
+  状态 2：用户选中"位置编码" → 侧栏实时出现 cue（正在解释）
+  状态 3：解释完成 → cue 列表有了第一条
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>PB1 Cornell Sidebar v2 — 首次选词流程</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+    background: #f5f5f7;
+    margin: 0;
+    color: #333;
+  }
+  .header {
+    background: #fff;
+    border-left: 4px solid #6b7280;
+    padding: 10px 16px;
+    font-size: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  }
+  .header strong { color: #111827; }
+  .header .verdict { color: #047857; margin-top: 4px; }
+
+  .states {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 20px;
+    padding: 20px;
+    height: calc(100vh - 60px);
+  }
+
+  .state {
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+  .state-header {
+    padding: 10px 16px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+    font-size: 12px;
+  }
+  .state-header .state-num {
+    display: inline-block;
+    background: #6b7280;
+    color: #fff;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    text-align: center;
+    line-height: 20px;
+    font-size: 11px;
+    margin-right: 6px;
+  }
+  .state-body {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+
+  /* 主内容区（每个 state 左边） */
+  .main-col {
+    flex: 1;
+    padding: 16px 20px;
+    overflow-y: auto;
+    border-right: 1px solid #e5e7eb;
+  }
+  .main-col h3 {
+    font-size: 13px;
+    color: #111827;
+    margin: 0 0 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e5e7eb;
+  }
+  .main-col p {
+    font-size: 12px;
+    line-height: 1.7;
+    color: #1f2937;
+    margin: 0 0 10px;
+  }
+  .selection {
+    background: #dbeafe;
+    border-bottom: 2px solid #60a5fa;
+    padding: 1px 0;
+  }
+  .selection-new {
+    background: #fef3c7;
+    border-bottom: 2px solid #f59e0b;
+    padding: 1px 0;
+  }
+
+  /* 侧栏区（每个 state 右边） */
+  .side-col {
+    width: 180px;
+    background: #f9fafb;
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .side-col-header {
+    padding: 8px 12px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #fff;
+  }
+  .side-col-header h4 {
+    font-size: 10px;
+    color: #6b7280;
+    text-transform: uppercase;
+    margin: 0 0 2px;
+    letter-spacing: 0.5px;
+  }
+  .side-col-header .info {
+    font-size: 11px;
+    color: #111827;
+  }
+  .side-col-header .meta {
+    font-size: 10px;
+    color: #9ca3af;
+  }
+  .side-col-body {
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+  }
+
+  /* === 空状态 === */
+  .empty-state {
+    text-align: center;
+    padding: 24px 10px;
+    color: #9ca3af;
+    font-size: 11px;
+    line-height: 1.6;
+  }
+  .empty-state .icon {
+    font-size: 28px;
+    margin-bottom: 10px;
+    opacity: 0.5;
+  }
+
+  /* === Cue 卡片 === */
+  .cue {
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 5px;
+    padding: 8px 10px;
+    margin-bottom: 6px;
+    transition: border-color 0.15s;
+  }
+  .cue.active { border-color: #6b7280; box-shadow: 0 0 0 1px #6b7280; }
+  .cue.new {
+    border-color: #f59e0b;
+    border-style: dashed;
+    background: #fffbeb;
+  }
+  .cue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .cue-term {
+    font-size: 11px;
+    font-weight: 600;
+    color: #111827;
+  }
+  .cue-tag {
+    font-size: 8px;
+    padding: 1px 5px;
+    border-radius: 6px;
+    color: #6b7280;
+    background: #f3f4f6;
+  }
+  .cue-tag.qa { background: #eff6ff; color: #1e40af; }
+  .cue-snippet {
+    font-size: 10px;
+    color: #4b5563;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .cue-loading {
+    font-size: 10px;
+    color: #9ca3af;
+    font-style: italic;
+    padding: 4px 0;
+  }
+  .cue-loading::before { content: '⏳ '; }
+
+  /* 追问 chip（mini） */
+  .chips-mini {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 5px;
+  }
+  .chip-mini {
+    background: #eff6ff;
+    border: 1px solid #bfdbfe;
+    color: #1e40af;
+    padding: 1px 5px;
+    border-radius: 6px;
+    font-size: 9px;
+  }
+  .chip-mini::before { content: '? '; color: #6b7280; font-size: 9px; }
+
+  /* === 追问输入栏 === */
+  .input-bar {
+    display: flex;
+    gap: 3px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e5e7eb;
+  }
+  .input-bar input {
+    flex: 1;
+    min-width: 0;           /* 允许 flex 子项缩小到 0 */
+    padding: 4px 6px;
+    border: 1px solid #d1d5db;
+    border-radius: 3px;
+    font-size: 10px;
+    outline: none;
+    background: #fff;
+    color: #111827;
+  }
+  .input-bar input::placeholder { color: #9ca3af; }
+  .input-bar input:focus { border-color: #6b7280; }
+  .input-bar button {
+    padding: 4px 6px;
+    background: #6b7280;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    font-size: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;         /* 按钮不缩小 */
+  }
+  .input-bar button:hover { background: #4b5563; }
+
+  .side-col-footer {
+    padding: 6px 10px;
+    border-top: 1px solid #e5e7eb;
+    background: #fff;
+    font-size: 9px;
+    color: #9ca3af;
+    text-align: center;
+  }
+
+  /* 步骤标签 */
+  .step-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 18px;
+    color: #6b7280;
+    z-index: 5;
+  }
+  .states { position: relative; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <strong>Cornell Sidebar v2 — 首次选词流程（3 状态）</strong> · 空 → 选词 → 第一条 cue 生成<br>
+    补全旧版缺失：侧栏首次响应、AI 正在解释的状态、新 cue 高亮
+    <div class="verdict">✓ 3 个状态覆盖了"从 0 到 1"的完整体验</div>
+  </div>
+
+  <div class="states">
+
+    <!-- State 1: 空侧栏 -->
+    <div class="state">
+      <div class="state-header">
+        <span class="state-num">1</span>
+        <strong>空状态</strong> · 还没有任何选词
+      </div>
+      <div class="state-body">
+        <div class="main-col">
+          <h3>第五章 · 位置编码</h3>
+          <p>
+            Transformer 处理序列时是"并行"的——所有 token 一次性进入模型，不像 RNN 那样串行。
+            但这带来一个问题：模型怎么知道"猫坐垫"和"垫坐猫"的顺序？
+          </p>
+          <p>
+            答案是位置编码。我们给每个 token 加一个位置向量，让"第 0 个位置"和"第 1 个位置"在向量空间里不一样。
+          </p>
+          <p>Transformer 用正弦余弦生成这些向量...</p>
+        </div>
+        <div class="side-col">
+          <div class="side-col-header">
+            <h4>本章要点</h4>
+            <div class="info">📖 第 5 章 · 位置编码</div>
+            <div class="meta">还没有 cue</div>
+          </div>
+          <div class="side-col-body">
+            <div class="empty-state">
+              <div class="icon">📌</div>
+              选中正文中的文字<br>AI 会自动生成 cue<br><br>
+              <span style="font-size:10px;color:#6b7280;">例：选中"位置编码"<br>→ 自动创建一条 cue</span>
+            </div>
+          </div>
+          <div class="side-col-footer">💡 选中文字即触发</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- State 2: 选词中 → AI 正在解释 -->
+    <div class="state">
+      <div class="state-header">
+        <span class="state-num">2</span>
+        <strong>选词后</strong> · AI 正在生成 cue
+      </div>
+      <div class="state-body">
+        <div class="main-col">
+          <h3>第五章 · 位置编码</h3>
+          <p>
+            Transformer 处理序列时是"并行"的——所有 token 一次性进入模型，不像 RNN 那样串行。
+            但这带来一个问题：模型怎么知道"猫坐垫"和"垫坐猫"的顺序？
+          </p>
+          <p>
+            答案是
+            <span class="selection-new">位置编码</span>
+            。我们给每个 token 加一个位置向量，让"第 0 个位置"和"第 1 个位置"在向量空间里不一样。
+          </p>
+          <p>Transformer 用正弦余弦生成这些向量...</p>
+        </div>
+        <div class="side-col">
+          <div class="side-col-header">
+            <h4>本章要点</h4>
+            <div class="info">📖 第 5 章 · 位置编码</div>
+            <div class="meta">正在解释...</div>
+          </div>
+          <div class="side-col-body">
+            <!-- 新 cue 卡片（黄色虚线边框 = 正在生成） -->
+            <div class="cue new">
+              <div class="cue-header">
+                <span class="cue-term">位置编码</span>
+                <span class="cue-tag" style="background:#fef3c7;color:#92400e;">新</span>
+              </div>
+              <div class="cue-loading">AI 正在生成 cue...</div>
+            </div>
+          </div>
+          <div class="side-col-footer">⏳ 等待 LLM 响应</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- State 3: 解释完成 → cue 就位 -->
+    <div class="state">
+      <div class="state-header">
+        <span class="state-num">3</span>
+        <strong>解释完成</strong> · cue 就位，可追问
+      </div>
+      <div class="state-body">
+        <div class="main-col">
+          <h3>第五章 · 位置编码</h3>
+          <p>
+            Transformer 处理序列时是"并行"的——所有 token 一次性进入模型，不像 RNN 那样串行。
+            但这带来一个问题：模型怎么知道"猫坐垫"和"垫坐猫"的顺序？
+          </p>
+          <p>
+            答案是
+            <span class="selection">位置编码</span>
+            。我们给每个 token 加一个位置向量，让"第 0 个位置"和"第 1 个位置"在向量空间里不一样。
+          </p>
+          <p>Transformer 用正弦余弦生成这些向量...</p>
+        </div>
+        <div class="side-col">
+          <div class="side-col-header">
+            <h4>本章要点</h4>
+            <div class="info">📖 第 5 章 · 位置编码</div>
+            <div class="meta">1 条 cue · 刚刚</div>
+          </div>
+          <div class="side-col-body">
+            <!-- 生成好的 cue 卡片（正常样式） -->
+            <div class="cue active">
+              <div class="cue-header">
+                <span class="cue-term">位置编码</span>
+                <span class="cue-tag qa">1 轮</span>
+              </div>
+              <div class="cue-snippet">
+                给每个 token 加位置向量（0/1/2...），让模型区分序列顺序。正弦余弦实现，无额外参数。
+              </div>
+              <div class="chips-mini">
+                <span class="chip-mini">为啥用正弦？</span>
+                <span class="chip-mini">和词嵌入区别？</span>
+                <span class="chip-mini">代码示例</span>
+              </div>
+              <!-- 自由输入栏 -->
+              <div class="input-bar">
+                <input type="text" placeholder="输入你的问题..." />
+                <button>发送</button>
+              </div>
+            </div>
+
+            <!-- 提示新建 -->
+            <div class="cue" style="border-style: dashed; background: #f9fafb; opacity: 0.6;">
+              <div class="cue-header">
+                <span class="cue-term" style="color: #9ca3af;">+ 继续选词</span>
+              </div>
+              <div class="cue-snippet" style="color: #b0b0b0;">
+                选中更多文字 → 创建更多 cue
+              </div>
+            </div>
+          </div>
+          <div class="side-col-footer">💡 点 cue 展开看完整 Q&A</div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</body>
+</html>

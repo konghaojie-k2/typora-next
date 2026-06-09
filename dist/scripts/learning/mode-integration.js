@@ -26,6 +26,16 @@
   let _lastQuizSubmission = null;
   let _reviewModal = null;
 
+  // Sprint 6 PB2: Cornell Sidebar state
+  let _cornellSidebarEl = null;      // sidebar DOM element
+  let _cornellCueIdCounter = 0;      // cue ID counter
+  let _cornellCues = [];             // cue data array
+  let _selectionChangeHandler = null; // bound selectionchange handler
+  let _currentChapterTitle = '';     // current chapter title for context
+  let _currentChapterFile = '';      // current chapter file path (for persistence)
+  let _lastChapterFileForSidebar = ''; // detect chapter switch
+  let _pendingSelectedText = '';     // selected text waiting for user to trigger cue
+
   function formatLocalTime(date) {
     const d = date || new Date();
     const pad = n => String(n).padStart(2, '0');
@@ -134,6 +144,8 @@
     if (!document.body.classList.contains('learning-mode')) { console.log('[Sprint3] not in learning-mode, skip quiz'); return; }
 
     _projectPath = projectPath || '';
+    _currentChapterFile = chapterFile || '';
+    console.log('[Sprint6] setupQuizPanel projectPath=', _projectPath, 'chapterFile=', _currentChapterFile);
     _quizPanel = new window.QuizPanel({ chapterFile: chapterFile || 'unknown' });
     _quizPanel.onSaveHistory = onQuizSaveHistory;
     _quizPanel.onAdaptRequested = onQuizAdaptRequested;
@@ -285,8 +297,8 @@
 
     try {
       const chapterFile = _quizPanel.getChapterFile();
-      console.log('[QuizDebug] chapterFile=', chapterFile);
-      const questions = await window.__TAURI__.core.invoke('generate_chapter_quiz', { chapterFile });
+      console.log('[QuizDebug] chapterFile=', chapterFile, 'projectPath=', _projectPath);
+      const questions = await window.__TAURI__.core.invoke('generate_chapter_quiz', { chapterFile, projectPath: _projectPath });
       console.log('[QuizDebug] loaded questions:', questions.length);
       _currentQuizQuestions = questions;
       if (_quizPanel) _quizPanel.setQuestions(questions);
@@ -862,53 +874,422 @@
   }
 
   // ============================================
-  // 3. Selection Explainer: floating toolbar
+  // 3. Cornell Sidebar (Sprint 6 PB2)
+  //    Replaces modal-based explain with 180px permanent sidebar + cue list
   // ============================================
 
   function setupSelectionExplainer() {
-    console.log('[Sprint3] setupSelectionExplainer called');
-    if (!window.SelectionExplainer) { console.warn('[Sprint3] SelectionExplainer not loaded'); return; }
-    if (!document.body.classList.contains('learning-mode')) { console.log('[Sprint3] not in learning-mode, skip selection'); return; }
+    console.log('[Sprint6] setupSelectionExplainer');
+    if (!document.body.classList.contains('learning-mode')) {
+      console.log('[Sprint6] not in learning-mode, skip sidebar');
+      return;
+    }
 
-    _selectionExplainer = new window.SelectionExplainer();
+    // Detect chapter change by file path (reliable for persistence)
+    const chapterChanged = _currentChapterFile && _currentChapterFile !== _lastChapterFileForSidebar;
+    if (chapterChanged) {
+      console.log('[Sprint6] chapter changed from', _lastChapterFileForSidebar, 'to', _currentChapterFile);
+      teardownCornellSidebar();
+      _lastChapterFileForSidebar = _currentChapterFile;
+      initCornellSidebar();
+      loadChapterExplanations();
+    } else if (!_cornellSidebarEl) {
+      initCornellSidebar();
+      loadChapterExplanations();
+    }
 
-    // Show the AI explain button in the existing selection toolbar
-    const aiBtn = document.getElementById('aiExplainBtn');
-    if (aiBtn) {
-      aiBtn.style.display = '';
-      aiBtn.addEventListener('click', onAiExplainClick);
+    // Update title from DOM for context display
+    const md = document.getElementById('markdownBody');
+    const newTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
+    if (newTitle) _currentChapterTitle = newTitle;
+    updateSidebarHeader();
+  }
+
+  function initCornellSidebar() {
+    const sidebar = document.getElementById('cornellSidebar');
+    if (!sidebar) { console.warn('[Sprint6] cornellSidebar element not found'); return; }
+
+    _cornellSidebarEl = sidebar;
+    sidebar.style.display = '';
+    sidebar.innerHTML = `
+      <div class="cornell-sidebar-header">
+        <h4>本章要点</h4>
+        <div class="info" id="cornellSidebarInfo">📖 尚未选词</div>
+        <div class="meta" id="cornellSidebarMeta">还没有 cue</div>
+      </div>
+      <div class="cornell-sidebar-body" id="cornellSidebarBody">
+        <div class="cornell-cue-empty" id="cornellEmptyState">
+          <div class="icon">📌</div>
+          选中正文中的文字<br>点击下方按钮生成 cue<br><br>
+          <span style="font-size:10px;color:#6b7280;">例：选中"位置编码"<br>→ 点底部按钮解释</span>
+        </div>
+      </div>
+      <div class="cornell-sidebar-footer" id="cornellSidebarFooter">💡 选中文字后点击此处解释</div>
+    `;
+
+    // Bind selectionchange
+    if (!_selectionChangeHandler) {
+      _selectionChangeHandler = onSelectionChange;
+      document.addEventListener('selectionchange', _selectionChangeHandler);
+    }
+
+    // Read current chapter title
+    const md = document.getElementById('markdownBody');
+    _currentChapterTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
+    updateSidebarHeader();
+  }
+
+  function updateSidebarHeader() {
+    const info = document.getElementById('cornellSidebarInfo');
+    const meta = document.getElementById('cornellSidebarMeta');
+    if (!info || !meta) return;
+
+    const chapter = _currentChapterTitle || '本章';
+    info.textContent = '📖 ' + chapter;
+
+    const count = _cornellCues.length;
+    if (count === 0) {
+      meta.textContent = '还没有 cue';
+    } else if (count === 1) {
+      meta.textContent = '1 条 cue';
+    } else {
+      meta.textContent = count + ' 条 cue';
     }
   }
 
-  async function onAiExplainClick() {
-    const sel = window.getSelection();
-    const text = sel ? sel.toString().trim() : '';
-    if (!text || text.length < 2) return;
+  function onSelectionChange() {
+    if (!document.body.classList.contains('learning-mode')) return;
 
-    // Hide the selection toolbar
-    const aiBtn = document.getElementById('aiExplainBtn');
-    if (aiBtn) aiBtn.style.display = 'none';
+    // Debounce: wait for selection to settle
+    clearTimeout(window._cornellSelectionTimer);
+    window._cornellSelectionTimer = setTimeout(() => {
+      const sel = window.getSelection();
+      const text = sel ? sel.toString().trim() : '';
+      if (!text || text.length < 2) return;
 
-    // Read chapter context
-    const md = document.getElementById('markdownBody');
-    const context = md ? md.querySelector('h1, h2')?.textContent || '' : '';
+      // Just track selected text for context; cue creation is triggered via toolbar button
+      _pendingSelectedText = text;
+    }, 300);
+  }
 
-    showExplanationModal('🤔 AI 正在解释...', '');
+  async function createCue(term) {
+    const cueId = 'cue-' + (++_cornellCueIdCounter);
+    const cueData = {
+      id: cueId,
+      term: term,
+      status: 'loading',
+      snippet: '',
+      qaHistory: [],
+      suggestedQuestions: [],
+      createdAt: new Date().toISOString(),
+      el: null
+    };
+    _cornellCues.push(cueData);
 
+    // Hide empty state
+    const empty = document.getElementById('cornellEmptyState');
+    if (empty) empty.style.display = 'none';
+
+    // Render loading cue
+    renderCue(cueData);
+    updateSidebarHeader();
+
+    // Fetch explanation via explain_selection_v2 (Rust ureq direct LLM call)
     try {
-      const explanation = await window.__TAURI__.core.invoke('explain_selection', { text, context });
-      showExplanationModal('📖 AI 解释', explanation);
+      const context = _currentChapterTitle;
+      const result = await window.__TAURI__.core.invoke('explain_selection_v2', {
+        text: term,
+        context: context || null,
+        previousQa: []
+      });
+
+      // result = {explanation: string, suggestedQuestions: string[]}
+      updateCueToActive(cueId, result.explanation, result.suggested_questions);
     } catch (err) {
       const msg = (err && err.message) || String(err);
-      showExplanationModal('❌ 解释失败', `${msg}<br><small>Sprint 3 决策：Agent 失败显式报错</small>`);
+      updateCueToActive(cueId, '解释失败: ' + msg, []);
     }
-
-    // Re-show the button for next selection
-    if (aiBtn) aiBtn.style.display = '';
   }
 
+  function updateCueToActive(cueId, explanation, suggestedQuestions) {
+    const cue = _cornellCues.find(c => c.id === cueId);
+    if (!cue) return;
+
+    cue.status = 'active';
+    cue.snippet = explanation;
+    cue.qaHistory = [{ q: cue.term, a: explanation }];
+    cue.suggestedQuestions = suggestedQuestions && suggestedQuestions.length > 0
+      ? suggestedQuestions
+      : (window.ExplainConversation ? window.ExplainConversation.FALLBACK_QUESTIONS : [
+          '这是什么意思？', '举个例子', '有什么应用场景？', '需要注意什么陷阱？'
+        ]);
+
+    renderCue(cue);
+    updateSidebarHeader();
+    persistCue(cue);
+  }
+
+  function appendQAToCue(cueId, question, answer) {
+    const cue = _cornellCues.find(c => c.id === cueId);
+    if (!cue) return;
+
+    cue.qaHistory.push({ q: question, a: answer });
+    renderCue(cue);
+    persistCue(cue);
+  }
+
+  function renderCue(cue) {
+    const container = document.getElementById('cornellSidebarBody');
+    if (!container) return;
+
+    // Remove old element if exists
+    if (cue.el && cue.el.parentNode) {
+      cue.el.remove();
+    }
+
+    const el = document.createElement('div');
+    const isCollapsed = cue.status !== 'loading';
+    el.className = 'cornell-cue' + (isCollapsed ? ' collapsed' : cue.status === 'active' ? ' active' : '');
+    el.dataset.cueId = cue.id;
+
+    // Header: term + tag + toggle
+    const roundCount = cue.qaHistory.length;
+    const tagText = cue.status === 'loading' ? '新' : (roundCount + ' 轮');
+    const tagClass = cue.status === 'loading' ? 'new' : 'qa';
+
+    let html = `
+      <div class="cornell-cue-header">
+        <span class="cornell-cue-term">${escapeHtml(cue.term)}</span>
+        <span class="cornell-cue-tag ${tagClass}">${tagText}</span>
+        <span class="cornell-cue-toggle">${isCollapsed ? '▶' : '▼'}</span>
+      </div>
+    `;
+
+    if (cue.status === 'loading') {
+      html += `<div class="cornell-cue-loading">AI 正在生成 cue...</div>`;
+    } else {
+      // Q&A history (all rounds, including the initial explanation, shown fully)
+      if (cue.qaHistory.length > 0) {
+        html += `<div class="cornell-cue-qa-list">`;
+        for (let i = 0; i < cue.qaHistory.length; i++) {
+          const qa = cue.qaHistory[i];
+          html += `
+            <div class="cornell-cue-qa-item">
+              <div class="q">Q: ${escapeHtml(qa.q)}</div>
+              <div class="a">${escapeHtml(qa.a)}</div>
+            </div>
+          `;
+        }
+        html += `</div>`;
+      }
+
+      // Suggested question chips
+      html += `<div class="cornell-cue-chips">`;
+      cue.suggestedQuestions.slice(0, 3).forEach(q => {
+        html += `<span class="cornell-cue-chip" data-q="${escapeHtml(q)}">${escapeHtml(q)}</span>`;
+      });
+      html += `</div>`;
+
+      // Free input bar
+      html += `
+        <div class="cornell-cue-input-bar">
+          <input type="text" placeholder="输入你的问题..." data-cue-id="${cue.id}" />
+          <button data-cue-id="${cue.id}">发送</button>
+        </div>
+      `;
+    }
+
+    el.innerHTML = html;
+    container.appendChild(el);
+    cue.el = el;
+
+    // Bind header click to toggle collapse
+    const header = el.querySelector('.cornell-cue-header');
+    if (header && cue.status !== 'loading') {
+      header.addEventListener('click', () => {
+        el.classList.toggle('collapsed');
+        const toggle = header.querySelector('.cornell-cue-toggle');
+        if (toggle) toggle.textContent = el.classList.contains('collapsed') ? '▶' : '▼';
+      });
+    }
+
+    // Bind chip clicks
+    if (cue.status === 'active') {
+      el.querySelectorAll('.cornell-cue-chip').forEach(chip => {
+        chip.addEventListener('click', () => onChipClick(cue.id, chip.dataset.q));
+      });
+
+      // Bind input
+      const input = el.querySelector('.cornell-cue-input-bar input');
+      const btn = el.querySelector('.cornell-cue-input-bar button');
+      if (input && btn) {
+        const submit = () => {
+          const q = input.value.trim();
+          if (!q) return;
+          input.value = '';
+          onFreeInputSubmit(cue.id, q);
+        };
+        btn.addEventListener('click', submit);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') submit();
+        });
+      }
+    }
+  }
+
+  // ============================================
+  // Sprint 6 PB3: Persistence
+  // ============================================
+
+  async function loadChapterExplanations() {
+    if (!_projectPath || !_currentChapterFile) return;
+    try {
+      const data = await window.__TAURI__.core.invoke('load_chapter_explanations', {
+        projectPath: _projectPath,
+        chapter: getChapterBasename(_currentChapterFile)
+      });
+      if (!data || !data.conversations || !data.conversations.length) return;
+
+      clearCues();
+
+      let maxIdNum = 0;
+      const fallbackQuestions = window.ExplainConversation
+        ? window.ExplainConversation.FALLBACK_QUESTIONS
+        : ['这是什么意思？', '举个例子', '有什么应用场景？', '需要注意什么陷阱？'];
+
+      data.conversations.forEach(conv => {
+        const cue = {
+          id: conv.id,
+          term: conv.selected_text,
+          status: 'active',
+          snippet: conv.qa_history.length > 0 ? conv.qa_history[conv.qa_history.length - 1].a : '',
+          qaHistory: conv.qa_history.map(h => ({ q: h.q, a: h.a })),
+          suggestedQuestions: fallbackQuestions,
+          createdAt: conv.created_at,
+          el: null
+        };
+        _cornellCues.push(cue);
+        renderCue(cue);
+
+        const match = conv.id.match(/(\d+)$/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > maxIdNum) maxIdNum = num;
+        }
+      });
+      _cornellCueIdCounter = maxIdNum;
+
+      const empty = document.getElementById('cornellEmptyState');
+      if (empty) empty.style.display = 'none';
+      updateSidebarHeader();
+    } catch (err) {
+      console.warn('[Sprint6] loadChapterExplanations failed:', err);
+    }
+  }
+
+  async function persistCue(cue) {
+    if (!_projectPath || !_currentChapterFile) return;
+    try {
+      const payload = {
+        projectPath: _projectPath,
+        chapter: getChapterBasename(_currentChapterFile),
+        conversation: {
+          id: cue.id,
+          selected_text: cue.term,
+          anchor: null,
+          qa_history: cue.qaHistory.map(h => ({
+            q: h.q,
+            a: h.a,
+            ts: new Date().toISOString()
+          })),
+          created_at: cue.createdAt || new Date().toISOString()
+        }
+      };
+      await window.__TAURI__.core.invoke('persist_explanation', payload);
+    } catch (err) {
+      console.warn('[Sprint6] persistCue failed:', err);
+    }
+  }
+
+  async function onChipClick(cueId, question) {
+    await askFollowUp(cueId, question);
+  }
+
+  async function onFreeInputSubmit(cueId, question) {
+    await askFollowUp(cueId, question);
+  }
+
+  async function askFollowUp(cueId, question) {
+    const cue = _cornellCues.find(c => c.id === cueId);
+    if (!cue) return;
+
+    // Temporarily show loading on the cue
+    if (cue.el) {
+      const snippet = cue.el.querySelector('.cornell-cue-snippet');
+      if (snippet) snippet.textContent = 'AI 正在回答...';
+    }
+
+    try {
+      const context = _currentChapterTitle;
+      // Build previousQA for structured parameter
+      const previousQa = cue.qaHistory.map(h => ({ q: h.q, a: h.a }));
+
+      const result = await window.__TAURI__.core.invoke('explain_selection_v2', {
+        text: question,
+        context: context || null,
+        previousQa: previousQa
+      });
+
+      // result = {explanation: string, suggestedQuestions: string[]}
+      appendQAToCue(cueId, question, result.explanation);
+    } catch (err) {
+      const msg = (err && err.message) || String(err);
+      appendQAToCue(cueId, question, '回答失败: ' + msg);
+    }
+  }
+
+  function clearCues() {
+    _cornellCues = [];
+    _cornellCueIdCounter = 0;
+    const body = document.getElementById('cornellSidebarBody');
+    if (body) {
+      body.innerHTML = `
+        <div class="cornell-cue-empty" id="cornellEmptyState">
+          <div class="icon">📌</div>
+          选中正文中的文字<br>AI 会自动生成 cue<br><br>
+          <span style="font-size:10px;color:#6b7280;">例：选中"位置编码"<br>→ 自动创建一条 cue</span>
+        </div>
+      `;
+    }
+    updateSidebarHeader();
+  }
+
+  function teardownCornellSidebar() {
+    if (_selectionChangeHandler) {
+      document.removeEventListener('selectionchange', _selectionChangeHandler);
+      _selectionChangeHandler = null;
+    }
+    clearTimeout(window._cornellSelectionTimer);
+
+    const sidebar = document.getElementById('cornellSidebar');
+    if (sidebar) {
+      sidebar.style.display = 'none';
+      sidebar.innerHTML = '';
+    }
+    _cornellSidebarEl = null;
+    _cornellCues = [];
+    _cornellCueIdCounter = 0;
+  }
+
+  function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  // Legacy modal fallback (kept for reference, no longer used by new flow)
   function showExplanationModal(title, body) {
-    // Remove existing modal
     const existing = document.getElementById('learningExplanationModal');
     if (existing) existing.remove();
 
@@ -1060,6 +1441,8 @@
     setupQuizPanel,
     setupSelectionExplainer,
     checkDailyReview,
+    clearCues,
+    createCue,
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }
       closeQuizModal();
@@ -1071,6 +1454,8 @@
       _scrollListenerBound = false;
       _currentQuizQuestions = [];
       if (_reviewModal) { _reviewModal.teardown(); _reviewModal = null; }
+      teardownCornellSidebar();
+      _lastChapterFileForSidebar = '';
     }
   };
 })();

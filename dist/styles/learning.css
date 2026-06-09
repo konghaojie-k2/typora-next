@@ -1598,3 +1598,409 @@ body.learning-mode .toolbar {
 .review-action-btn.review-action-primary:hover {
   opacity: 0.9;
 }
+
+/* ============================================
+   Cornell Sidebar (Sprint 6 PB2)
+   ============================================ */
+
+.cornell-sidebar {
+  width: 260px;
+  background: var(--color-bg-secondary, #f9fafb);
+  border-left: 1px solid var(--color-border, #e5e7eb);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* Header */
+.cornell-sidebar-header {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-bg-primary, #fff);
+  flex-shrink: 0;
+}
+
+.cornell-sidebar-header h4 {
+  font-size: 10px;
+  color: var(--color-text-muted, #6b7280);
+  text-transform: uppercase;
+  margin: 0 0 2px;
+  letter-spacing: 0.5px;
+}
+
+.cornell-sidebar-header .info {
+  font-size: 11px;
+  color: var(--color-text-primary, #111827);
+}
+
+.cornell-sidebar-header .meta {
+  font-size: 10px;
+  color: var(--color-text-muted, #9ca3af);
+}
+
+/* Body */
+.cornell-sidebar-body {
+  flex: 1;
+  padding: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Footer */
+.cornell-sidebar-footer {
+  padding: 6px 10px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+  background: var(--color-bg-primary, #fff);
+  font-size: 9px;
+  color: var(--color-text-muted, #9ca3af);
+  text-align: center;
+  flex-shrink: 0;
+}
+
+/* Empty State */
+.cornell-cue-empty {
+  text-align: center;
+  padding: 24px 10px;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.cornell-cue-empty .icon {
+  font-size: 28px;
+  margin-bottom: 10px;
+  opacity: 0.5;
+}
+
+/* Cue Card */
+.cornell-cue {
+  background: var(--color-bg-primary, #fff);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 5px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  transition: border-color 0.15s;
+}
+
+.cornell-cue.active {
+  border-color: #6b7280;
+  box-shadow: 0 0 0 1px #6b7280;
+}
+
+.cornell-cue.new {
+  border-color: #f59e0b;
+  border-style: dashed;
+  background: #fffbeb;
+}
+
+/* Cue Header */
+.cornell-cue-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  padding: 2px 0;
+}
+
+.cornell-cue-header:hover {
+  opacity: 0.8;
+}
+
+.cornell-cue-term {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-primary, #111827);
+  word-break: break-all;
+}
+
+.cornell-cue-tag {
+  font-size: 8px;
+  padding: 1px 5px;
+  border-radius: 6px;
+  color: var(--color-text-muted, #6b7280);
+  background: var(--color-bg-tertiary, #f3f4f6);
+  flex-shrink: 0;
+  margin-left: 4px;
+}
+
+.cornell-cue-tag.qa {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.cornell-cue-tag.new {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.cornell-cue-toggle {
+  font-size: 10px;
+  color: var(--color-text-muted, #9ca3af);
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+/* Cue Collapse */
+.cornell-cue.collapsed .cornell-cue-qa-list,
+.cornell-cue.collapsed .cornell-cue-chips,
+.cornell-cue.collapsed .cornell-cue-input-bar {
+  display: none;
+}
+
+/* Cue Snippet */
+.cornell-cue-snippet {
+  font-size: 10px;
+  color: var(--color-text-secondary, #4b5563);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-all;
+}
+
+/* Cue Loading */
+.cornell-cue-loading {
+  font-size: 10px;
+  color: var(--color-text-muted, #9ca3af);
+  font-style: italic;
+  padding: 4px 0;
+}
+
+.cornell-cue-loading::before {
+  content: '\23F3 ';
+}
+
+/* Q&A List */
+.cornell-cue-qa-list {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--color-border, #d1d5db);
+}
+
+.cornell-cue-qa-item {
+  margin-bottom: 6px;
+  padding: 5px 7px;
+  background: var(--color-bg-tertiary, #f3f4f6);
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.cornell-cue-qa-item .q {
+  color: #1e40af;
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.cornell-cue-qa-item .a {
+  color: var(--color-text-secondary, #4b5563);
+}
+
+/* Chips */
+.cornell-cue-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.cornell-cue-chip {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  color: #1e40af;
+  padding: 1px 5px;
+  border-radius: 6px;
+  font-size: 9px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.cornell-cue-chip:hover {
+  background: #dbeafe;
+}
+
+.cornell-cue-chip::before {
+  content: '? ';
+  color: #6b7280;
+  font-size: 9px;
+}
+
+/* Input Bar */
+.cornell-cue-input-bar {
+  display: flex;
+  gap: 3px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border, #e5e7eb);
+}
+
+.cornell-cue-input-bar input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--color-border, #d1d5db);
+  border-radius: 3px;
+  font-size: 10px;
+  outline: none;
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary, #111827);
+}
+
+.cornell-cue-input-bar input::placeholder {
+  color: var(--color-text-muted, #9ca3af);
+}
+
+.cornell-cue-input-bar input:focus {
+  border-color: #6b7280;
+}
+
+.cornell-cue-input-bar button {
+  padding: 4px 6px;
+  background: #6b7280;
+  color: #fff;
+  border: none;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.cornell-cue-input-bar button:hover {
+  background: #4b5563;
+}
+
+/* Hint Cue (继续选词提示) */
+.cornell-cue-hint {
+  border-style: dashed;
+  background: var(--color-bg-secondary, #f9fafb);
+  opacity: 0.6;
+}
+
+/* Responsive: viewport <= 1024px collapse sidebar */
+@media (max-width: 1024px) {
+  .cornell-sidebar {
+    width: 0;
+    border-left: none;
+    overflow: hidden;
+  }
+
+  .cornell-sidebar.collapsed {
+    width: 0;
+  }
+}
+
+/* Dark Theme Overrides */
+[data-theme="dark"] .cornell-sidebar {
+  background: #1e1e1e;
+  border-left-color: #333;
+}
+
+[data-theme="dark"] .cornell-sidebar-header {
+  background: #252525;
+  border-bottom-color: #333;
+}
+
+[data-theme="dark"] .cornell-sidebar-header h4 {
+  color: #888;
+}
+
+[data-theme="dark"] .cornell-sidebar-header .info {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .cornell-sidebar-header .meta {
+  color: #666;
+}
+
+[data-theme="dark"] .cornell-sidebar-footer {
+  background: #252525;
+  border-top-color: #333;
+  color: #666;
+}
+
+[data-theme="dark"] .cornell-cue {
+  background: #252525;
+  border-color: #333;
+}
+
+[data-theme="dark"] .cornell-cue.active {
+  border-color: #888;
+  box-shadow: 0 0 0 1px #888;
+}
+
+[data-theme="dark"] .cornell-cue.new {
+  background: #3d3618;
+  border-color: #d4a030;
+}
+
+[data-theme="dark"] .cornell-cue-term {
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .cornell-cue-tag {
+  background: #333;
+  color: #aaa;
+}
+
+[data-theme="dark"] .cornell-cue-tag.qa {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .cornell-cue-tag.new {
+  background: #3d3618;
+  color: #f0d060;
+}
+
+[data-theme="dark"] .cornell-cue-snippet {
+  color: #aaa;
+}
+
+[data-theme="dark"] .cornell-cue-qa-item {
+  background: #333;
+}
+
+[data-theme="dark"] .cornell-cue-qa-item .q {
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .cornell-cue-qa-item .a {
+  color: #aaa;
+}
+
+[data-theme="dark"] .cornell-cue-chip {
+  background: #1e3a5f;
+  border-color: #3b5998;
+  color: #93c5fd;
+}
+
+[data-theme="dark"] .cornell-cue-chip:hover {
+  background: #2a4a7a;
+}
+
+[data-theme="dark"] .cornell-cue-input-bar input {
+  background: #1e1e1e;
+  border-color: #444;
+  color: #e0e0e0;
+}
+
+[data-theme="dark"] .cornell-cue-input-bar input::placeholder {
+  color: #666;
+}
+
+[data-theme="dark"] .cornell-cue-input-bar button {
+  background: #555;
+}
+
+[data-theme="dark"] .cornell-cue-input-bar button:hover {
+  background: #666;
+}
+
+[data-theme="dark"] .cornell-cue-hint {
+  background: #1e1e1e;
+}
