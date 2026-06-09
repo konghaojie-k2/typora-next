@@ -903,6 +903,9 @@
     const newTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
     if (newTitle) _currentChapterTitle = newTitle;
     updateSidebarHeader();
+
+    // S4: Show review notice if due items exist (always check, even if sidebar already exists)
+    showReviewNoticeIfDue();
   }
 
   function initCornellSidebar() {
@@ -937,6 +940,45 @@
     const md = document.getElementById('markdownBody');
     _currentChapterTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
     updateSidebarHeader();
+  }
+
+  async function showReviewNoticeIfDue() {
+    if (!_projectPath || !window.ReviewScheduler) return;
+    try {
+      const scheduler = new window.ReviewScheduler();
+      const items = await scheduler.getDueItems(_projectPath);
+      const dueCount = (items || []).length;
+
+      const existing = document.getElementById('cornellReviewNotice');
+      if (dueCount === 0) {
+        if (existing) existing.remove();
+        return;
+      }
+
+      if (existing) {
+        const textEl = existing.querySelector('.text');
+        if (textEl) textEl.textContent = `今日有 ${dueCount} 项待复习`;
+        return;
+      }
+
+      const body = document.getElementById('cornellSidebarBody');
+      if (!body) return;
+
+      const notice = document.createElement('div');
+      notice.id = 'cornellReviewNotice';
+      notice.className = 'cornell-review-notice';
+      notice.innerHTML = `
+        <span class="icon">🧠</span>
+        <span class="text">今日有 ${dueCount} 项待复习</span>
+        <button class="btn">开始</button>
+      `;
+      notice.querySelector('.btn').addEventListener('click', () => {
+        checkDailyReview(_projectPath);
+      });
+      body.insertBefore(notice, body.firstChild);
+    } catch (e) {
+      console.warn('[ReviewNotice] failed:', e);
+    }
   }
 
   function updateSidebarHeader() {
@@ -1378,12 +1420,18 @@
 
           // Show review summary modal with status changes
           showReviewSummary(projectPath, items, answers, beforeStatus);
+
+          // Refresh sidebar review notice after review completion
+          showReviewNoticeIfDue();
         },
         onPostpone: async () => {
           for (const item of items) {
             await scheduler.syncPostpone(projectPath, item.concept);
           }
           _reviewModal = null;
+
+          // Refresh sidebar review notice after postpone
+          showReviewNoticeIfDue();
         }
       });
       _reviewModal.show();

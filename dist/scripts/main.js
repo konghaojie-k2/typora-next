@@ -930,6 +930,11 @@
     } else if (badge) {
       badge.remove();
     }
+
+    // S4: teardown learning mode integrations when exiting
+    if (!enabled && window.LearningModeIntegration) {
+      window.LearningModeIntegration.teardown();
+    }
   }
 
   function renderFileTree(entries, container = null, depth = 0) {

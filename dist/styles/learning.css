@@ -1648,6 +1648,41 @@ body.learning-mode .toolbar {
   overflow-x: hidden;
 }
 
+/* Review Notice (S4 postpone re-entry) */
+.cornell-review-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+  background: rgba(129, 140, 248, 0.08);
+  border: 1px solid rgba(129, 140, 248, 0.2);
+  border-radius: 8px;
+  font-size: 11px;
+  color: var(--color-text-primary, #111827);
+  flex-shrink: 0;
+}
+
+.cornell-review-notice .icon {
+  font-size: 13px;
+}
+
+.cornell-review-notice .text {
+  flex: 1;
+}
+
+.cornell-review-notice .btn {
+  padding: 3px 10px;
+  border-radius: 4px;
+  border: none;
+  background: linear-gradient(135deg, #818cf8, #a78bfa);
+  color: white;
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* Footer */
 .cornell-sidebar-footer {
   padding: 6px 10px;

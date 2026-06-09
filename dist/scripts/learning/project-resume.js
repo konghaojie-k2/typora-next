@@ -175,7 +175,12 @@
    * Returns a promise that resolves when the user closes the modal or clicks "进入阅读".
    */
   async function showProjectDashboard(project, basePath) {
-    console.log('[ProjectDashboard] showProjectDashboard called, modules:',
+    // Compatibility: called as showProjectDashboard(basePath) from review-summary-modal
+    if (typeof project === 'string' && !basePath) {
+      basePath = project;
+      project = null;
+    }
+    console.log('[ProjectDashboard] showProjectDashboard called, basePath:', basePath, 'modules:',
       !!window.KnowledgeGraphManager, !!window.KnowledgeGraphDashboard);
     if (!window.KnowledgeGraphManager || !window.KnowledgeGraphDashboard) {
       console.warn('[ProjectDashboard] Modules not loaded, skipping');
@@ -222,7 +227,7 @@
       }
 
       // Build chapters list from project
-      const chapters = (project.chapters || []).map((ch, i) => ({
+      const chapters = ((project && project.chapters) || []).map((ch, i) => ({
         file: ch.file || '',
         title: ch.title || ('第' + (i + 1) + '章'),
         status: ch.status || 'not_generated'
@@ -244,7 +249,7 @@
           graph: mergedGraph,
           stats,
           chapters,
-          projectName: project.name || '学习项目'
+          projectName: (project && project.name) || '学习项目'
         });
       });
     } catch (e) {
@@ -309,13 +314,19 @@
           }
         };
 
-        // Bind "Start Learning" button → open first readable chapter
+        // Bind "Start Learning" button → open first unfinished (ready) chapter
         ui.onStartLearningClick = () => {
-          const firstIndex = manager.chapters.findIndex(ch =>
-            ch.status === 'ready' || ch.status === 'completed'
-          );
-          if (firstIndex >= 0) {
-            ui.onChapterClick(firstIndex);
+          const firstReady = manager.chapters.findIndex(ch => ch.status === 'ready');
+          if (firstReady >= 0) {
+            ui.onChapterClick(firstReady);
+            return;
+          }
+          // All completed: open the last completed (most recently studied)
+          for (let i = manager.chapters.length - 1; i >= 0; i--) {
+            if (manager.chapters[i].status === 'completed') {
+              ui.onChapterClick(i);
+              return;
+            }
           }
         };
 

@@ -83,12 +83,6 @@
         modal.appendChild(cardList);
       }
 
-      // Mini knowledge graph
-      if (data.miniGraph) {
-        const miniGraph = this._createMiniGraph(data.miniGraph, changes);
-        modal.appendChild(miniGraph);
-      }
-
       // Action buttons
       const actions = this._createActions();
       modal.appendChild(actions);
@@ -132,24 +126,107 @@
       const container = document.createElement('div');
       container.className = 'review-mini-graph';
 
-      // Track which concepts were updated
-      const updatedConcepts = new Set(changes.map(c => c.concept));
-
-      // Render nodes
-      for (const node of (graph.nodes || [])) {
-        const nodeEl = document.createElement('div');
-        nodeEl.className = 'kg-mini-node';
-        nodeEl.setAttribute('data-concept-id', node.id);
-
-        if (updatedConcepts.has(node.name)) {
-          nodeEl.classList.add('pulse');
-          nodeEl.classList.add('updated');
-        }
-
-        nodeEl.textContent = node.name;
-        container.appendChild(nodeEl);
+      if (!changes || changes.length === 0) {
+        container.textContent = '本次复习无状态变化';
+        return container;
       }
 
+      // Build concept -> node id mapping (fuzzy match)
+      const conceptToId = new Map();
+      const idToConcept = new Map();
+      for (const change of changes) {
+        const concept = change.concept;
+        let matchedId = null;
+        for (const node of (graph && graph.nodes) || []) {
+          if (node.name === concept || node.name.includes(concept) || concept.includes(node.name)) {
+            matchedId = node.id;
+            break;
+          }
+        }
+        if (!matchedId) {
+          matchedId = 'syn-' + concept.replace(/[^一-龥a-zA-Z0-9]/g, '-');
+        }
+        conceptToId.set(concept, matchedId);
+        idToConcept.set(matchedId, concept);
+      }
+
+      // Find edges between these concepts
+      const edgePairs = [];
+      for (const edge of (graph && graph.edges) || []) {
+        const fromConcept = idToConcept.get(edge.from);
+        const toConcept = idToConcept.get(edge.to);
+        if (fromConcept && toConcept && fromConcept !== toConcept) {
+          edgePairs.push([fromConcept, toConcept]);
+        }
+      }
+
+      // Create SVG graph
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '200');
+      svg.style.display = 'block';
+      svg.setAttribute('viewBox', '0 0 456 200');
+
+      const concepts = changes.map(c => c.concept);
+      const centerX = 228;
+      const centerY = 85;
+      const radius = Math.min(456, 200) * 0.35;
+
+      // Position nodes in a circle
+      const positions = {};
+      concepts.forEach((concept, i) => {
+        const angle = (i / concepts.length) * 2 * Math.PI - Math.PI / 2;
+        positions[concept] = {
+          x: centerX + radius * Math.cos(angle),
+          y: centerY + radius * Math.sin(angle)
+        };
+      });
+
+      // Draw edges first (behind nodes)
+      for (const [from, to] of edgePairs) {
+        const fromPos = positions[from];
+        const toPos = positions[to];
+        if (!fromPos || !toPos) continue;
+        const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        line.setAttribute('x1', fromPos.x);
+        line.setAttribute('y1', fromPos.y);
+        line.setAttribute('x2', toPos.x);
+        line.setAttribute('y2', toPos.y);
+        line.setAttribute('stroke', 'rgba(129,140,248,0.3)');
+        line.setAttribute('stroke-width', '1.5');
+        svg.appendChild(line);
+      }
+
+      // Draw nodes
+      const updatedConcepts = new Set(changes.map(c => c.concept));
+      for (const concept of concepts) {
+        const pos = positions[concept];
+        const isUpdated = updatedConcepts.has(concept);
+
+        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+
+        const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        circle.setAttribute('cx', pos.x);
+        circle.setAttribute('cy', pos.y);
+        circle.setAttribute('r', isUpdated ? 7 : 5);
+        circle.setAttribute('fill', isUpdated ? 'rgba(129,140,248,0.25)' : 'rgba(148,163,184,0.15)');
+        circle.setAttribute('stroke', isUpdated ? '#818cf8' : 'rgba(148,163,184,0.4)');
+        circle.setAttribute('stroke-width', '2');
+        g.appendChild(circle);
+
+        const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        text.setAttribute('x', pos.x);
+        text.setAttribute('y', pos.y + 18);
+        text.setAttribute('text-anchor', 'middle');
+        text.setAttribute('fill', 'var(--color-text-secondary)');
+        text.setAttribute('font-size', '9');
+        text.textContent = concept.length > 6 ? concept.substring(0, 5) + '..' : concept;
+        g.appendChild(text);
+
+        svg.appendChild(g);
+      }
+
+      container.appendChild(svg);
       return container;
     }
 

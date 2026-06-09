@@ -75,13 +75,18 @@
       this.teardown();
     }
 
+    dismiss() {
+      if (this.state === 'hidden') return;
+      this.state = 'hidden';
+      this.teardown();
+    }
+
     teardown() {
       if (this._overlay) {
         this._overlay.remove();
         this._overlay = null;
         this._card = null;
       }
-      // Don't override completed state; postpone/close already set hidden
       if (this.state !== 'completed') {
         this.state = 'hidden';
       }
@@ -125,13 +130,13 @@
 
       // ESC key handler
       this._escHandler = (e) => {
-        if (e.key === 'Escape') this.postpone();
+        if (e.key === 'Escape') this.dismiss();
       };
       document.addEventListener('keydown', this._escHandler);
 
-      // Click outside to postpone
+      // Click outside to dismiss (not postpone)
       overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) this.postpone();
+        if (e.target === overlay) this.dismiss();
       });
     }
 

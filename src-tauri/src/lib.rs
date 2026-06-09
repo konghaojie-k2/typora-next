@@ -65,7 +65,6 @@ pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
     watched_path: Mutex<Option<String>>,
     md2docx_pid: Mutex<Option<u32>>,
-    agent_process: ai_agent::AgentProcess,
 }
 
 /// Kill all existing md2docx_service processes (Windows only)
@@ -1908,6 +1907,14 @@ async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, St
     Ok(value)
 }
 
+/// Read any text file by absolute path (used by review-scheduler.js and other modules)
+#[tauri::command]
+async fn read_text_file(file_path: String) -> Result<String, String> {
+    let content = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(content)
+}
+
 // ============================================
 // Sprint 6 PB3: Per-chapter Explanation Persistence
 // ============================================
@@ -2473,7 +2480,6 @@ pub fn run() {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
             md2docx_pid: Mutex::new(None),
-            agent_process: ai_agent::AgentProcess::default(),
         })
         .manage(ai_agent::AgentProcess::default())
         .setup(|app| {
@@ -2548,7 +2554,7 @@ pub fn run() {
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::explain_selection_v2,
-            create_learning_project, persist_quiz_result, read_quiz_history,
+            create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness
         ])
