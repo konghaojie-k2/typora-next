@@ -947,8 +947,14 @@
           toolbarRight.insertBefore(badge, toolbarRight.firstChild);
         }
       }
-    } else if (badge) {
-      badge.remove();
+      // Sprint 8a: show Socratic quick-trigger button
+      const socraticBtn = document.getElementById('openSocraticBtn');
+      if (socraticBtn) socraticBtn.style.display = 'inline-flex';
+    } else {
+      if (badge) badge.remove();
+      // Sprint 8a: hide Socratic quick-trigger button
+      const socraticBtn = document.getElementById('openSocraticBtn');
+      if (socraticBtn) socraticBtn.style.display = 'none';
     }
 
     // S4: teardown learning mode integrations when exiting
@@ -2871,6 +2877,17 @@
     if (elements.translateBtn) {
       elements.translateBtn.addEventListener('click', toggleTranslation);
     }
+    // Sprint 8a: 立即 Socratic 复习（绕过阈值）
+    const socraticQuickBtn = document.getElementById('openSocraticBtn');
+    if (socraticQuickBtn) {
+      socraticQuickBtn.addEventListener('click', openSocraticReview);
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.shiftKey && e.key === 'S' && window.LearningProgress) {
+        e.preventDefault();
+        openSocraticReview();
+      }
+    });
     elements.themeToggle.addEventListener('click', toggleTheme);
 
     if (elements.settingsBtn) {
@@ -3088,6 +3105,35 @@
     } catch (err) {
       console.error('Failed to save config:', err);
       showError('保存失败: ' + err);
+    }
+  }
+
+  // ============================================
+  // Sprint 8a: Open Socratic review (bypass threshold, for testing + manual entry)
+  // ============================================
+  async function openSocraticReview() {
+    if (!window.SocraticModal) {
+      showToast('Socratic 模块未加载', 'error');
+      return;
+    }
+    if (!document.body.classList.contains('learning-mode')) {
+      showToast('请先进入学习模式', 'info');
+      return;
+    }
+    // Use the active tab's path as project root (rough heuristic)
+    const activeTab = state.tabs[state.activeTab];
+    const projectPath = activeTab?.baseDir || activeTab?.path?.replace(/[^\\/]+$/, '') || '';
+    if (!projectPath) {
+      showToast('请先打开一个学习项目', 'info');
+      return;
+    }
+    try {
+      const modal = new window.SocraticModal({ projectPath });
+      await modal.open();
+      showToast('Socratic 复习已打开（8a MVP: tutor 回复为 stub，真实 LLM 见 Sprint 8b）');
+    } catch (e) {
+      console.error('[Socratic] open failed:', e);
+      showToast('打开 Socratic 失败: ' + e.message, 'error');
     }
   }
 
