@@ -18,6 +18,11 @@
     }
   };
 
+  // Theme logic extracted to theme-manager.js (loaded before this script in index.html).
+  // Always-present data-theme invariant guards against prefers-color-scheme: dark
+  // overriding the explicit user choice. See dist/scripts/theme-manager.js + tests/.
+  const TM = window.ThemeManager;
+
   // ============================================
   // State Management
   // ============================================
@@ -2754,20 +2759,21 @@
   // ============================================
   function initTheme() {
     const saved = localStorage.getItem('typora-theme');
-    if (saved === 'dark' || saved === 'light') {
-      applyTheme(saved);
-    } else {
-      const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      applyTheme(prefersDark ? 'dark' : 'light');
-    }
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    const initial = TM.resolveInitialTheme(saved, prefersDark);
+    applyTheme(initial);
   }
 
   function applyTheme(theme) {
     const root = document.documentElement;
-    if (theme === 'dark') {
-      root.setAttribute('data-theme', 'dark');
-    } else {
-      root.removeAttribute('data-theme');
+    // Use theme-manager to decide the DOM mutation. Invariant: data-theme is
+    // always set (never removed), so :root:not([data-theme]) cannot match the
+    // @media (prefers-color-scheme: dark) rule and override the explicit choice.
+    const cmd = TM.domCommandForTheme(theme);
+    if (cmd.action === 'setAttribute') {
+      root.setAttribute(cmd.attr, cmd.value);
+    } else if (cmd.action === 'removeAttribute') {
+      root.removeAttribute(cmd.attr);
     }
     updateThemeIcon(theme);
     reinitMermaid(theme);
@@ -2786,8 +2792,8 @@
   }
 
   function toggleTheme() {
-    const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const newTheme = isDark ? 'light' : 'dark';
+    const currentAttr = document.documentElement.getAttribute('data-theme');
+    const newTheme = TM.computeToggledTheme(currentAttr);
     applyTheme(newTheme);
     // Save theme to config
     if (window.__TAURI__) {
