@@ -220,3 +220,155 @@ type ChapterExplanations = {
 - **速度**：Rust 直调 LLM（ureq），仿 `fix_mermaid` 模式
 - **UI**：Cornell Sidebar v2（180px 永久侧栏，cue 列表）—— 见 `docs/prototypes/pb1-cornell-sidebar-v2.html`
 - **关联反馈**：[[feedback_brainstorm_ux_gap]]（避免再陷入状态机缺失）
+
+---
+
+# [架构决策] Sprint 7 — OS 文件关联打开时任务栏注意力提醒
+
+> 整理自 2026-06-10 讨论
+
+## 1. 背景
+
+**当前状态**：
+- OS 文件关联打开 → 冷启动走 `lib.rs:2528-2544`、热启动走单实例插件 `lib.rs:2469-2478`
+- 两条路径都发 `open-file-from-args` 事件到前端
+- 前端 `main.js:227-238` 监听后 `invoke('open_file')` → `addTab`
+- 整个链路**没有任何注意力提示**：用户在另一个窗口操作时，无法感知文件已被打开
+
+**用户痛点**：
+> 如果我的注意力不在阅读器上，我去资源管理器双击打开一个 md 文件时，是很难感知这个文件被打开了的。参考成熟的软件，在任务栏里的图标会有提醒，比如闪烁等用来提醒用户，文件被打开了
+
+## 2. 约束
+
+| 约束 | 来源 |
+|------|------|
+| Tauri 2.x 跨平台 API 自动适配 | `request_user_attention` 在 Windows 闪任务栏、macOS 弹 Dock、Linux 设 urgent hint |
+| 不能误闪（用户在应用内拖拽/菜单打开） | 不能污染现有 `addTab` 路径 |
+| 冷启动时窗口通常已获焦 → 闪烁无意义 | 闪烁必须基于实时焦点状态 |
+| BDD + TDD 强制流程 | CLAUDE.md |
+| 防御性错误处理 | 用户体验优先，不让边缘错误污染主流程 |
+
+## 3. 方案对比
+
+### 3.1 触发范围
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 仅 OS 文件关联打开** | 最小手术刀，不污染 `addTab` | 其它需要关注的场景（AI 完成、外部文件改动）暂不动 | ✅ |
+| **B. 接入所有需注意事件** | 一致性好 | 改动面大、未明确范围 | ❌ YAGNI |
+
+### 3.2 触发条件
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 仅 `is_focused() == false`** | 贴合 IM 软件行为 | — | ✅ |
+| B. 加上 `is_minimized()` | 多覆盖边缘 | 与 A 几乎重合 | ❌ |
+| C. 不判断，无条件闪 | 简单 | 冷启动冗余闪烁 | ❌ |
+
+### 3.3 闪烁级别
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. Informational（闪一次）** | 体验克制，符合"双击 = 已有预期"场景 | — | ✅ |
+| B. Critical（持续闪到点开） | 夺注意力 | 过度打扰 | ❌ |
+
+### 3.4 决策落地方式
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 新增 Rust 命令 `notify_external_file_opened`，前端在 OS 路径上调用** | 命令语义清晰、可 mock 测试、可精准控制 | 多 1 次 IPC | ✅ |
+| B. 直接在 Rust 单实例回调中闪烁 | 少一次 IPC | 冷启动路径不覆盖；前端无法控制时机 | ❌ |
+| C. 新事件广播 | 解耦 | 不可控、不可测 | ❌ |
+
+## 4. 最终选择
+
+**架构**：保留现有 `open-file-from-args` 事件链路不变，在前端 `addTab` 成功之后，**追加**一次 `invoke('notify_external_file_opened')` 调用。Rust 端命令内部判断焦点，未聚焦时调用 `request_user_attention(Informational)`。
+
+**数据流**：
+```
+OS 双击 .md
+  ├─ 冷启动 → setup 钩子 500ms 后 emit ─┐
+  └─ 热启动 → 单实例回调 emit ─────────┤
+                                       ↓
+                       前端 listen('open-file-from-args')
+                                       ↓
+                          invoke('open_file') → addTab
+                                       ↓
+                       invoke('notify_external_file_opened')  ← 新增
+                                       ↓
+                         Rust: window.is_focused() ?
+                           false → request_user_attention(Info)
+                           true  → noop
+```
+
+## 5. 接口契约
+
+### 5.1 Rust 命令
+
+```rust
+fn should_request_attention(is_focused: bool) -> bool {
+    !is_focused  // 防御性：is_focused 失败时按 false → 闪
+}
+
+#[tauri::command]
+async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String> {
+    let focused = window.is_focused().unwrap_or(false);
+    if should_request_attention(focused) {
+        use tauri::UserAttentionType;
+        let _ = window.request_user_attention(Some(UserAttentionType::Informational));
+    }
+    Ok(())
+}
+```
+
+- **无入参、无返回值**——前端不需要知道"闪没闪"
+- `is_focused` 失败按 `false` 处理（保守宁可闪不可漏）
+- `request_user_attention` 失败**吞掉**（不污染前端）
+
+### 5.2 前端集成点
+
+`dist/scripts/main.js:227-238` 监听器内，`addTab` 成功之后追加：
+
+```js
+invoke('notify_external_file_opened').catch(err =>
+  console.warn('[Attention] notify failed:', err)
+);
+```
+
+放在 `.then(result => { if (result && result.content) { addTab(...); <NEW> } })` 内部，**确保 `open_file` 失败时不调用 notify**（防误闪）。
+
+## 6. 测试矩阵
+
+| 层 | 文件 | 用例 |
+|---|---|---|
+| **Rust unit** | `src-tauri/tests/test_notify_external_open.rs`（新） | T1: `should_request_attention(true) == false`<br>T2: `should_request_attention(false) == true`<br>T3: 纯函数边界穷尽 |
+| **JS unit** | `tests/unit/test_external_open_attention.js`（新） | U1: 收到事件 + open_file 成功 → 调 addTab + 调 notify<br>U2: 收到事件 + open_file 失败 → 调 addTab 失败，**不**调 notify<br>U3: 内部 addTab（拖拽）→ **不**经过此监听器，**不**调 notify |
+| **BDD acceptance** | `tests/features/sprint7_taskbar_attention.feature`（新）<br>`tests/bdd-acceptance/sprint7_*.steps.js`（新） | B1: 应用前台时 OS 打开 → 任务栏不闪<br>B2: 应用最小化时 OS 打开 → 任务栏闪<br>B3: 应用内拖拽/菜单打开 → 任务栏不闪（边界） |
+
+`mock-tauri.js` 需扩展：记录 `notify_external_file_opened` 调用次数与顺序。
+
+## 7. 风险点 + 缓解
+
+| 风险 | 缓解 |
+|------|------|
+| macOS Dock 弹跳比 Windows 任务栏闪更"重" | Informational 级别都是单次/短暂，参照系统 IM 默认行为 |
+| `request_user_attention` 在 Linux 行为依赖 WM | 项目主要交付 Windows/macOS |
+| 冷启动 500ms 延迟期间用户切走窗口 → 闪烁"过晚" | 500ms 是现有约束，闪晚比漏好 |
+| `addTab` 内部去重（文件已打开）→ addTab 走 switchTab → notify 仍触发 | 正确：用户就是想知道"我刚双击的文件现在在哪个 tab" |
+| 前端 notify 失败 → 不污染主流程 | `.catch(console.warn)` |
+
+## 8. YAGNI 边界（明确不做）
+
+- ❌ 关闭/最小化窗口时清除 attention 状态（Tauri 自动处理）
+- ❌ 多个外部文件连续打开的合并闪烁（OS 自己去重）
+- ❌ 用户可配置是否启用此行为
+
+## 9. 决策摘要（供 daily_reflection 引用）
+
+- **触发范围**：仅 OS 文件关联打开（`open-file-from-args` 事件）
+- **触发条件**：`is_focused() == false`
+- **闪烁级别**：`UserAttentionType::Informational`
+- **决策点位置**：前端 `addTab` 成功之后调 `notify_external_file_opened`
+- **可测性**：决策抽成纯函数 `should_request_attention(bool) -> bool`
+- **错误处理**：`is_focused` 失败 → 按未聚焦处理；`request_user_attention` 失败 → 吞掉
+- **平台适配**：依赖 Tauri `request_user_attention` 跨平台映射（Windows 闪/macOS 弹/Linux urgent）
