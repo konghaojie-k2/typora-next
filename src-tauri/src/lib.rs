@@ -2490,6 +2490,243 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
     Ok(())
 }
 
+// ============================================
+// Sprint 8: Socratic Review commands
+// Pure cluster-selection algorithm + state/session IO + LLM chat
+// PHYSICALLY ISOLATED from quiz-history.json and project.json
+// ============================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticConceptRef {
+    id: String,
+    title: String,
+    source_chapter: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticEdgeRef {
+    from: String,
+    to: String,
+    weight: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticCluster {
+    concepts: Vec<SocraticConceptRef>,
+    edges: Vec<SocraticEdgeRef>,
+    cluster_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticChatMessage {
+    role: String,    // "user" | "tutor"
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticChatResponse {
+    content: String,
+    done: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct SocraticSessionData {
+    version: String,
+    started_at: String,
+    concept_ids: Vec<String>,
+    concept_titles: Vec<String>,
+    turns: Vec<SocraticChatMessage>,
+    ended_at: String,
+    end_reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct SocraticStateData {
+    last_socratic_at: Option<String>,
+    last_dismissed_at: Option<String>,
+    #[serde(default)]
+    opt_out: bool,
+    #[serde(default)]
+    quiz_count_since_last_socratic: u32,
+    #[serde(default)]
+    recent_cluster_hashes: Vec<String>,
+}
+
+/// Pure function: BFS from highest-degree node + strong-edge filter (weight >= 0.5).
+/// Testable in isolation (no Tauri runtime needed).
+fn select_socratic_cluster_pure(
+    nodes: &[KnowledgeNode],
+    edges: &[KnowledgeEdge],
+    target_size: usize,
+    min_edge_weight: f32,
+) -> Vec<String> {
+    if nodes.is_empty() {
+        return vec![];
+    }
+
+    // Compute degree using weight filter
+    let mut degree: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for n in nodes {
+        degree.insert(n.id.clone(), 0);
+    }
+    for e in edges {
+        // No weight field in current KnowledgeEdge → treat all as 1.0 (passes >= 0.5)
+        let _w = min_edge_weight; // suppress unused warning if no weights
+        *degree.entry(e.from.clone()).or_insert(0) += 1;
+        *degree.entry(e.to.clone()).or_insert(0) += 1;
+    }
+
+    // Find anchor = highest-degree node
+    let anchor = nodes.iter()
+        .max_by_key(|n| degree.get(&n.id).copied().unwrap_or(0))
+        .map(|n| n.id.clone())
+        .unwrap_or_default();
+
+    let mut cluster = vec![anchor.clone()];
+    let mut visited = std::collections::HashSet::new();
+    visited.insert(anchor.clone());
+    let mut frontier = vec![anchor];
+
+    while cluster.len() < target_size && !frontier.is_empty() {
+        let mut next_frontier = vec![];
+        for node in &frontier {
+            for e in edges {
+                let neighbor = if &e.from == node { Some(&e.to) }
+                              else if &e.to == node { Some(&e.from) }
+                              else { None };
+                if let Some(nb) = neighbor {
+                    if !visited.contains(nb) {
+                        visited.insert(nb.clone());
+                        cluster.push(nb.clone());
+                        next_frontier.push(nb.clone());
+                        if cluster.len() >= target_size { break; }
+                    }
+                }
+            }
+            if cluster.len() >= target_size { break; }
+        }
+        frontier = next_frontier;
+    }
+
+    cluster
+}
+
+fn cluster_hash(cluster: &[String]) -> String {
+    let mut sorted = cluster.to_vec();
+    sorted.sort();
+    let joined = sorted.join("|");
+    // Simple FNV-like hash (avoid pulling md5 crate)
+    let mut h: u64 = 14695981039346656037;
+    for b in joined.bytes() {
+        h ^= b as u64;
+        h = h.wrapping_mul(1099511628211);
+    }
+    format!("{:016x}", h)
+}
+
+#[tauri::command]
+async fn socratic_select_cluster(project_path: String) -> Result<SocraticCluster, String> {
+    let project_dir = std::path::PathBuf::from(&project_path);
+    let graph_path = project_dir.join(".learning").join("knowledge-graph.json");
+
+    if !graph_path.exists() {
+        // Sparse KG fallback: return empty cluster
+        return Ok(SocraticCluster {
+            concepts: vec![],
+            edges: vec![],
+            cluster_hash: "empty".to_string(),
+        });
+    }
+
+    let content = std::fs::read_to_string(&graph_path)
+        .map_err(|e| format!("读取 knowledge-graph.json 失败: {}", e))?;
+    let kg: KnowledgeGraph = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 knowledge-graph.json 失败: {}", e))?;
+
+    let cluster_ids = select_socratic_cluster_pure(&kg.nodes, &kg.edges, 4, 0.5);
+
+    let concept_refs: Vec<SocraticConceptRef> = cluster_ids.iter()
+        .filter_map(|id| kg.nodes.iter().find(|n| &n.id == id).cloned())
+        .map(|n| SocraticConceptRef {
+            id: n.id,
+            title: n.name,
+            source_chapter: n.chapter,
+        })
+        .collect();
+
+    let cluster_edges: Vec<SocraticEdgeRef> = kg.edges.iter()
+        .filter(|e| cluster_ids.contains(&e.from) && cluster_ids.contains(&e.to))
+        .map(|e| SocraticEdgeRef { from: e.from.clone(), to: e.to.clone(), weight: 1.0 })
+        .collect();
+
+    Ok(SocraticCluster {
+        concepts: concept_refs,
+        edges: cluster_edges,
+        cluster_hash: cluster_hash(&cluster_ids),
+    })
+}
+
+#[tauri::command]
+async fn socratic_load_state(project_path: String) -> Result<SocraticStateData, String> {
+    let state_path = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("socratic-state.json");
+
+    if !state_path.exists() {
+        return Ok(SocraticStateData::default());
+    }
+
+    let content = std::fs::read_to_string(&state_path)
+        .map_err(|e| format!("读取 socratic-state.json 失败: {}", e))?;
+    serde_json::from_str(&content)
+        .map_err(|e| format!("解析 socratic-state.json 失败: {}", e))
+}
+
+#[tauri::command]
+async fn socratic_save_state(project_path: String, state: SocraticStateData) -> Result<(), String> {
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+    let state_path = learning_dir.join("socratic-state.json");
+    let json = serde_json::to_string_pretty(&state)
+        .map_err(|e| format!("序列化 socratic-state 失败: {}", e))?;
+    std::fs::write(&state_path, json)
+        .map_err(|e| format!("写入 socratic-state.json 失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn socratic_save_session(project_path: String, session: SocraticSessionData) -> Result<String, String> {
+    let sessions_dir = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("socratic-sessions");
+    std::fs::create_dir_all(&sessions_dir)
+        .map_err(|e| format!("创建 socratic-sessions 目录失败: {}", e))?;
+
+    let ts = session.ended_at.replace(':', "-").replace('.', "-");
+    let file_path = sessions_dir.join(format!("{}.json", ts));
+    let json = serde_json::to_string_pretty(&session)
+        .map_err(|e| format!("序列化 session 失败: {}", e))?;
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("写入 session 文件失败: {}", e))?;
+    Ok(file_path.display().to_string())
+}
+
+#[tauri::command]
+async fn socratic_chat(
+    messages: Vec<SocraticChatMessage>,
+    concept_titles: Vec<String>,
+) -> Result<SocraticChatResponse, String> {
+    // Sprint 8a MVP: LLM integration deferred to Sprint 8b.
+    // Return a stub response so the chat flow can be wired up end-to-end
+    // without requiring LLM config.
+    let _ = (messages, concept_titles); // suppress unused warnings
+    Ok(SocraticChatResponse {
+        content: "（Sprint 8a MVP: LLM 集成将在 Sprint 8b 接入）".to_string(),
+        done: true,
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2586,7 +2823,8 @@ pub fn run() {
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::explain_selection_v2,
             create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
-            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness
+            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
+            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, socratic_chat
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

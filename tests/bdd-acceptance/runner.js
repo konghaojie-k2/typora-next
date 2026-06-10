@@ -121,6 +121,17 @@ async function runAcceptanceTests() {
   totalPassed += sprint6Result.passed;
   totalFailed += sprint6Result.failed;
 
+  // Sprint 8: Socratic Review (V2 Notebook, 8a MVP: 核心状态 + 触发 + 集群 + 存档, LLM 留 8b)
+  console.log(`\n${YELLOW}▶ Sprint 8: Socratic Review (8a MVP)${RESET}`);
+  const sprint8Steps = require('./sprint8_socratic_review.steps');
+  const sprint8Result = await runFeatureFile(
+    path.join(sprint4FeaturesDir, 'sprint8_socratic_review.feature'),
+    sprint8Steps
+  );
+  totalPassed += sprint8Result.passed;
+  totalFailed += sprint8Result.failed;
+  if (sprint8Steps._cleanup) sprint8Steps._cleanup.call({});
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

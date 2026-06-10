@@ -523,11 +523,74 @@
 
       await window.__TAURI__.core.invoke('persist_quiz_result', payload);
       console.log('[QuizSaveHistory] persisted quiz result');
+
+      // Sprint 8a: Trigger Socratic review if threshold reached
+      _maybeTriggerSocratic();
     } catch (err) {
       const msg = (err && err.message) || String(err);
       console.error('[QuizSaveHistory] persist failed:', msg);
       if (window.showToast) window.showToast('保存测验结果失败', 'error');
     }
+  }
+
+  // Sprint 8a MVP: increment quiz count + check Socratic trigger
+  async function _maybeTriggerSocratic() {
+    if (!window.SocraticState || !window.SocraticTrigger) return;
+    try {
+      const state = await window.SocraticState.load(_projectPath);
+      state.incrementQuizCount();
+      await state.save(_projectPath);
+
+      const result = await window.SocraticTrigger.checkAndTrigger({
+        projectPath: _projectPath
+      });
+
+      if (result.shouldTrigger && result.toast) {
+        _showSocraticToast(result.toast);
+      }
+    } catch (e) {
+      console.warn('[SocraticTrigger] check failed:', e);
+    }
+  }
+
+  function _showSocraticToast(toast) {
+    // Minimal toast UI (Sprint 8a MVP)
+    const existing = document.getElementById('socraticTriggerToast');
+    if (existing) existing.remove();
+    const el = document.createElement('div');
+    el.id = 'socraticTriggerToast';
+    el.style.cssText = `
+      position: fixed; bottom: 24px; right: 24px; width: 320px; padding: 14px 18px;
+      background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+      border: 1px solid rgba(129,140,248,0.3); border-radius: 14px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4); z-index: 9999;
+      animation: slideUp 0.3s ease;
+    `;
+    el.innerHTML = `
+      <div style="font-size:14px;font-weight:600;color:#f1f5f9;margin-bottom:8px;">🏛️ ${toast.text}</div>
+      <div style="display:flex;gap:6px;">
+        <button data-action="start" style="flex:1;padding:6px;border-radius:8px;font-size:12px;font-weight:600;background:linear-gradient(135deg,#818cf8,#a78bfa);color:white;border:none;cursor:pointer;">开始</button>
+        <button data-action="postpone" style="flex:1;padding:6px;border-radius:8px;font-size:12px;background:rgba(255,255,255,0.04);color:#94a3b8;border:1px solid rgba(255,255,255,0.08);cursor:pointer;">稍后</button>
+        <button data-action="optout" style="padding:6px 10px;border-radius:8px;font-size:12px;background:transparent;color:#64748b;border:none;cursor:pointer;">不再提醒</button>
+      </div>
+    `;
+    document.body.appendChild(el);
+    el.querySelectorAll('button').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const action = btn.dataset.action;
+        const state = await window.SocraticState.load(_projectPath);
+        if (action === 'start') {
+          const modal = new window.SocraticModal({ projectPath: _projectPath });
+          await modal.open();
+        } else if (action === 'postpone') {
+          state.markDismissed();
+        } else if (action === 'optout') {
+          state.markOptOut();
+        }
+        await state.save(_projectPath);
+        el.remove();
+      });
+    });
   }
 
   function showQuizToast(rating, score, weakList) {

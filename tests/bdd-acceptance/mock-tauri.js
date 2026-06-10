@@ -30,6 +30,16 @@ const mockInvoke = async (cmd, args) => {
       return _planCourse(args);
     case 'persist_quiz_result':
       return _persistQuizResult(args);
+    case 'socratic_select_cluster':
+      return _socraticSelectCluster(args);
+    case 'socratic_chat':
+      return _socraticChat(args);
+    case 'socratic_save_session':
+      return _socraticSaveSession(args);
+    case 'socratic_load_state':
+      return _socraticLoadState(args);
+    case 'socratic_save_state':
+      return _socraticSaveState(args);
     default:
       throw new Error(`Mock invoke not implemented: ${cmd}`);
   }
@@ -165,6 +175,119 @@ function _persistQuizResult({ projectPath, chapterFile, rating, score, weakConce
   });
   fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
 
+  return true;
+}
+
+// ============================================
+// Sprint 8: Socratic Review (mock implementations)
+// ============================================
+
+function _socraticSelectCluster({ projectPath }) {
+  const kgPath = path.join(projectPath, '.learning', 'knowledge-graph.json');
+  if (!fs.existsSync(kgPath)) {
+    // No KG → empty cluster (sparse fallback)
+    return { concepts: [], edges: [], cluster_hash: 'empty' };
+  }
+  const kg = JSON.parse(fs.readFileSync(kgPath, 'utf-8'));
+  const nodes = kg.nodes || [];
+  const edges = (kg.edges || []).filter(e => (e.weight || 0) >= 0.5);
+
+  if (nodes.length === 0) {
+    return { concepts: [], edges: [], cluster_hash: 'empty' };
+  }
+
+  // BFS from highest-degree node
+  const degree = new Map();
+  for (const n of nodes) degree.set(n.id, 0);
+  for (const e of edges) {
+    degree.set(e.from, (degree.get(e.from) || 0) + 1);
+    degree.set(e.to, (degree.get(e.to) || 0) + 1);
+  }
+  const sorted = [...nodes].sort((a, b) => (degree.get(b.id) || 0) - (degree.get(a.id) || 0));
+  const anchor = sorted[0];
+
+  const targetSize = 4;
+  const cluster = [anchor.id];
+  const visited = new Set([anchor.id]);
+  const frontier = [anchor.id];
+  while (cluster.length < targetSize && frontier.length > 0) {
+    const next = [];
+    for (const node of frontier) {
+      const neighbors = edges
+        .filter(e => e.from === node || e.to === node)
+        .map(e => e.from === node ? e.to : e.from)
+        .filter(id => !visited.has(id));
+      for (const nb of neighbors) {
+        if (cluster.length >= targetSize) break;
+        cluster.push(nb);
+        visited.add(nb);
+        next.push(nb);
+      }
+    }
+    frontier.length = 0;
+    frontier.push(...next);
+  }
+
+  const conceptRefs = cluster.map(id => {
+    const n = nodes.find(x => x.id === id);
+    return { id, title: n?.title || id, source_chapter: n?.source_chapter || '' };
+  });
+  const clusterEdges = edges.filter(e => cluster.includes(e.from) && cluster.includes(e.to));
+
+  // Hash for 24h dedup
+  const crypto = require('crypto');
+  const clusterHash = crypto.createHash('md5')
+    .update(cluster.sort().join('|'))
+    .digest('hex')
+    .slice(0, 8);
+
+  return {
+    concepts: conceptRefs,
+    edges: clusterEdges,
+    cluster_hash: clusterHash
+  };
+}
+
+function _socraticChat({ messages, concept_titles }) {
+  // Mock LLM response: alternate between asking a follow-up and ending
+  const turnCount = (messages || []).length;
+  if (turnCount >= 4) {
+    return { content: '好，本场 Socratic 复习到此结束。', done: true };
+  }
+  if (turnCount === 0) {
+    return { content: `说说这些概念之间是什么关系：${(concept_titles || []).join('、')}`, done: false };
+  }
+  return { content: '能再具体讲讲吗？', done: false };
+}
+
+function _socraticSaveSession({ projectPath, session }) {
+  const sessionsDir = path.join(projectPath, '.learning', 'socratic-sessions');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const ts = (session.ended_at || new Date().toISOString()).replace(/[:.]/g, '-');
+  const filePath = path.join(sessionsDir, `${ts}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+  return filePath;
+}
+
+function _socraticLoadState({ projectPath }) {
+  const statePath = path.join(projectPath, '.learning', 'socratic-state.json');
+  if (!fs.existsSync(statePath)) {
+    return {
+      last_socratic_at: null,
+      last_dismissed_at: null,
+      opt_out: false,
+      quiz_count_since_last_socratic: 0,
+      recent_cluster_hashes: []
+    };
+  }
+  return JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+}
+
+function _socraticSaveState({ projectPath, state }) {
+  const learningDir = path.join(projectPath, '.learning');
+  fs.mkdirSync(learningDir, { recursive: true });
+  const statePath = path.join(learningDir, 'socratic-state.json');
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
   return true;
 }
 
