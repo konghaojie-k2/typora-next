@@ -315,6 +315,15 @@
     state.activeTab = state.tabs.length - 1;
     renderTabs();
     await loadTabContent(state.activeTab);
+
+    // Reset DOM scroll to the new tab's saved position (0 for new tabs).
+    // Without this, the browser's default overflow-anchor preserves the
+    // previous tab's scrollTop on innerHTML replacement, so the new file
+    // opens at the old file's scroll position.
+    if (elements.markdownBody) {
+      elements.markdownBody.scrollTop = tab.scrollTop || 0;
+    }
+
     watchCurrentFile(path);
     showToast('已打开: ' + tab.name);
 
