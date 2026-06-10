@@ -372,3 +372,276 @@ invoke('notify_external_file_opened').catch(err =>
 - **可测性**：决策抽成纯函数 `should_request_attention(bool) -> bool`
 - **错误处理**：`is_focused` 失败 → 按未聚焦处理；`request_user_attention` 失败 → 吞掉
 - **平台适配**：依赖 Tauri `request_user_attention` 跨平台映射（Windows 闪/macOS 弹/Linux urgent）
+
+---
+
+# [架构决策] Sprint 8 — Socratic 复习（多概念体系巩固）
+
+> 整理自 2026-06-10 讨论
+
+## 1. 背景
+
+**现有复习体系**（Sprint 4）：
+- 艾宾浩斯调度 `review-scheduler.js`（按 `next_review_at` 触发）
+- 单概念多选 quiz `quiz-panel.js`
+- `status` 字段：`mastered / learning / struggling / not_started`
+- 设计原则（已固化为不变量）：**"主观感觉 ≠ 掌握，只有 quiz 能改 status"**（docs/design.md Sprint 6 决策）
+- 知识图谱 `knowledge-graph-manager.js`：节点 + 边，**表达结构但没表达"关系是什么"**
+
+**用户痛点 + 洞察**：
+> 知识图谱只是表达了关系，但是没有表达到底**是什么关系**。能不能加个中期的复习模式，用 AI 追问让用户自己阐述概念之间"是什么关系"？多知识点体系巩固用。
+
+→ 现有 quiz 是单概念、单题、客观题；缺一个**多概念、主观阐述、AI 追问**的"中期体系巩固"模式。
+
+## 2. 约束
+
+| 约束 | 来源 |
+|------|------|
+| "quiz 是 status 唯一变更者"不变量 | Sprint 6 决策（用户核心论点） |
+| 概念选材必须有 KG 语义 | 用户洞察"用图说关系" |
+| 题目数和顺序由 AI 动态决定（非预设） | 苏格拉底方法本质 |
+| 不污染 `project.json`、不复用 quiz-history.json | 物理隔离 |
+| LLM 调用成本可接受（与 `explain_selection_v2` 同量级） | 现有监控数据 |
+| BDD + TDD 强制流程 | CLAUDE.md |
+
+## 3. 方案对比
+
+### 3.1 触发时机
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 事件驱动：完成 N 次 quiz 后推荐** | 与 quiz 节奏耦合、不打扰、有成就感 | N 阈值需调 | ✅ |
+| B. 固定周期（每周一次） | 简单 | 不灵活 | ❌ |
+| C. 用户主动入口 | 0 推送 | 容易忘 | ❌ |
+
+### 3.2 概念选材
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. KG 集群（BFS from 最高度节点 + 强边过滤）** | 自然契合"用图说关系"洞察 | KG 稀疏时退化 | ✅ |
+| B. 时间窗（最近 N 概念） | 简单 | 与"体系巩固"初衷弱 | ❌ |
+| C. LLM 自由选材 | 灵活 | 不可复现/难调 | ❌ |
+
+### 3.3 Status 影响
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 不改 status，不动 review_count，只记 last_socratic_at** | 与 Sprint 6 原则 100% 一致 | — | ✅ |
+| B. 引入 LLM 质量评估 | 信号丰富 | 主观信号进状态机，违原则 | ❌ |
+| C. 用户自评 1-5 星 | 显式 | 操作成本 | ❌ |
+
+### 3.4 对话保存
+
+| 方案 | 优点 | 缺点 | 决定 |
+|------|------|------|------|
+| **A. 保存到 `.learning/socratic-sessions/<ts>.json`** | 未来可挖掘、复盘价值高 | 多 KB/次（可忽略） | ✅ |
+| B. 不保存，只留 last_socratic_at | 简单 | 永久失去复盘能力 | ❌ |
+
+### 3.5 UI 形态（4 候选 → V2 Notebook）
+
+候选对比见 `docs/prototypes/sprint8-socratic-mockups.html`：
+
+| 候选 | 进度表达 | KG 耦合 | 实现成本 | 决定 |
+|------|---------|--------|---------|------|
+| V1 Chat | "已 N 轮" | 仅 chip | 🟢 低 | ❌ |
+| **V2 Notebook** | **无（隐式累积）** | **仅 chip** | **🟢 低** | **✅** |
+| V3 Split KG | 节点覆盖 | 最高 | 🔴 高 | ❌（Sprint 9+ 再做） |
+| V4 右侧栏 | 概念列表 | 中 | 🟡 中 | ❌ |
+
+**决定 V2** 理由：实现成本最低、契合"复习"质感（像读书笔记）、不与 Sprint 7 视觉语言冲突。"无进度"恰好契合苏格拉底**题目数和顺序不可预设**的本质。V3 是最契合用户洞察的，但 KG 渲染是独立 Sprint 工作量，留 Sprint 9+。
+
+## 4. 最终选择
+
+**架构**：复用 Cornell Sidebar 风格的 LLM 追问流（不复制 Cornell Sidebar 本身，新建全屏 modal），事件驱动触发，KG 集群选材，独立 session 文件存档，**与 quiz 物理隔离**。
+
+**数据流**：
+```
+用户完成第 N 次 quiz (mastered/learning)
+  ↓
+review-scheduler.js 检测 quiz_count_since_last_socratic ≥ N
+  ↓
+弹非阻塞 prompt：toast "要做次体系复习吗？"
+  - 「开始」→ 启动 Socratic Modal（V2 Notebook）
+  - 「稍后」→ 静默记录 last_dismissed_at（24h 内不再弹）
+  - 「不再提醒」→ 永久 opt-out
+  ↓
+Socratic Modal：
+  1. invoke('socratic_select_cluster', projectPath) → Rust BFS 选 4-6 概念
+  2. invoke('socratic_chat', { messages, system_prompt_template }) → 流式 LLM 响应
+  3. 多轮 Q&A，AI 自由决定追问/跳转/结束（输出 {done: true}）
+  4. 结束 → invoke('socratic_save_session', { path, turns, end_reason })
+  5. 关闭 → 更新 .learning/socratic-state.json 的 last_socratic_at
+```
+
+**关键不变量**：
+- ❌ Socratic **绝不写** `project.json` 的 concept status
+- ❌ Socratic **绝不写** `.learning/quiz-history.json`
+- ✅ Socratic **只写** `.learning/socratic-state.json` 和 `.learning/socratic-sessions/<ts>.json`
+- ❌ Socratic **不能把 mastered 概念打回 struggling**
+
+## 5. 接口契约
+
+### 5.1 Rust 命令
+
+**`socratic_select_cluster`**（R1 概念选材）：
+```rust
+#[tauri::command]
+async fn socratic_select_cluster(
+    project_path: PathBuf,
+    state: tauri::State<AppState>,
+) -> Result<SocraticCluster, String>;
+```
+
+```rust
+struct SocraticCluster {
+    concepts: Vec<ConceptRef>,        // 4-6 个
+    cluster_hash: String,             // 24h 去重
+    edges: Vec<EdgeRef>,              // 概念间的边
+}
+
+struct ConceptRef { id: String, title: String, source_chapter: String }
+struct EdgeRef   { from: String, to: String, weight: f32 }
+```
+
+**`socratic_chat`**（R2 多轮对话）：
+```rust
+#[tauri::command]
+async fn socratic_chat(
+    messages: Vec<ChatMessage>,        // 历史
+    concept_titles: Vec<String>,      // 本场概念标题（拼到 system prompt）
+) -> Result<SocraticResponse, String>;
+```
+
+```rust
+struct ChatMessage     { role: String, content: String }  // "user" | "tutor"
+struct SocraticResponse { 
+    content: String,                  // tutor 回复文本
+    done: bool,                       // AI 判断 session 该结束了
+}
+```
+
+**`socratic_save_session`**（R3 落盘）：
+```rust
+#[tauri::command]
+async fn socratic_save_session(
+    project_path: PathBuf,
+    session: SocraticSession,
+) -> Result<String, String>;          // 返回落盘文件路径
+```
+
+```rust
+struct SocraticSession {
+    version: String,                  // "1.0"
+    started_at: String,               // ISO
+    concept_ids: Vec<String>,
+    concept_titles: Vec<String>,
+    turns: Vec<ChatMessage>,
+    ended_at: String,
+    end_reason: String,               // "llm_done" | "user_ended" | "abandoned"
+}
+```
+
+**`socratic_load_state` / `socratic_save_state`**（R4 trigger 状态）：
+```rust
+struct SocraticState {
+    last_socratic_at: Option<String>,
+    last_dismissed_at: Option<String>,
+    opt_out: bool,
+    quiz_count_since_last_socratic: u32,
+    recent_cluster_hashes: Vec<String>,  // 24h 内
+}
+```
+
+### 5.2 纯函数（测试核心）
+
+```rust
+// KG 集群选择（BFS from 最高度节点 + 强边过滤）
+fn select_socratic_cluster(
+    nodes: &[KgNode], 
+    edges: &[KgEdge], 
+    target_size: usize, 
+    min_edge_weight: f32,
+) -> Vec<String>;
+
+// 是否应该触发 prompt（事件驱动）
+fn should_trigger_socratic(
+    quiz_count_since: u32,
+    threshold: u32,
+    last_dismissed_at: Option<&str>,
+    now: &str,                         // ISO
+    opt_out: bool,
+    last_socratic_at: Option<&str>,
+    recent_hashes: &[String],
+    current_hash: &str,
+) -> TriggerAction;                    // Trigger | Silent | Postponed
+```
+
+### 5.3 前端集成点
+
+`dist/scripts/learning/review-scheduler.js`：
+- `onQuizComplete()` 内追加：累加 `quiz_count_since_last_socratic`，到阈值后调 `socratic_load_state` + `socratic_select_cluster` + 弹 toast prompt
+
+`dist/scripts/learning/socratic-modal.js`（新建）：
+- 入口：`openSocratic(cluster)` 启动 V2 Notebook modal
+- 内部：调 `socratic_chat` 流式、渲染 notebook 卡片、结束时调 `socratic_save_session` + `socratic_save_state`
+
+`dist/scripts/learning/socratic-trigger.js`（新建）：
+- 触发 toast DOM（V0 简化版：复用现有 review-toast 样式）
+
+### 5.4 文件布局
+
+```
+{project}/
+  .learning/
+    socratic-state.json                # 触发状态（极简）
+    socratic-sessions/
+      2026-06-10T11-30-00Z.json
+      2026-06-17T11-30-00Z.json
+      ...
+```
+
+## 6. 测试矩阵
+
+| 层 | 文件 | 关键用例 |
+|---|---|---|
+| **Rust unit** | `src-tauri/tests/socratic_cluster_test.rs`（新） | T1: BFS 选最高度节点<br>T2: 强边过滤（weight ≥ 0.5）<br>T3: target_size 截断<br>T4: 空 KG → 空 cluster<br>T5: 概念 < 4 → 全返回<br>T6: cluster_hash 一致性 |
+| **Rust unit** | `src-tauri/tests/socratic_trigger_test.rs`（新） | T7: quiz 计数达阈值 → Trigger<br>T8: 24h 内 dismissed → Postponed<br>T9: opt_out → Silent<br>T10: cluster hash 已存在 → Silent |
+| **Rust integration** | `src-tauri/tests/socratic_chat_test.rs`（新） | I1: system prompt 包含概念列表<br>I2: 多轮历史正确拼接<br>I3: LLM `{done: true}` 解析<br>I4: 非 JSON 响应降级 |
+| **JS unit** | `tests/unit/test_socratic_state.js`（新） | U1: state 文件 load/save roundtrip<br>U2: quiz 完成 +1 计数<br>U3: trigger 函数对各场景返回正确 action |
+| **JS unit** | `tests/unit/test_socratic_modal.js`（新） | S1: notebook 卡片正确渲染<br>S2: 提交回答 → 调 socratic_chat<br>S3: 收到 done=true → 调 socratic_save_session<br>S4: 用户主动结束 → 二次确认 |
+| **BDD acceptance** | `tests/features/sprint8_socratic_review.feature`（新）<br>`tests/bdd-acceptance/sprint8_socratic_review.steps.js`（新） | B1: 完成 N 次 quiz → 弹 prompt<br>B2: "开始" → 选 cluster → 开 modal<br>B3: 多轮对话 + 真实 LLM 响应<br>B4: **session 结束后 concept status 不变**（关键回归）<br>B5: session 文件落盘到正确路径<br>B6: "不再提醒" → 后续 quiz 完成不弹<br>B7: KG 稀疏 → 走 fallback |
+
+## 7. 风险点 + 缓解
+
+| 风险 | 缓解 |
+|---|---|
+| LLM 成本（~8k tokens/session） | 与 explain_selection 同量级 |
+| LLM 不按 Socratic 风格追问（直接给答案） | system prompt 明确禁止 + Rust 校验首轮不出现"答案是..." |
+| Cluster 选得不好（不相关的概念） | BFS + 强边过滤；Sprint 9+ 加用户反馈"题质量差" |
+| Session 文件膨胀 | 手动清；Sprint 9+ 加自动归档 |
+| 24h cluster 去重但用户想做新一组 | UI 加"换一组"按钮（force re-pick） |
+| LLM done 误判 | 提示"只覆盖了 N/M 个概念，继续吗？" |
+| 二次确认（避免误关） | ESC / 主动结束 / 关闭按钮全部走二次确认弹窗 |
+
+## 8. YAGNI 边界（明确不做）
+
+- ❌ KG 渲染（V3 留 Sprint 9+）
+- ❌ "过往 Socratic 历史"查看 UI
+- ❌ 跨 session 弱项挖掘
+- ❌ Session 评分（1-5 星用户自评）—— 不入状态机
+- ❌ Session 导出 markdown / 分享
+- ❌ 多语言切换
+- ❌ 多人协作 session
+- ❌ LLM 表达质量评估反馈到 KG
+- ❌ 自动归档 session 文件
+
+## 9. 决策摘要（供 daily_reflection 引用）
+
+- **形态**：AI 一问一答（V2 Notebook modal，无固定进度）
+- **触发**：完成 N 次 quiz 后事件驱动 prompt
+- **选材**：KG 集群（BFS + 强边 weight ≥ 0.5，4-6 概念）+ 24h 去重
+- **Status 影响**：零（保 Sprint 6 不变量）
+- **Session 存档**：`.learning/socratic-sessions/<ts>.json`（每场独立文件）
+- **状态文件**：`.learning/socratic-state.json`（极简：last_socratic_at + 计数 + opt_out + recent_hashes）
+- **物理隔离**：不写 `project.json`、不写 `quiz-history.json`
+- **关键洞察**：题目数和顺序由 AI 动态决定（**无"X/Y"固定进度**）
