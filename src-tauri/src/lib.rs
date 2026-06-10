@@ -155,6 +155,35 @@ async fn open_file(path: PathBuf) -> Result<FileResult, String> {
     })
 }
 
+/// Pure decision: should we request OS-level user attention for an externally
+/// opened file? Returns true when the window is not focused.
+///
+/// Kept as a free function (not a method) so it can be unit-tested without
+/// any Tauri runtime — see `tests/test_notify_external_open.rs`.
+/// Conservative default: if focus state is unknown, request attention.
+fn should_request_attention(is_focused: bool) -> bool {
+    !is_focused
+}
+
+/// Request OS-level taskbar/Dock attention when a file is opened from the
+/// OS (file association / command line) and the app window is not focused.
+/// No-op when the window already has focus.
+///
+/// Frontend contract (Sprint 7):
+///   - Called only from the `open-file-from-args` listener
+///   - Called AFTER `addTab` succeeds (so we don't flash on failed open)
+///   - Fire-and-forget: errors are swallowed to keep the main flow clean
+#[tauri::command]
+async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String> {
+    let focused = window.is_focused().unwrap_or(false);
+    if should_request_attention(focused) {
+        use tauri::UserAttentionType;
+        let _ = window
+            .request_user_attention(Some(UserAttentionType::Informational));
+    }
+    Ok(())
+}
+
 /// Render markdown content to HTML (body content only, for WebView injection)
 #[tauri::command]
 fn render_markdown(content: &str) -> String {
@@ -2547,6 +2576,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             open_file_dialog, open_file, render_markdown, get_toc,
+            notify_external_file_opened,
             open_folder_dialog, list_directory, watch_file, unwatch_file,
             fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
             get_recent_files, add_recent_file, clear_recent_files, write_file,

@@ -230,6 +230,12 @@
         invoke('open_file', { path: filePath }).then(result => {
           if (result && result.content) {
             addTab(result.path, result.content, result.base_dir || '');
+            // Sprint 7: ask Rust to flash taskbar / bounce Dock if the user
+            // is not currently looking at the app window. No-op when focused.
+            // Fire-and-forget: don't pollute the main flow on failure.
+            invoke('notify_external_file_opened').catch(err =>
+              console.warn('[Attention] notify_external_file_opened failed:', err)
+            );
           }
         }).catch(err => {
           console.error('Failed to open file from args:', err);
