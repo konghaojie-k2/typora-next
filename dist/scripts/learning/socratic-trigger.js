@@ -73,7 +73,25 @@
     return decideTrigger(state, { candidateHash });
   }
 
-  window.SocraticTrigger = { decideTrigger, checkAndTrigger, QUIZ_THRESHOLD, DISMISS_COOLDOWN_MS };
+  /**
+   * Dev flag check: the quick-trigger button (🏛️) and Ctrl+Shift+S shortcut
+   * are gated behind this. Default OFF. To enable for testing/verification:
+   *   localStorage.setItem('socratic-dev-trigger', 'true')  // in DevTools
+   *   then reload
+   * @returns {boolean}
+   */
+  function isDevQuickTriggerEnabled() {
+    try {
+      return localStorage.getItem('socratic-dev-trigger') === 'true';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  window.SocraticTrigger = {
+    decideTrigger, checkAndTrigger, isDevQuickTriggerEnabled,
+    QUIZ_THRESHOLD, DISMISS_COOLDOWN_MS
+  };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { decideTrigger, checkAndTrigger, QUIZ_THRESHOLD, DISMISS_COOLDOWN_MS };
   }

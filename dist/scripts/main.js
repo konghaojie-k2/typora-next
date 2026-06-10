@@ -947,12 +947,18 @@
           toolbarRight.insertBefore(badge, toolbarRight.firstChild);
         }
       }
-      // Sprint 8a: show Socratic quick-trigger button
+      // Sprint 8a: Socratic dev quick-trigger button (gated by localStorage flag)
       const socraticBtn = document.getElementById('openSocraticBtn');
-      if (socraticBtn) socraticBtn.style.display = 'inline-flex';
+      if (socraticBtn) {
+        const devOn = window.SocraticTrigger?.isDevQuickTriggerEnabled?.();
+        socraticBtn.style.display = devOn ? 'inline-flex' : 'none';
+        socraticBtn.title = devOn
+          ? '立即 Socratic 复习 (Ctrl+Shift+S) — DEV'
+          : '已隐藏：DevTools 执行 localStorage.setItem("socratic-dev-trigger","true") 开启';
+      }
     } else {
       if (badge) badge.remove();
-      // Sprint 8a: hide Socratic quick-trigger button
+      // Sprint 8a: hide Socratic dev quick-trigger button
       const socraticBtn = document.getElementById('openSocraticBtn');
       if (socraticBtn) socraticBtn.style.display = 'none';
     }
@@ -2877,15 +2883,23 @@
     if (elements.translateBtn) {
       elements.translateBtn.addEventListener('click', toggleTranslation);
     }
-    // Sprint 8a: 立即 Socratic 复习（绕过阈值）
+    // Sprint 8a: Socratic dev quick-trigger (gated by localStorage flag, see isDevQuickTriggerEnabled)
     const socraticQuickBtn = document.getElementById('openSocraticBtn');
     if (socraticQuickBtn) {
-      socraticQuickBtn.addEventListener('click', openSocraticReview);
+      socraticQuickBtn.addEventListener('click', () => {
+        if (!window.SocraticTrigger?.isDevQuickTriggerEnabled?.()) {
+          showToast('Socratic 快捷入口已禁用。开发模式：在 DevTools 执行 localStorage.setItem("socratic-dev-trigger","true")', 'info', 5000);
+          return;
+        }
+        openSocraticReview();
+      });
     }
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'S' && window.LearningProgress) {
         e.preventDefault();
-        openSocraticReview();
+        if (window.SocraticTrigger?.isDevQuickTriggerEnabled?.()) {
+          openSocraticReview();
+        }
       }
     });
     elements.themeToggle.addEventListener('click', toggleTheme);
