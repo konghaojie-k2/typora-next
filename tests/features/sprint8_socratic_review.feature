@@ -59,18 +59,25 @@ Feature: 苏格拉底式复习（多概念体系巩固）
 
   Scenario: 多轮对话以 notebook 卡片形式累积
     Given Socratic modal 已打开
-    When tutor 问"说说 JWT 和 OAuth2 是什么关系？"
-    And 用户回答"JWT 是 token 格式，OAuth2 是授权框架"
-    And tutor 追问"那 JWT 是必须的吗？"
-    And LLM 返回 {content: "...", done: true}
-    Then modal 顶部出现"本次 Socratic 复习完成"卡片
+    When 系统请求 tutor 提问
+    Then 返回的内容不是占位文本
+    And 返回的内容包含概念簇关键词
+
+    When 用户回答"JWT 是 token 格式，OAuth2 是授权框架"
+    And 系统再次请求 tutor 提问
+    Then 返回的内容不是占位文本
+
+    When 系统判断对话结束
+    Then LLM 返回 done: true
+    And modal 顶部出现"本次 Socratic 复习完成"卡片
     And 聊天区有 3 张 notebook 卡片（2 个 Q&A + 1 个 done）
 
   Scenario: 用户主动"结束"触发二次确认
     Given Socratic modal 已打开
     When 用户点击"结束"
     Then 弹二次确认"确定提前结束？对话仍会保存"
-    And 用户点"确认"后 modal 关闭
+    When 用户选择"确认"
+    Then 用户点"确认"后 modal 关闭
     And session 文件仍落盘（end_reason = "user_ended"）
 
   # ============================
@@ -95,12 +102,38 @@ Feature: 苏格拉底式复习（多概念体系巩固）
     And project.json 的 concepts 字段未变
 
   # ============================
+  # 异常路径（Round 3）
+  # ============================
+
+  Scenario: Agent SDK 调用失败时显示友好错误
+    Given Socratic modal 已打开
+    When 系统请求 tutor 提问时 Agent SDK 失败
+    Then 聊天区显示错误提示（非白屏）
+    And 错误提示包含"暂时无法连接"
+    And 用户可以继续发送下一条消息
+
+  Scenario: Session 保存失败时保留内存中的对话
+    Given Socratic modal 已打开
+    And 对话已有 2 轮 turns
+    When session 保存时磁盘写入失败
+    Then 用户看到"保存失败，但对话仍在"提示
+    And modal 不自动关闭
+    And 聊天区 turns 未丢失
+
+  Scenario: 用户点击"结束"后取消
+    Given Socratic modal 已打开
+    When 用户点击"结束"
+    And 用户在二次确认中选择取消
+    Then modal 保持打开
+    And 用户可以继续对话
+
+  # ============================
   # YAGNI 边界
   # ============================
 
   Scenario: 24h 内同一 cluster 不重复
-    Given 用户 1 小时前做过 Socratic 复习（cluster_hash = X）
+    Given 用户 "1 小时" 前做过 Socratic 复习（cluster_hash = "X"）
     When 系统再次触发 Socratic
-    And BFS 选出的 cluster 仍是 X
+    And BFS 选出的 cluster 仍是 "X"
     Then 不弹 toast，提示"今天已做过"
-    And socratic-state.json 的 recent_cluster_hashes 包含 X
+    And socratic-state.json 的 recent_cluster_hashes 包含 "X"

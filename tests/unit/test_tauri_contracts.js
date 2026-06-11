@@ -115,7 +115,7 @@ const COMMAND_REGISTRY = {
   },
   explain_selection: {
     category: 'learning',
-    jsParams: ['text', 'context'],
+    jsParams: ['text', 'context', 'previousQa'],
     rustFile: 'ai_agent.rs',
   },
   generate_chapter_quiz: {

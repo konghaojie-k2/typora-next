@@ -209,36 +209,9 @@ TestRunner.test('scroll progress >= 0.8 shows quiz area', () => {
   TestRunner.assertEquals(quizArea.style.display, 'block', 'Quiz area should be visible after scroll');
 });
 
-TestRunner.test('showExplanationModal creates modal and replaces previous', async () => {
-  setupEnv();
-  const LMI = loadIntegration();
-  document.body.classList.add('learning-mode');
-  LMI.setupSelectionExplainer();
-
-  global.window.__TAURI__.core.invoke = () => Promise.resolve('这是一个生活化类比解释。');
-  global.window.getSelection = () => ({ toString: () => '测试文字' });
-
-  const aiBtn = document.getElementById('aiExplainBtn');
-  aiBtn.style.display = '';
-
-  // First click
-  aiBtn.click();
-  await new Promise(r => setTimeout(r, 50));
-
-  const modal = document.getElementById('learningExplanationModal');
-  TestRunner.assertExists(modal, 'Modal should exist after first click');
-  TestRunner.assert(
-    modal._innerHTML.includes('📖 AI 解释'),
-    'Should show explanation title'
-  );
-
-  // Second click should replace the previous modal
-  aiBtn.click();
-  await new Promise(r => setTimeout(r, 50));
-
-  const modals = document.querySelectorAll('#learningExplanationModal');
-  TestRunner.assertEquals(modals.length, 1, 'Should only have one modal');
-});
+// NOTE: Sprint 6 replaced modal-based explain with Cornell sidebar.
+// Sidebar tests are covered by test_explain_conversation.js (Sprint 6).
+// The old modal tests are removed because the modal no longer exists.
 
 TestRunner.test('teardown removes quiz area, hides AI button, and removes modal', () => {
   setupEnv();
@@ -246,11 +219,6 @@ TestRunner.test('teardown removes quiz area, hides AI button, and removes modal'
   document.body.classList.add('learning-mode');
 
   LMI.setupQuizPanel('02-test.md', '/project');
-  LMI.setupSelectionExplainer();
-
-  // Make AI button visible
-  const aiBtn = document.getElementById('aiExplainBtn');
-  aiBtn.style.display = '';
 
   TestRunner.assertExists(
     document.getElementById('learningQuizArea'),
@@ -262,11 +230,6 @@ TestRunner.test('teardown removes quiz area, hides AI button, and removes modal'
   TestRunner.assert(
     document.getElementById('learningQuizArea') === null,
     'Quiz area should be removed'
-  );
-  TestRunner.assertEquals(
-    aiBtn.style.display,
-    'none',
-    'AI button should be hidden'
   );
 });
 

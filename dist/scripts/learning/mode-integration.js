@@ -1102,7 +1102,7 @@
     // Fetch explanation via explain_selection_v2 (Rust ureq direct LLM call)
     try {
       const context = _currentChapterTitle;
-      const result = await window.__TAURI__.core.invoke('explain_selection_v2', {
+      const result = await window.__TAURI__.core.invoke('explain_selection', {
         text: term,
         context: context || null,
         previousQa: []
@@ -1339,7 +1339,7 @@
       // Build previousQA for structured parameter
       const previousQa = cue.qaHistory.map(h => ({ q: h.q, a: h.a }));
 
-      const result = await window.__TAURI__.core.invoke('explain_selection_v2', {
+      const result = await window.__TAURI__.core.invoke('explain_selection', {
         text: question,
         context: context || null,
         previousQa: previousQa

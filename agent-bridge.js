@@ -389,6 +389,46 @@ ${context ? `上下文：${context}` : ''}
   return output.trim();
 }
 
+/**
+ * Socratic review — Agent-driven Socratic dialogue (Sprint 8b)
+ * @param {Function} queryFn - Agent SDK query function
+ * @param {object} config - API config
+ * @param {object} args - { project_path, concept_titles }
+ * @returns {Promise<{content: string, done: boolean}>}
+ */
+async function socraticChat(queryFn, config, args) {
+  const { project_path, concept_titles } = args;
+
+  if (!project_path) {
+    throw new Error('project_path is required for socratic review');
+  }
+
+  log('info', 'Starting socratic review', { project_path, concept_titles });
+
+  const stream = queryFn({
+    prompt: `开始苏格拉底复习。当前概念簇：${concept_titles.join('、')}`,
+    options: {
+      cwd: project_path,
+      permissionMode: 'bypassPermissions',
+      allowDangerouslySkipPermissions: true,
+      skills: ['socratic-review'],
+    }
+  });
+
+  const output = await collectAgentOutput(stream);
+
+  if (!output || output.trim().length === 0) {
+    throw new Error('Agent returned empty socratic response');
+  }
+
+  // Check for session end marker injected by skill rules
+  const done = output.includes('[SESSION_END]');
+  const content = output.replace(/\[SESSION_END\]/g, '').trim();
+
+  log('info', 'Socratic review turn complete', { done, content_length: content.length });
+  return { content, done };
+}
+
 // ============================================
 // Load Agent SDK
 // ============================================
@@ -460,6 +500,14 @@ async function main() {
         log('info', 'Explain stage completed', { explanation_length: explanation.length });
         process.exit(0);
         break;
+      case 'socratic':
+        log('info', 'Starting socratic stage', { project_path: taskArgs.project_path, concept_titles: taskArgs.concept_titles });
+        const socraticResult = await socraticChat(queryFn, config, taskArgs);
+        // Output JSON for Rust to parse
+        console.log(JSON.stringify(socraticResult));
+        log('info', 'Socratic stage completed', { done: socraticResult.done, content_length: socraticResult.content.length });
+        process.exit(0);
+        break;
       default:
         emitError(`未知阶段: ${stage}`);
         process.exit(1);
@@ -481,6 +529,7 @@ module.exports = {
   planCourse,
   generateChapters,
   explainText,
+  socraticChat,
   emit,
   emitError,
   log

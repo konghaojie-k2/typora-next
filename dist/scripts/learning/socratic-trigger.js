@@ -22,7 +22,7 @@
    */
   function decideTrigger(state, ctx) {
     const s = state || {};
-    const now = ctx.now || new Date().toISOString();
+    const now = new Date(ctx.now || new Date()).getTime();
     const quizCount = ctx.quizCountSince || 0;
 
     // Opt-out is permanent
@@ -70,7 +70,11 @@
   async function checkAndTrigger({ projectPath, candidateHash }) {
     if (!window.SocraticState) return { shouldTrigger: false, reason: 'no_state_module' };
     const state = await window.SocraticState.load(projectPath);
-    return decideTrigger(state, { candidateHash });
+
+    // Count quizzes since last Socratic review
+    let quizCountSince = state.quiz_count_since_last_socratic || 0;
+
+    return decideTrigger(state, { candidateHash, quizCountSince });
   }
 
   /**

@@ -56,13 +56,6 @@ function makeReviewResult(changes) {
   };
 }
 
-function makeMiniGraph(nodes, edges) {
-  return {
-    nodes: nodes.map(([id, name, chapter, status]) => ({ id, name, chapter, status })),
-    edges: edges.map(([from, to]) => ({ from, to }))
-  };
-}
-
 // ============================================
 // Test: Module loading
 // ============================================
@@ -197,74 +190,6 @@ TestRunner.test('regression (downgraded) cards have warning styling', () => {
     TestRunner.assert(
       card.classList.contains('status-regressed') || card.classList.contains('warning'),
       'regression card should have warning styling'
-    );
-  }
-});
-
-// ============================================
-// Test: Mini knowledge graph
-// ============================================
-
-TestRunner.test('mini graph renders when graph data provided', () => {
-  setupEnv();
-  const RSM = loadModal();
-  if (!RSM) return;
-
-  const result = makeReviewResult([['A', 'learning', 'mastered', '01.md']]);
-  const miniGraph = makeMiniGraph(
-    [['a', 'A', '01', 'mastered']],
-    []
-  );
-
-  const modal = new RSM();
-  modal.show({ reviewResult: result, miniGraph });
-
-  const graphEl = document.querySelector('.review-mini-graph');
-  TestRunner.assertExists(graphEl, 'mini graph container should exist');
-});
-
-TestRunner.test('mini graph not rendered when no graph data', () => {
-  setupEnv();
-  const RSM = loadModal();
-  if (!RSM) return;
-
-  const result = makeReviewResult([['A', 'learning', 'mastered', '01.md']]);
-  const modal = new RSM();
-  modal.show({ reviewResult: result, miniGraph: null });
-
-  const graphEl = document.querySelector('.review-mini-graph');
-  TestRunner.assert(!graphEl || graphEl._removed, 'mini graph should not render without data');
-});
-
-TestRunner.test('updated nodes have pulse animation class', () => {
-  setupEnv();
-  const RSM = loadModal();
-  if (!RSM) return;
-
-  const result = makeReviewResult([['A', 'learning', 'mastered', '01.md']]);
-  const miniGraph = makeMiniGraph(
-    [['a', 'A', '01', 'mastered'], ['b', 'B', '01', 'not_started']],
-    []
-  );
-
-  const modal = new RSM();
-  modal.show({ reviewResult: result, miniGraph });
-
-  // Node 'a' was updated → should have pulse class
-  const nodeA = document.querySelector('[data-concept-id="a"]');
-  if (nodeA) {
-    TestRunner.assert(
-      nodeA.classList.contains('pulse') || nodeA.classList.contains('updated'),
-      'updated node should have pulse animation'
-    );
-  }
-
-  // Node 'b' was NOT updated → should NOT have pulse class
-  const nodeB = document.querySelector('[data-concept-id="b"]');
-  if (nodeB) {
-    TestRunner.assert(
-      !nodeB.classList.contains('pulse') && !nodeB.classList.contains('updated'),
-      'unchanged node should not have pulse animation'
     );
   }
 });

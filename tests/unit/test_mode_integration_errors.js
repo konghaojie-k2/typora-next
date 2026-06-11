@@ -126,33 +126,9 @@ TestRunner.test('onQuizStart error shows toast with error message', async () => 
   TestRunner.assertEquals(toastType, 'error', 'Toast type should be error');
 });
 
-TestRunner.test('onAiExplainClick error shows error modal', async () => {
-  setupEnv({
-    invokeFn: () => Promise.reject(new Error('AI timeout')),
-    selectedText: '选中文字'
-  });
-
-  const LMI = loadIntegration();
-  document.body.classList.add('learning-mode');
-  LMI.setupSelectionExplainer();
-
-  const aiBtn = document.getElementById('aiExplainBtn');
-  aiBtn.style.display = '';
-  aiBtn.click();
-
-  await new Promise(r => setTimeout(r, 50));
-
-  const modal = document.getElementById('learningExplanationModal');
-  TestRunner.assertExists(modal, 'Error modal should be created');
-  TestRunner.assert(
-    modal._innerHTML.includes('❌ 解释失败'),
-    'Modal title should indicate failure'
-  );
-  TestRunner.assert(
-    modal._innerHTML.includes('AI timeout'),
-    'Modal should contain error detail'
-  );
-});
+// NOTE: Sprint 6 replaced modal-based explain with Cornell sidebar.
+// Error handling now updates sidebar cues instead of creating a modal.
+// See test_explain_conversation.js for Sprint 6 explain tests.
 
 TestRunner.test('teardown does not throw when DOM elements are missing', () => {
   setupEnv();

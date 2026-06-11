@@ -947,26 +947,27 @@
           toolbarRight.insertBefore(badge, toolbarRight.firstChild);
         }
       }
-      // Sprint 8a: Socratic dev quick-trigger button (gated by localStorage flag)
-      const socraticBtn = document.getElementById('openSocraticBtn');
-      if (socraticBtn) {
-        const devOn = window.SocraticTrigger?.isDevQuickTriggerEnabled?.();
-        socraticBtn.style.display = devOn ? 'inline-flex' : 'none';
-        socraticBtn.title = devOn
-          ? '立即 Socratic 复习 (Ctrl+Shift+S) — DEV'
-          : '已隐藏：DevTools 执行 localStorage.setItem("socratic-dev-trigger","true") 开启';
-      }
-    } else {
-      if (badge) badge.remove();
-      // Sprint 8a: hide Socratic dev quick-trigger button
-      const socraticBtn = document.getElementById('openSocraticBtn');
-      if (socraticBtn) socraticBtn.style.display = 'none';
+    } else if (badge) {
+      badge.remove();
     }
 
     // S4: teardown learning mode integrations when exiting
     if (!enabled && window.LearningModeIntegration) {
       window.LearningModeIntegration.teardown();
     }
+
+    // Sprint 8a: update Socratic quick-trigger button visual state (always visible)
+    _updateSocraticButtonState();
+  }
+
+  function _updateSocraticButtonState() {
+    const socraticBtn = document.getElementById('openSocraticBtn');
+    if (!socraticBtn) return;
+    const devOn = window.SocraticTrigger?.isDevQuickTriggerEnabled?.();
+    socraticBtn.title = devOn
+      ? '立即 Socratic 复习 (Ctrl+Shift+S) — DEV 已启用'
+      : 'Socratic 快捷入口（已禁用）。DevTools 执行: localStorage.setItem("socratic-dev-trigger","true")';
+    socraticBtn.style.opacity = devOn ? '1' : '0.4';
   }
 
   function renderFileTree(entries, container = null, depth = 0) {
@@ -2887,6 +2888,8 @@
     const socraticQuickBtn = document.getElementById('openSocraticBtn');
     if (socraticQuickBtn) {
       socraticQuickBtn.addEventListener('click', () => {
+        // Re-check the dev flag on every click (user may have just enabled it in DevTools)
+        _updateSocraticButtonState();
         if (!window.SocraticTrigger?.isDevQuickTriggerEnabled?.()) {
           showToast('Socratic 快捷入口已禁用。开发模式：在 DevTools 执行 localStorage.setItem("socratic-dev-trigger","true")', 'info', 5000);
           return;
@@ -2894,6 +2897,8 @@
         openSocraticReview();
       });
     }
+    // Re-check flag when window regains focus (user comes back from DevTools)
+    window.addEventListener('focus', _updateSocraticButtonState);
     document.addEventListener('keydown', (e) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'S' && window.LearningProgress) {
         e.preventDefault();

@@ -228,6 +228,14 @@ function _socraticSelectCluster({ projectPath }) {
     frontier.push(...next);
   }
 
+  // Fallback: if KG is sparse, include remaining nodes up to available count
+  const remaining = nodes.filter(n => !visited.has(n.id)).map(n => n.id);
+  for (const id of remaining) {
+    if (cluster.length >= targetSize) break;
+    cluster.push(id);
+    visited.add(id);
+  }
+
   const conceptRefs = cluster.map(id => {
     const n = nodes.find(x => x.id === id);
     return { id, title: n?.title || id, source_chapter: n?.source_chapter || '' };
@@ -248,16 +256,37 @@ function _socraticSelectCluster({ projectPath }) {
   };
 }
 
-function _socraticChat({ messages, concept_titles }) {
-  // Mock LLM response: alternate between asking a follow-up and ending
-  const turnCount = (messages || []).length;
-  if (turnCount >= 4) {
-    return { content: '好，本场 Socratic 复习到此结束。', done: true };
-  }
+function _socraticChat({ projectPath, conceptTitles }) {
+  // Round 2: Simulate realistic AI responses (contract testing baseline)
+  // Returns non-stub, concept-relevant questions instead of Sprint 8a placeholder
+  const titles = conceptTitles || [];
+  const turns = global.__SOCRATIC_TURNS__ || [];
+  const turnCount = turns.length;
+
+  // Simulate progressive questioning based on turn count
   if (turnCount === 0) {
-    return { content: `说说这些概念之间是什么关系：${(concept_titles || []).join('、')}`, done: false };
+    return {
+      content: `Let's explore how ${titles.join(', ')} relate to each other. What connections do you see?`,
+      done: false
+    };
   }
-  return { content: '能再具体讲讲吗？', done: false };
+  if (turnCount === 1) {
+    return {
+      content: `Interesting. Can you explain the mechanism behind ${titles[0]} in more detail?`,
+      done: false
+    };
+  }
+  if (turnCount === 2) {
+    return {
+      content: `How would you apply ${titles.join(' and ')} to a real-world scenario?`,
+      done: false
+    };
+  }
+  // End after 3 rounds
+  return {
+    content: `Great discussion. That concludes our Socratic review. [SESSION_END]`,
+    done: true
+  };
 }
 
 function _socraticSaveSession({ projectPath, session }) {

@@ -2524,7 +2524,7 @@ struct SocraticChatMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct SocraticChatResponse {
+pub struct SocraticChatResponse {
     content: String,
     done: bool,
 }
@@ -2712,21 +2712,6 @@ async fn socratic_save_session(project_path: String, session: SocraticSessionDat
     Ok(file_path.display().to_string())
 }
 
-#[tauri::command]
-async fn socratic_chat(
-    messages: Vec<SocraticChatMessage>,
-    concept_titles: Vec<String>,
-) -> Result<SocraticChatResponse, String> {
-    // Sprint 8a MVP: LLM integration deferred to Sprint 8b.
-    // Return a stub response so the chat flow can be wired up end-to-end
-    // without requiring LLM config.
-    let _ = (messages, concept_titles); // suppress unused warnings
-    Ok(SocraticChatResponse {
-        content: "（Sprint 8a MVP: LLM 集成将在 Sprint 8b 接入）".to_string(),
-        done: true,
-    })
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2820,11 +2805,11 @@ pub fn run() {
             open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
-            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::explain_selection_v2,
+            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
             create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
-            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, socratic_chat
+            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

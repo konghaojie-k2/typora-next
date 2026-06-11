@@ -701,90 +701,9 @@ pub async fn evaluate_quiz(
     Ok(result)
 }
 
-/// Explain selected text using Agent SDK (Sprint 3 task 3.5)
-/// Decision: max 300 characters per explanation (生活化类比)
-#[tauri::command]
-pub async fn explain_selection(
-    text: String,
-    context: String,
-    app_handle: AppHandle,
-    _agent_process: State<'_, AgentProcess>,
-) -> Result<String, String> {
-    log::info!("[Sprint3] explain_selection START: text_len={}, context_len={}", text.len(), context.len());
-
-    // Limit input size to prevent abuse
-    let text = if text.len() > 200 {
-        log::info!("[Sprint3] explain_selection: text truncated from {} to 200 chars", text.len());
-        text.chars().take(200).collect()
-    } else {
-        text
-    };
-
-    let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
-    let bridge_path = get_agent_bridge_path()?;
-    log::info!("[Sprint3] explain_selection: bridge_path={:?}", bridge_path);
-
-    // Use nested { config, args } format consistent with plan/generate stages
-    let payload = serde_json::json!({
-        "config": {
-            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
-            "ai_base_url": config.ai_base_url,
-            "api_key": config.api_key,
-            "model": config.model,
-        },
-        "args": {
-            "text": text,
-            "context": context,
-            "maxLength": 300,
-        }
-    });
-    log::info!("[Sprint3] explain_selection: payload={}", payload);
-
-    let mut cmd = std::process::Command::new("node");
-    cmd.arg(&bridge_path)
-        .arg("explain")
-        .arg(payload.to_string())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    log::info!("[Sprint3] explain_selection: spawning node process...");
-    let output = cmd.output()
-        .map_err(|e| {
-            log::error!("[Sprint3] explain_selection: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
-
-    log::info!("[Sprint3] explain_selection: exit_code={:?}, stdout_len={}, stderr_len={}",
-        output.status.code(), output.stdout.len(), output.stderr.len());
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[Sprint3] explain_selection: agent failed: stderr={}", stderr);
-        return Err(format!("Agent explanation failed: {}", stderr));
-    }
-
-    let explanation = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    log::info!("[Sprint3] explain_selection: explanation_len={}", explanation.len());
-
-    if explanation.is_empty() {
-        log::error!("[Sprint3] explain_selection: agent returned empty output");
-        return Err("Agent returned empty explanation".to_string());
-    }
-
-    log::info!("[Sprint3] explain_selection SUCCESS");
-    Ok(explanation)
-}
-
 // ============================================
-// Sprint 6 PB1/PB2: explain_selection_v2
-// Replaces explain_selection with ureq direct LLM call
+// Sprint 6 PB1/PB2: explain_selection
+// Direct ureq LLM call (replaced Sprint 3 agent-bridge approach)
 // ============================================
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -799,7 +718,7 @@ pub struct ExplainV2Response {
     pub suggested_questions: Vec<String>,
 }
 
-/// Build LLM prompt for explain_selection_v2
+/// Build LLM prompt for explain_selection
 /// Pure function — extracted for testability
 pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Option<&[QAItem]>) -> String {
     let mut parts: Vec<String> = Vec::new();
@@ -894,13 +813,13 @@ pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
 }
 
 #[tauri::command]
-pub async fn explain_selection_v2(
+pub async fn explain_selection(
     text: String,
     context: Option<String>,
     previous_qa: Option<Vec<QAItem>>,
     app_handle: AppHandle,
 ) -> Result<ExplainV2Response, String> {
-    log::info!("[Sprint6] explain_selection_v2 START: text_len={}", text.len());
+    log::info!("[Sprint6] explain_selection START: text_len={}", text.len());
 
     // Get config
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
@@ -971,7 +890,7 @@ pub async fn explain_selection_v2(
     // Parse structured response
     let result = parse_explain_response(raw_content);
 
-    log::info!("[Sprint6] explain_selection_v2 SUCCESS: explanation_len={}, questions={}",
+    log::info!("[Sprint6] explain_selection SUCCESS: explanation_len={}, questions={}",
         result.explanation.len(), result.suggested_questions.len());
     Ok(result)
 }
@@ -1046,4 +965,78 @@ pub async fn load_chapter_explanations(
     chapter: String,
 ) -> Result<crate::explanation_persistence::ChapterExplanations, String> {
     crate::explanation_persistence::load(&project_path, &chapter)
+}
+
+// ============================================
+// Sprint 8b: Socratic Review via Agent SDK
+// ============================================
+
+#[tauri::command]
+pub async fn socratic_chat(
+    project_path: String,
+    concept_titles: Vec<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<crate::SocraticChatResponse, String> {
+    log::info!("[Sprint8b] socratic_chat START: project={}, concepts={:?}", project_path, concept_titles);
+
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+    log::info!("[Sprint8b] socratic_chat: bridge_path={:?}", bridge_path);
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "concept_titles": concept_titles,
+        }
+    });
+    log::info!("[Sprint8b] socratic_chat: payload={}", payload);
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("socratic")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[Sprint8b] socratic_chat: spawning node process...");
+    let output = cmd.output()
+        .map_err(|e| {
+            log::error!("[Sprint8b] socratic_chat: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    log::info!("[Sprint8b] socratic_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
+        output.status.code(), output.stdout.len(), output.stderr.len());
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[Sprint8b] socratic_chat: agent failed: stderr={}", stderr);
+        return Err(format!("Agent socratic review failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::info!("[Sprint8b] socratic_chat: raw_stdout={}", stdout);
+
+    // Parse JSON response: { "content": "...", "done": true/false }
+    let result: crate::SocraticChatResponse = serde_json::from_str(&stdout)
+        .map_err(|e| {
+            log::error!("[Sprint8b] socratic_chat: parse failed: {} — raw: {}", e, stdout);
+            format!("Failed to parse socratic response: {}. Raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())])
+        })?;
+
+    log::info!("[Sprint8b] socratic_chat SUCCESS: content_len={}, done={}", result.content.len(), result.done);
+    Ok(result)
 }
