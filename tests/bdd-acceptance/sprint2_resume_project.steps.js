@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 
 require('./mock-tauri');
 const { ProjectDetector } = require('../../dist/scripts/learning/project-resume');

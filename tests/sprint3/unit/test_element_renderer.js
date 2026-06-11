@@ -5,7 +5,7 @@
  * Module: dist/scripts/learning/element-renderer.js
  */
 
-const T = require('../../unit/test-runner');
+const T = require('../../shared/test-runner');
 const { JSDOM } = (() => {
   try { return require('jsdom'); } catch { return null; }
 })() || {};
@@ -34,7 +34,7 @@ function beforeLoad() {
     }
   }
   try {
-    ElementRenderer = require('../../../dist/scripts/learning/element-renderer');
+    ElementRenderer = require('../../../../dist/scripts/learning/element-renderer');
   } catch (e) {
     ElementRenderer = null;
   }

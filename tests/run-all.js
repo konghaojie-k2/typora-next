@@ -1,13 +1,16 @@
+#!/usr/bin/env node
+// -*- coding: utf-8 -*-
 /**
- * Unified Test Runner (Sprint-based)
+ * Unified Test Runner — Sprint-based auto-discovery
  *
  * Usage:
- *   node tests/run-all.js              # Run ALL sprints
- *   node tests/run-all.js --sprint=1   # Only Sprint 1
- *   node tests/run-all.js --sprint=2   # Only Sprint 2
- *   node tests/run-all.js --unit       # Only unit tests (all sprints)
- *   node tests/run-all.js --bdd        # Only BDD tests (all sprints)
- *   node tests/run-all.js --sprint=2 --bdd  # Sprint 2 BDD only
+ *   node tests/run-all.js                    # Run ALL tests (unit + integration + bdd + acceptance)
+ *   node tests/run-all.js --unit             # Only unit tests
+ *   node tests/run-all.js --integration      # Only integration tests
+ *   node tests/run-all.js --bdd              # Only BDD tests (in-memory step defs)
+ *   node tests/run-all.js --acceptance       # Only BDD acceptance tests (real filesystem)
+ *   node tests/run-all.js --sprint=1         # Only Sprint 1 (all types)
+ *   node tests/run-all.js --sprint=2 --unit  # Sprint 2 unit tests only
  */
 
 const { execSync } = require('child_process');
@@ -23,75 +26,76 @@ const RESET = '\x1b[0m';
 const args = process.argv.slice(2);
 const sprintFilter = args.find(a => a.startsWith('--sprint='));
 const targetSprint = sprintFilter ? parseInt(sprintFilter.split('=')[1]) : null;
-const hasTypeFlag = args.includes('--unit') || args.includes('--integration') || args.includes('--bdd');
-const runAll = !hasTypeFlag; // No type flag = run all types
+const hasTypeFlag = args.includes('--unit') || args.includes('--integration') || args.includes('--bdd') || args.includes('--acceptance');
+const runAll = !hasTypeFlag;
 const runUnit = runAll || args.includes('--unit');
 const runIntegration = runAll || args.includes('--integration');
 const runBDD = runAll || args.includes('--bdd');
+const runAcceptance = runAll || args.includes('--acceptance');
 
 let totalPassed = 0;
 let totalFailed = 0;
 
-// Sprint configurations
-const SPRINTS = [
-  {
-    id: 1,
-    name: 'Sprint 1: 学习项目骨架',
-    unitTests: [
-      'tests/sprint1/unit/test_agent_bridge.js',
-      'tests/sprint1/unit/test_project_manager.js',
-      'tests/sprint1/unit/test_project_manager_impl.js',
-    ],
-    integrationTests: [
-      'tests/sprint1/integration/test_agent_bridge.js',
-    ],
-    featureDir: 'tests/sprint1/features',
-    stepsFile: 'tests/sprint1/steps/steps.js',
-  },
-  {
-    id: 2,
-    name: 'Sprint 2: 逐章生成 + 后台预生成',
-    unitTests: [
-      'tests/sprint2/unit/test_progress_tracker.js',
-      'tests/sprint2/unit/test_learning_renderer.js',
-      'tests/sprint2/unit/test_project_folder.js',
-    ],
-    integrationTests: [],
-    featureDir: 'tests/sprint2/features',
-    stepsFile: 'tests/sprint2/steps/steps.js',
-  },
-  {
-    id: 3,
-    name: 'Sprint 3: 学习模式渲染 + 测验',
-    unitTests: [],
-    integrationTests: [],
-    featureDir: 'tests/sprint3/features',
-    stepsFile: null, // Not implemented yet
-  },
-  {
-    id: 4,
-    name: 'Sprint 4: 进度追踪 + 知识图谱 + 遗忘曲线',
-    unitTests: [],
-    integrationTests: [],
-    featureDir: 'tests/sprint4/features',
-    stepsFile: null, // Not implemented yet
-  },
-];
+const TESTS_ROOT = path.join(__dirname);
 
-function runTestSuite(name, command, cwd) {
+/**
+ * Auto-discover tests for a given sprint
+ */
+function discoverSprint(sprintNum) {
+  const base = path.join(TESTS_ROOT, `sprint${sprintNum}`);
+  if (!fs.existsSync(base)) return null;
+
+  const sprint = {
+    id: sprintNum,
+    name: `Sprint ${sprintNum}`,
+    unitTests: [],
+    integrationTests: [],
+    hasBDD: false,
+  };
+
+  // Discover unit tests
+  const unitDir = path.join(base, 'unit');
+  if (fs.existsSync(unitDir)) {
+    sprint.unitTests = fs.readdirSync(unitDir)
+      .filter(f => f.startsWith('test_') && f.endsWith('.js'))
+      .map(f => path.join(unitDir, f));
+  }
+
+  // Discover integration tests
+  const integrationDir = path.join(base, 'integration');
+  if (fs.existsSync(integrationDir)) {
+    sprint.integrationTests = fs.readdirSync(integrationDir)
+      .filter(f => f.startsWith('test_') && f.endsWith('.js'))
+      .map(f => path.join(integrationDir, f));
+  }
+
+  // Discover BDD tests
+  const featureDir = path.join(base, 'features');
+  const stepsFile = path.join(base, 'steps', 'steps.js');
+  if (fs.existsSync(featureDir) && fs.existsSync(stepsFile)) {
+    sprint.featureDir = featureDir;
+    sprint.stepsFile = stepsFile;
+    sprint.hasBDD = true;
+  }
+
+  return sprint;
+}
+
+function runTestSuite(name, testFile) {
   console.log(`\n${CYAN}═══════════════════════════════════════${RESET}`);
   console.log(`${CYAN}  ${name}${RESET}`);
   console.log(`${CYAN}═══════════════════════════════════════${RESET}\n`);
 
   try {
-    const output = execSync(command, {
-      cwd: cwd || process.cwd(),
+    const output = execSync(`node "${testFile}"`, {
+      cwd: process.cwd(),
       encoding: 'utf-8',
-      stdio: 'pipe'
+      stdio: 'pipe',
+      timeout: 60000,
     });
     console.log(output);
 
-    const match = output.match(/(\d+) passed, (\d+) failed/);
+    const match = output.match(/(\d+)\s+passed,?\s*(\d+)\s+failed/);
     if (match) {
       totalPassed += parseInt(match[1]);
       totalFailed += parseInt(match[2]);
@@ -99,7 +103,7 @@ function runTestSuite(name, command, cwd) {
     return true;
   } catch (e) {
     console.log(e.stdout || e.message);
-    const match = (e.stdout || '').match(/(\d+) passed, (\d+) failed/);
+    const match = (e.stdout || '').match(/(\d+)\s+passed,?\s*(\d+)\s+failed/);
     if (match) {
       totalPassed += parseInt(match[1]);
       totalFailed += parseInt(match[2]);
@@ -109,8 +113,8 @@ function runTestSuite(name, command, cwd) {
 }
 
 async function runBDDForSprint(sprint) {
-  if (!sprint.stepsFile) {
-    console.log(`\n${YELLOW}  ⏭️  ${sprint.name} - BDD steps not implemented yet${RESET}`);
+  if (!sprint.hasBDD) {
+    console.log(`\n${YELLOW}  ⏭️  ${sprint.name} — BDD steps not found${RESET}`);
     return;
   }
 
@@ -119,33 +123,91 @@ async function runBDDForSprint(sprint) {
   console.log(`${CYAN}═══════════════════════════════════════${RESET}\n`);
 
   const { runFeatures } = require('./shared/runner');
-  const sprintSteps = require(path.join(__dirname, '..', sprint.stepsFile));
+  const sprintSteps = require(sprint.stepsFile);
 
-  const result = await runFeatures(path.join(__dirname, '..', sprint.featureDir), sprintSteps);
+  const result = await runFeatures(sprint.featureDir, sprintSteps);
   totalPassed += result.passed;
   totalFailed += result.failed;
 }
 
+async function runAcceptanceTests() {
+  const acceptanceRunner = path.join(TESTS_ROOT, 'bdd-acceptance', 'runner.js');
+  if (!fs.existsSync(acceptanceRunner)) {
+    console.log(`\n${YELLOW}  ⏭️  BDD Acceptance runner not found${RESET}`);
+    return;
+  }
+
+  console.log(`\n${CYAN}═══════════════════════════════════════${RESET}`);
+  console.log(`${CYAN}  BDD Acceptance Tests${RESET}`);
+  console.log(`${CYAN}═══════════════════════════════════════${RESET}\n`);
+
+  try {
+    const output = execSync(`node "${acceptanceRunner}"`, {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 120000,
+    });
+    console.log(output);
+
+    const match = output.match(/(\d+)\s+passed.*?\s*(\d+)\s+failed/);
+    if (match) {
+      totalPassed += parseInt(match[1]);
+      totalFailed += parseInt(match[2]);
+    }
+  } catch (e) {
+    console.log(e.stdout || e.message);
+    const match = (e.stdout || '').match(/(\d+)\s+passed.*?\s*(\d+)\s+failed/);
+    if (match) {
+      totalPassed += parseInt(match[1]);
+      totalFailed += parseInt(match[2]);
+    }
+  }
+}
+
 async function main() {
-  console.log(`${YELLOW}🧪 AI Learning Designer - Test Suite${RESET}`);
+  console.log(`${YELLOW}🧪 Typora Next — Unified Test Suite${RESET}`);
   console.log(`${YELLOW}Working directory: ${process.cwd()}${RESET}`);
   if (targetSprint) {
     console.log(`${YELLOW}Filter: Sprint ${targetSprint}${RESET}`);
   }
+  if (hasTypeFlag) {
+    const types = [];
+    if (args.includes('--unit')) types.push('unit');
+    if (args.includes('--integration')) types.push('integration');
+    if (args.includes('--bdd')) types.push('bdd');
+    if (args.includes('--acceptance')) types.push('acceptance');
+    console.log(`${YELLOW}Filter: ${types.join(', ')} only${RESET}`);
+  }
+
+  // Discover sprints
+  const sprints = [];
+  for (let i = 1; i <= 8; i++) {
+    const sprint = discoverSprint(i);
+    if (sprint && (
+      sprint.unitTests.length > 0 ||
+      sprint.integrationTests.length > 0 ||
+      sprint.hasBDD
+    )) {
+      sprints.push(sprint);
+    }
+  }
 
   const sprintsToRun = targetSprint
-    ? SPRINTS.filter(s => s.id === targetSprint)
-    : SPRINTS;
+    ? sprints.filter(s => s.id === targetSprint)
+    : sprints;
+
+  if (sprintsToRun.length === 0) {
+    console.log(`${RED}No sprints found matching filter${RESET}`);
+    process.exit(1);
+  }
 
   for (const sprint of sprintsToRun) {
     // Unit tests
     if (runUnit) {
       for (const testFile of sprint.unitTests) {
         const testName = path.basename(testFile, '.js');
-        runTestSuite(
-          `Unit [Sprint ${sprint.id}]: ${testName}`,
-          `node ${testFile}`
-        );
+        runTestSuite(`Unit [Sprint ${sprint.id}]: ${testName}`, testFile);
       }
     }
 
@@ -153,10 +215,7 @@ async function main() {
     if (runIntegration) {
       for (const testFile of sprint.integrationTests) {
         const testName = path.basename(testFile, '.js');
-        runTestSuite(
-          `Integration [Sprint ${sprint.id}]: ${testName}`,
-          `node ${testFile}`
-        );
+        runTestSuite(`Integration [Sprint ${sprint.id}]: ${testName}`, testFile);
       }
     }
 
@@ -164,6 +223,11 @@ async function main() {
     if (runBDD) {
       await runBDDForSprint(sprint);
     }
+  }
+
+  // Acceptance tests (run once, not per-sprint)
+  if (runAcceptance && !targetSprint) {
+    await runAcceptanceTests();
   }
 
   // Summary

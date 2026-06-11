@@ -62,7 +62,7 @@ global.window = {
 const TestRunner = require('../../shared/test-runner');
 
 // Load implementation (will initialize with mocked DOM)
-require('../../dist/scripts/learning/project-manager.js');
+require('../../../dist/scripts/learning/project-manager.js');
 
 // ============================================
 // TDD: Public API Tests

@@ -19,7 +19,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 
 const steps = new StepRegistry();
 

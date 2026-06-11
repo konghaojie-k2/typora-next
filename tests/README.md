@@ -10,23 +10,34 @@
 ```
 tests/
 ├── README.md                      # 本规范
-├── features/                      # BDD Gherkin 场景文件
-│   └── sprint{N}_{pb_title}.feature
-├── step_defs/                     # BDD Step Definitions（JS）
-│   ├── runner.js                  # Gherkin 解析器（共享）
-│   └── sprint{N}_steps.js         # 每 Sprint 独立
-├── integration/                   # JS Integration Tests
-│   └── test_{module}.js
+├── run-all.js                     # 统一测试入口（自动发现各 Sprint 测试）
+├── sprint1/ ~ sprint8/            # 按 Sprint 组织的测试
+│   ├── features/                  # BDD Gherkin 场景文件
+│   │   └── sprint{N}_{pb_title}.feature
+│   ├── steps/                     # BDD Step Definitions（JS）
+│   │   ├── steps.js               # Sprint 专属步骤
+│   │   └── common.js              # 跨 Sprint 共享步骤（可选）
+│   ├── unit/                      # JS 单元测试
+│   │   └── test_{module}.js
+│   └── integration/               # JS Integration Tests（可选）
+│       └── test_{module}.js
+├── bdd-acceptance/                # BDD 验收测试（真实文件系统层）
+│   ├── runner.js
+│   └── sprint{N}_{pb_title}.steps.js
 ├── e2e/                           # CLI 端到端测试
-│   └── cli_test.js
-├── unit/                          # JS 单元测试
-│   ├── test-runner.js             # 共享测试框架
-│   └── test_{module}.js
-└── mock-agent-sdk/                # Mock Agent SDK
-    └── index.js
+│   └── cli-test.js
+├── samples/                       # 测试用 Markdown 样本
+├── mock-agent-sdk/                # Mock Agent SDK
+│   └── index.js
+└── shared/                        # 跨 Sprint 共享工具
+    ├── runner.js                  # Gherkin 解析器 + StepRegistry
+    ├── test-runner.js             # 轻量测试框架（零外部依赖）
+    ├── mock-dom.js                # Mock DOM 辅助
+    └── steps/
+        └── common.js              # 跨 Sprint 共享步骤
 
 src-tauri/tests/                    # Rust Integration Tests
-└── ai_agent_test.rs
+└── *_test.rs
 ```
 
 **规则**：
@@ -118,8 +129,23 @@ fn test_feature_scenario() {
 
 **运行方式**：
 ```bash
-# JS 测试
-cd tests/unit && node test_module.js
+# 运行全部测试
+node tests/run-all.js
+
+# 只运行某个 Sprint
+node tests/run-all.js --sprint=1
+
+# 只运行单元测试
+node tests/run-all.js --unit
+
+# 只运行 BDD 测试
+node tests/run-all.js --bdd
+
+# 只运行验收测试（真实文件系统）
+node tests/run-all.js --acceptance
+
+# 运行单个单元测试文件
+node tests/sprint1/unit/test_project_manager.js
 
 # Rust 测试（主仓库）
 cd src-tauri && cargo test --test some_module_test
@@ -175,10 +201,11 @@ Step 8: BDD 场景验证 → 全部通过
 
 一个 Sprint **完成**当且仅当：
 
-- [ ] BDD: `node tests/run-all.js --bdd` 该 Sprint 的 feature 全绿
-- [ ] TDD JS: `node tests/unit/test_*.js` 全绿
+- [ ] BDD: `node tests/run-all.js --bdd --sprint=N` 该 Sprint 的 feature 全绿
+- [ ] TDD JS: `node tests/run-all.js --unit --sprint=N` 全绿
 - [ ] TDD Rust: `cargo test --test *_test` 全绿（主仓库执行）
-- [ ] Integration: `node tests/integration/test_*.js` 全绿
+- [ ] Integration: `node tests/run-all.js --integration --sprint=N` 全绿
+- [ ] Acceptance: `node tests/run-all.js --acceptance` 全绿
 - [ ] 无编译错误：`cargo check` 通过
 
 ---

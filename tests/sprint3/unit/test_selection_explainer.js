@@ -5,7 +5,7 @@
  * Module: dist/scripts/learning/selection-explainer.js
  */
 
-const T = require('../../unit/test-runner');
+const T = require('../../shared/test-runner');
 
 if (typeof T.assertEquals === 'undefined') {
   T.assertEquals = function(a, b, msg) {
@@ -45,7 +45,7 @@ if (typeof global.document === 'undefined') {
 
 let SelectionExplainer;
 try {
-  SelectionExplainer = require('../../../dist/scripts/learning/selection-explainer');
+  SelectionExplainer = require('../../../../dist/scripts/learning/selection-explainer');
 } catch (e) {
   SelectionExplainer = null;
 }

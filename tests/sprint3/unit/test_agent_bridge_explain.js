@@ -5,7 +5,7 @@
  * Module: agent-bridge.js
  */
 
-const T = require('../../unit/test-runner');
+const T = require('../../shared/test-runner');
 
 // Load module under test (require the bridge file)
 const bridge = require('../../../agent-bridge');

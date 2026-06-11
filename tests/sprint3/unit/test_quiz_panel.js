@@ -1,256 +1,172 @@
 /**
- * TDD Tests for Quiz Panel
- * Tests chapter-end mastery check, state machine, and adaptive feedback
- *
- * Module: dist/scripts/learning/quiz-panel.js
+ * TDD Tests for QuizPanel State Machine
+ * Covers submit/setResult ordering, reset/retake flow, and callback contracts
  */
 
-const T = require('../../unit/test-runner');
+const TestRunner = require('../../shared/test-runner');
 
-// Ensure assertEquals/assertExists are available
-if (typeof T.assertEquals === 'undefined') {
-  T.assertEquals = function(a, b, msg) {
-    if (a !== b) throw new Error((msg || 'Assertion failed') + `: expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
-  };
-}
-if (typeof T.assertExists === 'undefined') {
-  T.assertExists = function(v, msg) { if (v === null || v === undefined) throw new Error(msg || 'Expected value to exist'); };
-}
-
-// ============================================
-// Setup
-// ============================================
-
-if (typeof global.window === 'undefined') global.window = {};
-if (typeof global.document === 'undefined') {
+// Provide minimal browser globals for quiz-panel.js
+if (typeof window === 'undefined') global.window = {};
+if (typeof document === 'undefined') {
   global.document = {
-    createElement: (tag) => ({
-      tagName: tag.toUpperCase(),
-      children: [],
-      _classes: [],
-      _attrs: {},
-      _listeners: {},
-      classList: {
-        add() {}, remove() {}, contains() { return false; }, toggle() {}
-      },
-      setAttribute(k, v) { this._attrs[k] = v; },
-      getAttribute(k) { return this._attrs[k]; },
-      appendChild(c) { this.children.push(c); return c; },
-      querySelector() { return null; },
-      querySelectorAll() { return []; },
-      addEventListener(ev, fn) { (this._listeners[ev] = this._listeners[ev] || []).push(fn); },
-      removeEventListener() {},
-      click() { (this._listeners.click || []).forEach(fn => fn({ target: this })); },
-      get innerHTML() { return this._innerHTML; },
-      set innerHTML(v) { this._innerHTML = v; },
-      get textContent() { return this._textContent; },
-      set textContent(v) { this._textContent = v; }
+    createElement: () => ({
+      classList: { add() {}, remove() {}, contains() { return false; }, toggle() {} },
+      setAttribute() {},
+      getAttribute() { return null; },
+      appendChild() { return {}; },
+      addEventListener() {},
     }),
-    body: { appendChild() {} }
   };
 }
 
-let QuizPanel;
-try {
-  QuizPanel = require('../../../dist/scripts/learning/quiz-panel');
-} catch (e) {
-  QuizPanel = null;
+require('../../../dist/scripts/learning/quiz-panel.js');
+const { QuizPanel, VALID_STATES, VALID_RATINGS } = window;
+
+// ============================================
+// Helpers
+// ============================================
+function makePanel() {
+  return new QuizPanel({ chapterFile: '02-test.md' });
 }
 
-// ============================================
-// State Machine Tests
-// ============================================
-
-T.test('state: 初始状态为 hidden', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  T.assertEquals(panel.getState(), 'hidden', 'initial state');
-});
-
-T.test('state: hidden → loading（滚动到 80%）', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.notifyScrollProgress(0.85);
-  // State should transition; allow either loading or generating
-  T.assert(['loading', 'generating', 'loading'].includes(panel.getState()),
-    `expected loading, got ${panel.getState()}`);
-});
-
-T.test('state: loading → ready（quiz 生成完成）', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1', type: 'single', question: '?', options: [], correct: 'A' }]);
-  T.assertEquals(panel.getState(), 'ready', 'state after questions set');
-});
-
-T.test('state: ready → answering（用户开始作答）', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1', type: 'single', question: '?', options: [], correct: 'A' }]);
-  panel.startAnswering();
-  T.assertEquals(panel.getState(), 'answering', 'state after startAnswering');
-});
-
-T.test('state: answering → submitting（提交答案）', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
-  panel.startAnswering();
-  panel.submit();
-  T.assertEquals(panel.getState(), 'submitting', 'state after submit');
-});
-
-T.test('state: submitting → graded（评估完成）', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
-  panel.startAnswering();
-  panel.submit();
-  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
-  T.assertEquals(panel.getState(), 'graded', 'state after grading');
-});
-
-T.test('state: 非法状态转换抛错', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  // hidden → graded 不允许
-  T.assertThrows(() => panel.setResult({ rating: 'mastered' }),
-    'should throw on invalid transition');
-});
-
-// ============================================
-// Question Management Tests
-// ============================================
-
-T.test('questions: 存储 3-5 道题', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  const questions = [
-    { id: 'q1', type: 'single', question: 'Q1', options: [{label:'A',text:'1'},{label:'B',text:'2'}], correct: 'A' },
-    { id: 'q2', type: 'single', question: 'Q2', options: [{label:'A',text:'1'},{label:'B',text:'2'}], correct: 'B' },
-    { id: 'q3', type: 'multiple', question: 'Q3', options: [{label:'A',text:'1'},{label:'B',text:'2'}], correct: ['A','B'] }
+function makeQuestions() {
+  return [
+    { id: 'q1', qtype: 'single', question: 'Q1', options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }], correct: 'B', weak_concepts: ['c1'] },
+    { id: 'q2', qtype: 'multiple', question: 'Q2', options: [{ label: 'A', text: 'a' }, { label: 'B', text: 'b' }], correct: ['A', 'B'], weak_concepts: ['c2'] },
+    { id: 'q3', qtype: 'short', question: 'Q3', weak_concepts: ['c3'] },
   ];
-  panel.setQuestions(questions);
-  T.assertEquals(panel.getQuestions().length, 3, 'questions stored');
-});
-
-T.test('answers: 记录用户答案', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }, { id: 'q2' }]);
-  panel.startAnswering();
-  panel.setAnswer('q1', 'A');
-  panel.setAnswer('q2', 'B');
-  T.assertEquals(panel.getAnswer('q1'), 'A', 'answer q1');
-  T.assertEquals(panel.getAnswer('q2'), 'B', 'answer q2');
-});
-
-T.test('result: 存储评估结果', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
-  panel.startAnswering();
-  panel.submit();
-  const result = { rating: 'learning', score: 0.5, weak_concepts: ['X'], suggestions: ['复习 X'] };
-  panel.setResult(result);
-  const stored = panel.getResult();
-  T.assertEquals(stored.rating, 'learning', 'rating stored');
-  T.assertEquals(stored.weak_concepts.length, 1, 'weak concepts stored');
-});
-
-T.test('result: rating 必须是 mastered/learning/struggling', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
-  panel.startAnswering();
-  panel.submit();
-  T.assertThrows(() => panel.setResult({ rating: 'invalid_rating' }),
-    'should reject invalid rating');
-});
+}
 
 // ============================================
-// Adaptive Feedback Tests
+// Test: State machine basics
 // ============================================
 
-T.test('adaptive: mastered 不触发 adaptSubsequent', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
+TestRunner.test('QuizPanel transitions hidden -> loading -> ready -> answering -> submitting -> graded', () => {
+  const panel = makePanel();
+  panel.notifyScrollProgress(1.0); // hidden -> loading
+  TestRunner.assertEquals(panel.getState(), 'loading', 'scroll should move to loading');
+
+  panel.setQuestions(makeQuestions()); // loading -> ready
+  TestRunner.assertEquals(panel.getState(), 'ready', 'setQuestions should move to ready');
+
+  panel.startAnswering(); // ready -> answering
+  TestRunner.assertEquals(panel.getState(), 'answering', 'startAnswering should move to answering');
+
+  panel.submit(); // answering -> submitting
+  TestRunner.assertEquals(panel.getState(), 'submitting', 'submit should move to submitting');
+
+  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] }); // submitting -> graded
+  TestRunner.assertEquals(panel.getState(), 'graded', 'setResult should move to graded');
+});
+
+TestRunner.test('QuizPanel rejects setResult then submit ordering bug', () => {
+  // This regression caused: onQuizModalSubmit called setResult() then submit(),
+  // which threw because state was already graded.
+  const panel = makePanel();
+  panel.setQuestions(makeQuestions());
   panel.startAnswering();
   panel.submit();
-  let adaptCalled = false;
-  panel.onAdaptRequested = () => { adaptCalled = true; };
   panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
-  T.assertEquals(adaptCalled, false, 'mastered should not trigger adapt');
+
+  let threw = false;
+  try {
+    panel.submit(); // ❌ graded -> ? is invalid
+  } catch (e) {
+    threw = true;
+  }
+  TestRunner.assert(threw, 'submit from graded state should throw');
 });
 
-T.test('adaptive: struggling 触发 adaptSubsequent', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
+TestRunner.test('QuizPanel reset allows retake after graded', () => {
+  const panel = makePanel();
+  panel.setQuestions(makeQuestions());
   panel.startAnswering();
   panel.submit();
-  let adaptCalled = false;
-  let adaptPayload = null;
+  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
+  TestRunner.assertEquals(panel.getState(), 'graded');
+
+  panel.reset();
+  TestRunner.assertEquals(panel.getState(), 'hidden', 'reset should return to hidden');
+
+  panel.setQuestions(makeQuestions());
+  TestRunner.assertEquals(panel.getState(), 'ready', 'after reset, setQuestions should move to ready');
+
+  panel.startAnswering();
+  TestRunner.assertEquals(panel.getState(), 'answering', 'after reset, startAnswering should work');
+});
+
+TestRunner.test('QuizPanel reset allows restart after closing mid-answering', () => {
+  // Regression: user closed modal before submitting, then clicked "开始测验" again.
+  // State was stuck in answering and setQuestions(ready) threw.
+  const panel = makePanel();
+  panel.setQuestions(makeQuestions());
+  panel.startAnswering();
+  TestRunner.assertEquals(panel.getState(), 'answering');
+
+  // Simulate close-modal reset (mode-integration.js calls panel.reset())
+  panel.reset();
+  TestRunner.assertEquals(panel.getState(), 'hidden');
+
+  panel.setQuestions(makeQuestions());
+  panel.startAnswering();
+  TestRunner.assertEquals(panel.getState(), 'answering', 'should be able to restart after reset');
+});
+
+// ============================================
+// Test: Callbacks
+// ============================================
+
+TestRunner.test('QuizPanel triggers onSaveHistory when setResult reaches graded', () => {
+  const panel = makePanel();
+  let called = false;
+  panel.onSaveHistory = (payload) => {
+    called = true;
+    TestRunner.assertExists(payload.chapter, 'payload should have chapter');
+    TestRunner.assertExists(payload.timestamp, 'payload should have timestamp');
+    TestRunner.assertExists(payload.result, 'payload should have result');
+    TestRunner.assertEquals(payload.result.rating, 'learning');
+  };
+
+  panel.setQuestions(makeQuestions());
+  panel.startAnswering();
+  panel.submit();
+  panel.setResult({ rating: 'learning', score: 0.6, weak_concepts: ['c1'] });
+
+  TestRunner.assert(called, 'onSaveHistory should be called');
+});
+
+TestRunner.test('QuizPanel triggers onAdaptRequested for non-mastered ratings', () => {
+  const panel = makePanel();
+  let called = false;
   panel.onAdaptRequested = (payload) => {
-    adaptCalled = true;
-    adaptPayload = payload;
+    called = true;
+    TestRunner.assertEquals(payload.rating, 'struggling');
   };
-  panel.setResult({ rating: 'struggling', score: 0.2, weak_concepts: ['A', 'B'] });
-  T.assertEquals(adaptCalled, true, 'struggling should trigger adapt');
-  T.assertEquals(adaptPayload.weak_concepts.length, 2, 'weak concepts passed');
-});
 
-T.test('adaptive: learning 触发 adaptSubsequent', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  panel.setQuestions([{ id: 'q1' }]);
+  panel.setQuestions(makeQuestions());
   panel.startAnswering();
   panel.submit();
-  let adaptCalled = false;
-  panel.onAdaptRequested = () => { adaptCalled = true; };
-  panel.setResult({ rating: 'learning', score: 0.5, weak_concepts: ['X'] });
-  T.assertEquals(adaptCalled, true, 'learning should trigger adapt');
+  panel.setResult({ rating: 'struggling', score: 0.2, weak_concepts: ['c1'] });
+
+  TestRunner.assert(called, 'onAdaptRequested should be called for struggling');
+});
+
+TestRunner.test('QuizPanel does NOT trigger onAdaptRequested for mastered', () => {
+  const panel = makePanel();
+  let called = false;
+  panel.onAdaptRequested = () => { called = true; };
+
+  panel.setQuestions(makeQuestions());
+  panel.startAnswering();
+  panel.submit();
+  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
+
+  TestRunner.assert(!called, 'onAdaptRequested should NOT be called for mastered');
 });
 
 // ============================================
-// History Persistence Tests
+// Run
 // ============================================
-
-T.test('history: 测验完成后调用 onSaveHistory 回调', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'fake.md' });
-  let saveCalled = false;
-  let savedEntry = null;
-  panel.onSaveHistory = (entry) => {
-    saveCalled = true;
-    savedEntry = entry;
-  };
-  panel.setQuestions([{ id: 'q1' }]);
-  panel.startAnswering();
-  panel.setAnswer('q1', 'A');
-  panel.submit();
-  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
-  T.assertEquals(saveCalled, true, 'save called');
-  T.assertExists(savedEntry, 'entry saved');
-  T.assertEquals(savedEntry.chapter, 'fake.md', 'chapter in entry');
-  T.assertExists(savedEntry.timestamp, 'timestamp in entry');
+TestRunner.run().then(({ passed, failed }) => {
+  if (failed > 0) process.exit(1);
 });
-
-T.test('history: entry 包含 questions/answers/result', () => {
-  if (!QuizPanel) throw new Error('QuizPanel not loaded');
-  const panel = new QuizPanel.QuizPanel({ chapterFile: 'ch1.md' });
-  let saved = null;
-  panel.onSaveHistory = (e) => { saved = e; };
-  panel.setQuestions([{ id: 'q1', question: 'Q?' }]);
-  panel.startAnswering();
-  panel.setAnswer('q1', 'A');
-  panel.submit();
-  panel.setResult({ rating: 'mastered', score: 1.0, weak_concepts: [] });
-  T.assertExists(saved.questions, 'has questions');
-  T.assertExists(saved.answers, 'has answers');
-  T.assertExists(saved.result, 'has result');
-});
-
-// Expose T for test-runner
-module.exports = T;

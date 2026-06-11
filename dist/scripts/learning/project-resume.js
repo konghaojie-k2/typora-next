@@ -37,7 +37,24 @@
      * Detect if a learning project exists at this path (async, uses Tauri FS)
      * @returns {Promise<object|null>} Project data or null
      */
-    async detect() {
+    detect() {
+      // Node.js test environment fallback: synchronous fs
+      if (!window.__TAURI__ && fs) {
+        try {
+          if (!fs.existsSync(this.jsonPath)) return null;
+          const data = JSON.parse(fs.readFileSync(this.jsonPath, 'utf-8'));
+          if (!data.chapters || !Array.isArray(data.chapters)) return null;
+          return data;
+        } catch (e) {
+          return null;
+        }
+      }
+
+      // Tauri async path
+      return this._detectAsync();
+    }
+
+    async _detectAsync() {
       if (!window.__TAURI__) return null;
 
       try {
@@ -67,7 +84,7 @@
     getChaptersToGenerate(project) {
       if (!project || !project.chapters) return [];
       return project.chapters.filter(ch =>
-        ch.status === '未生成' || ch.status === 'failed' || ch.status === 'not_generated'
+        ch.status === '未生成' || ch.status === '失败' || ch.status === 'failed' || ch.status === 'not_generated'
       );
     }
 

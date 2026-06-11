@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 
 // Load real frontend modules (mock DOM for headless test)
 require('./mock-tauri');

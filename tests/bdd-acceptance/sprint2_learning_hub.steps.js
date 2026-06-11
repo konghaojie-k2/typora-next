@@ -8,7 +8,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 const { setTestFolderDialog, clearTestFolderDialog } = require('./mock-tauri');
 
 // Load real frontend modules (after mock-tauri sets up window.__TAURI__)

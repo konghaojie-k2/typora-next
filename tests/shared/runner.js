@@ -82,13 +82,33 @@ class StepRegistry {
 
   matchPattern(pattern, text) {
     // Convert pattern to regex, supporting both English and Chinese quotes
+    // 注意：pattern 中如需字面 `+` `*` `?` 等 regex 元字符，请用 \{string\} 等占位符，
+    // 或在 step text 中改用其他字面（如 "和"、"与"），避免与 regex 量词冲突。
     let regexStr = pattern
-      .replace(/\{string\}/g, '[""""]([^""""]+)[""""]')
+      .replace(/\{string\}/g, '["""""]([^""""]+)["""""]')
       .replace(/\{int\}/g, '\\s*(\\d+)\\s*')
       .replace(/\{word\}/g, '(\\S+)');
     regexStr = '^' + regexStr + '$';
     const regex = new RegExp(regexStr);
-    return text.match(regex);
+    const match = text.match(regex);
+    if (!match) return null;
+    // Convert captured {int} groups from strings to numbers
+    const intPattern = /\{int\}/g;
+    const intMatches = pattern.match(intPattern);
+    if (intMatches) {
+      let captureIndex = 1;
+      // Walk pattern to find which capture groups are {int}
+      const parts = pattern.split(/(\{string\}|\{int\}|\{word\})/);
+      for (const part of parts) {
+        if (part === '{int}') {
+          match[captureIndex] = parseInt(match[captureIndex], 10);
+        }
+        if (part === '{string}' || part === '{int}' || part === '{word}') {
+          captureIndex++;
+        }
+      }
+    }
+    return match;
   }
 }
 

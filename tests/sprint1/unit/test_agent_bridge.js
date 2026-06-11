@@ -12,7 +12,7 @@ const {
   generateChapters
 } = require('../../../agent-bridge');
 
-const mockSDK = require('../../shared/mock-agent-sdk');
+const mockSDK = require('../../mock-agent-sdk');
 
 // ============================================
 // Test: extractJSON

@@ -13,7 +13,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 
 // 加载纯函数模块
 const { replaceMermaidInSource } = require('../../dist/scripts/mermaid-source-replace');

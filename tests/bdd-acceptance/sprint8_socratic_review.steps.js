@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { StepRegistry } = require('../step_defs/runner');
+const { StepRegistry } = require('../shared/runner');
 
 require('./mock-tauri');
 
@@ -1009,7 +1009,7 @@ steps.then('用户可以继续对话', async function() {
 // ============================================
 
 if (require.main === module) {
-  const { runFeatures } = require('../step_defs/runner');
+  const { runFeatures } = require('../shared/runner');
   runFeatures(path.join(__dirname, '..', 'features'), steps)
     .then(({ passed, failed }) => {
       process.exit(failed > 0 ? 1 : 0);

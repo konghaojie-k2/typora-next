@@ -5,7 +5,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseFeature, StepRegistry } = require('../step_defs/runner');
+const { parseFeature, StepRegistry } = require('../shared/runner');
 
 const GREEN = '\x1b[32m';
 const RED = '\x1b[31m';
@@ -90,7 +90,7 @@ async function runAcceptanceTests() {
 
   // Sprint 4: Review System (遗忘曲线复习)
   console.log(`\n${YELLOW}▶ Sprint 4: Review System${RESET}`);
-  const sprint4FeaturesDir = path.join(__dirname, '../features');
+  const sprint4FeaturesDir = path.join(__dirname, '../sprint4/features');
   const sprint4Steps = require('./sprint4_review.steps');
   const sprint4Result = await runFeatureFile(
     path.join(sprint4FeaturesDir, 'sprint4_review_system.feature'),
