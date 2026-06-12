@@ -2805,7 +2805,7 @@ pub fn run() {
             open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
-            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection,
+            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
             create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,

@@ -430,23 +430,36 @@ async function socraticChat(queryFn, config, args) {
 }
 
 // ============================================
+// Agent SDK Availability Check
+// ============================================
+function checkAgentSDK() {
+  log('info', 'Checking Claude Agent SDK availability...');
+  try {
+    const sdk = require('@anthropic-ai/claude-agent-sdk');
+    const available = typeof sdk.query === 'function';
+    log('info', 'Claude Agent SDK check result', { available });
+    return { available, query: available ? sdk.query : undefined };
+  } catch (e) {
+    log('error', 'Claude Agent SDK not available', { error: e.message });
+    return { available: false, error: e.message };
+  }
+}
+
+// ============================================
 // Load Agent SDK
 // ============================================
 function loadAgentSDK() {
   log('info', 'Loading Claude Agent SDK...');
-  try {
-    const sdk = require('@anthropic-ai/claude-agent-sdk');
-    log('info', 'Claude Agent SDK loaded successfully');
-    return sdk.query;
-  } catch (e) {
-    log('error', 'Failed to load Claude Agent SDK', { error: e.message });
-    emitError(
-      'Claude Agent SDK not found. Please install it first:\n' +
-      '  npm install -g @anthropic-ai/claude-code\n' +
-      '  npm install -g @anthropic-ai/claude-agent-sdk\n\n' +
-      'The Agent SDK is required for autonomous learning design capabilities.'
-    );
+  const result = checkAgentSDK();
+  if (result.available) {
+    return result.query;
   }
+  emitError(
+    'Claude Agent SDK not found. Please install it first:\n' +
+    '  npm install -g @anthropic-ai/claude-code\n' +
+    '  npm install -g @anthropic-ai/claude-agent-sdk\n\n' +
+    'The Agent SDK is required for autonomous learning design capabilities.'
+  );
 }
 
 // ============================================
@@ -480,6 +493,18 @@ async function main() {
 
   try {
     switch (stage) {
+      case 'check': {
+        log('info', 'Starting check stage');
+        const result = checkAgentSDK();
+        // Output clean JSON for Rust to parse; do not use emit() to avoid log pollution
+        console.log(JSON.stringify({
+          available: result.available,
+          error: result.error || null
+        }));
+        log('info', 'Check stage completed', { available: result.available });
+        process.exit(0);
+        break;
+      }
       case 'plan':
         log('info', 'Starting plan stage', { goal: taskArgs.goal, level: taskArgs.level, hours: taskArgs.hours });
         await planCourse(queryFn, config, taskArgs);
@@ -530,6 +555,7 @@ module.exports = {
   generateChapters,
   explainText,
   socraticChat,
+  checkAgentSDK,
   emit,
   emitError,
   log

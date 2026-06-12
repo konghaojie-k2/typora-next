@@ -9,7 +9,8 @@ const {
   generateFilename,
   collectAgentOutput,
   planCourse,
-  generateChapters
+  generateChapters,
+  checkAgentSDK
 } = require('../../../agent-bridge');
 
 const mockSDK = require('../../mock-agent-sdk');
@@ -165,6 +166,19 @@ TestRunner.test('generateChapters writes files with mock SDK', async () => {
   // Check events
   const completeEvent = events.find(e => e.type === 'complete');
   TestRunner.assertExists(completeEvent, 'Should emit complete event');
+});
+
+// ============================================
+// Test: checkAgentSDK
+// ============================================
+
+TestRunner.test('checkAgentSDK returns availability object', () => {
+  const result = checkAgentSDK();
+  TestRunner.assertExists(result, 'Should return a result object');
+  TestRunner.assert(typeof result.available === 'boolean', 'Should have boolean available field');
+  if (!result.available) {
+    TestRunner.assertExists(result.error, 'Should include error when not available');
+  }
 });
 
 // Run

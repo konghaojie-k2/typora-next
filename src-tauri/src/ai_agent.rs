@@ -472,6 +472,64 @@ pub async fn is_agent_running(agent_process: State<'_, AgentProcess>) -> Result<
     Ok(agent_process.is_running())
 }
 
+/// Check whether the Claude Agent SDK is available
+#[tauri::command]
+pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
+    log::info!("[ai_agent] check_agent_sdk called");
+
+    let bridge_path = get_agent_bridge_path()?;
+    let payload = serde_json::json!({
+        "config": {},
+        "args": {}
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg("--no-warnings")
+        .arg(&bridge_path)
+        .arg("check")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .env("NODE_NO_WARNINGS", "1");
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = cmd.output()
+        .map_err(|e| format!("Failed to spawn agent-bridge check: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    log::info!("[ai_agent] check_agent_sdk exit={:?} stdout={} stderr={}", output.status.code(), stdout.trim(), stderr.trim());
+
+    if !output.status.success() {
+        return Ok(serde_json::json!({
+            "available": false,
+            "error": format!("Agent bridge exited with code {:?}: {}", output.status.code(), stderr.trim())
+        }));
+    }
+
+    // Parse the last non-empty JSON line from stdout (in case logs leak)
+    let last_json_line = stdout.lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && (l.starts_with('{') || l.starts_with('[')))
+        .last()
+        .unwrap_or("{}");
+
+    match serde_json::from_str::<serde_json::Value>(last_json_line) {
+        Ok(result) => Ok(result),
+        Err(e) => Ok(serde_json::json!({
+            "available": false,
+            "error": format!("Failed to parse check result: {}. Raw: {}", e, stdout.trim())
+        })),
+    }
+}
+
 // ============================================
 // Sprint 3: Learning Elements, Quiz, Explanation
 // ============================================

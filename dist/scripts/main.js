@@ -96,7 +96,10 @@
     searchCount: document.getElementById('searchCount'),
     searchPrev: document.getElementById('searchPrev'),
     searchNext: document.getElementById('searchNext'),
-    searchClose: document.getElementById('searchClose')
+    searchClose: document.getElementById('searchClose'),
+    agentStatusChip: document.getElementById('agentStatusChip'),
+    agentStatusDot: document.querySelector('#agentStatusChip .agent-status-dot'),
+    agentStatusText: document.querySelector('#agentStatusChip .agent-status-text')
   };
 
   // ============================================
@@ -141,6 +144,9 @@
         return Promise.resolve(renderMarkdownMock(args.content));
       case 'get_toc':
         return Promise.resolve([]);
+      case 'check_agent_sdk':
+        // Mock: in web preview, pretend SDK is available
+        return Promise.resolve({ available: true, error: null });
       case 'open_folder_dialog':
         return Promise.resolve('/mock/project');
       case 'list_directory':
@@ -2427,6 +2433,115 @@
   }
 
   // ============================================
+  // Agent SDK Status Indicator
+  // ============================================
+  const AGENT_STATUS_LABELS = {
+    checking: '检测中…',
+    ready: 'Agent 就绪',
+    missing: 'Agent 未安装'
+  };
+
+  function updateAgentStatusChip(status, errorMessage) {
+    const chip = elements.agentStatusChip;
+    const dot = elements.agentStatusDot;
+    const text = elements.agentStatusText;
+    if (!chip || !text) return;
+
+    chip.classList.remove('status-checking', 'status-ready', 'status-missing');
+    chip.classList.add(`status-${status}`);
+    text.textContent = AGENT_STATUS_LABELS[status] || status;
+
+    if (status === 'missing') {
+      chip.title = errorMessage || '未检测到 Claude Code Agent SDK';
+    } else if (status === 'ready') {
+      chip.title = 'Claude Code Agent SDK 已就绪';
+    } else {
+      chip.title = '正在检测 Claude Code Agent SDK…';
+    }
+  }
+
+  function showAgentMissingToast(errorMessage) {
+    let toast = document.getElementById('agent-missing-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'agent-missing-toast';
+      toast.className = 'agent-missing-toast';
+      toast.innerHTML = `
+        <div class="agent-missing-toast-icon">!</div>
+        <div class="agent-missing-toast-body">
+          <div class="agent-missing-toast-title">未检测到 Claude Code Agent</div>
+          <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Agent SDK 才能使用。</div>
+          <div class="agent-missing-toast-actions">
+            <button class="agent-missing-toast-btn primary" id="agentMissingRetryBtn">重新检测</button>
+            <button class="agent-missing-toast-btn" id="agentMissingDismissBtn">忽略</button>
+          </div>
+        </div>
+        <button class="agent-missing-toast-close" id="agentMissingCloseBtn">×</button>
+      `;
+      document.body.appendChild(toast);
+
+      toast.querySelector('#agentMissingRetryBtn').addEventListener('click', () => {
+        hideAgentMissingToast();
+        checkAgentSdk();
+      });
+      toast.querySelector('#agentMissingDismissBtn').addEventListener('click', hideAgentMissingToast);
+      toast.querySelector('#agentMissingCloseBtn').addEventListener('click', hideAgentMissingToast);
+    }
+
+    const hint = toast.querySelector('.agent-missing-toast-hint');
+    if (hint && errorMessage) {
+      hint.textContent = `AI 学习功能需要安装 Agent SDK 才能使用。详情：${errorMessage}`;
+    }
+
+    // Force reflow to trigger transition
+    void toast.offsetWidth;
+    toast.classList.add('visible');
+  }
+
+  function hideAgentMissingToast() {
+    const toast = document.getElementById('agent-missing-toast');
+    if (toast) {
+      toast.classList.remove('visible');
+    }
+  }
+
+  async function checkAgentSdk() {
+    try {
+      updateAgentStatusChip('checking');
+      const result = await invoke('check_agent_sdk');
+      console.log('[AgentStatus] check result:', result);
+
+      if (result && result.available) {
+        updateAgentStatusChip('ready');
+        hideAgentMissingToast();
+      } else {
+        const error = (result && result.error) ? String(result.error) : '未检测到 @anthropic-ai/claude-agent-sdk';
+        updateAgentStatusChip('missing', error);
+        showAgentMissingToast(error);
+      }
+    } catch (err) {
+      console.error('[AgentStatus] check failed:', err);
+      const message = err && err.message ? String(err.message) : String(err);
+      updateAgentStatusChip('missing', message);
+      showAgentMissingToast(message);
+    }
+  }
+
+  function initAgentStatusIndicator() {
+    const chip = elements.agentStatusChip;
+    if (!chip) return;
+
+    chip.addEventListener('click', () => {
+      if (chip.classList.contains('status-missing')) {
+        checkAgentSdk();
+      }
+    });
+
+    // Initial check after a short delay so the UI has time to paint
+    setTimeout(checkAgentSdk, 500);
+  }
+
+  // ============================================
   // Share Document (ZIP with embedded images)
   // ============================================
   async function shareDocument(tabIndex) {
@@ -3172,6 +3287,7 @@
     loadRecentFiles();
     loadUIState();
     checkPlatform();
+    initAgentStatusIndicator();
 
     console.log('Typora Next initialized');
   }

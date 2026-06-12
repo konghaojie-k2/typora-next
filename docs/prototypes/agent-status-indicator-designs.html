@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Code Agent 状态指示器 - 设计方案</title>
+  <style>
+    /* ============================================
+       Base + Theme Tokens (mirrors dist/styles/main.css)
+       ============================================ */
+    :root {
+      --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Consolas, monospace;
+
+      --font-size-xs: 0.75rem;
+      --font-size-sm: 0.875rem;
+      --font-size-base: 1rem;
+
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 1rem;
+
+      --radius-sm: 0.25rem;
+      --radius-md: 0.5rem;
+      --radius-full: 9999px;
+
+      --color-text-primary: #1a1a2e;
+      --color-text-secondary: #4a4a68;
+      --color-text-tertiary: #6b7280;
+      --color-text-muted: #9ca3af;
+
+      --color-bg-primary: #ffffff;
+      --color-bg-secondary: #f8fafc;
+      --color-bg-tertiary: #f1f5f9;
+
+      --color-border: #e2e8f0;
+      --color-border-light: #f1f5f9;
+
+      --color-accent: #3b82f6;
+      --color-accent-hover: #2563eb;
+      --color-accent-light: #dbeafe;
+
+      --color-success: #10b981;
+      --color-success-light: #d1fae5;
+      --color-warning: #f59e0b;
+      --color-warning-light: #fef3c7;
+      --color-error: #ef4444;
+      --color-error-light: #fee2e2;
+
+      --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+      --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+
+      --toolbar-height: 48px;
+    }
+
+    [data-theme="dark"] {
+      --color-text-primary: #f1f5f9;
+      --color-text-secondary: #cbd5e1;
+      --color-text-tertiary: #94a3b8;
+      --color-text-muted: #64748b;
+
+      --color-bg-primary: #0f172a;
+      --color-bg-secondary: #1e293b;
+      --color-bg-tertiary: #334155;
+
+      --color-border: #334155;
+      --color-border-light: #1e293b;
+
+      --color-accent: #60a5fa;
+      --color-accent-hover: #93c5fd;
+      --color-accent-light: #1e3a5f;
+
+      --color-success: #34d399;
+      --color-success-light: #064e3b;
+      --color-warning: #fbbf24;
+      --color-warning-light: #451a03;
+      --color-error: #f87171;
+      --color-error-light: #450a0a;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: var(--font-main);
+      font-size: var(--font-size-base);
+      color: var(--color-text-primary);
+      background: var(--color-bg-primary);
+      line-height: 1.6;
+    }
+
+    .page-header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: var(--spacing-md) var(--spacing-md);
+      background: var(--color-bg-secondary);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .page-title {
+      font-size: 1.125rem;
+      font-weight: 600;
+      margin: 0;
+    }
+
+    .page-subtitle {
+      font-size: var(--font-size-sm);
+      color: var(--color-text-secondary);
+      margin: 0;
+    }
+
+    .theme-toggle {
+      padding: var(--spacing-sm) var(--spacing-md);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      cursor: pointer;
+      font-size: var(--font-size-sm);
+    }
+
+    .theme-toggle:hover {
+      background: var(--color-bg-tertiary);
+    }
+
+    .design-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+      gap: var(--spacing-md);
+      padding: var(--spacing-md);
+    }
+
+    .design-card {
+      background: var(--color-bg-secondary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    .design-card-header {
+      padding: var(--spacing-md);
+      border-bottom: 1px solid var(--color-border);
+    }
+
+    .design-card-title {
+      font-size: var(--font-size-base);
+      font-weight: 600;
+      margin: 0 0 var(--spacing-xs);
+    }
+
+    .design-card-desc {
+      font-size: var(--font-size-sm);
+      color: var(--color-text-secondary);
+      margin: 0;
+    }
+
+    .design-card-body {
+      padding: var(--spacing-md);
+    }
+
+    .mock-window {
+      background: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      min-height: 120px;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .mock-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: var(--toolbar-height);
+      padding: 0 var(--spacing-sm);
+      background: var(--color-bg-secondary);
+      border-bottom: 1px solid var(--color-border);
+      gap: var(--spacing-xs);
+    }
+
+    .mock-toolbar-left,
+    .mock-toolbar-right {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+    }
+
+    .btn-icon {
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--color-text-secondary);
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+
+    .btn-icon:hover {
+      background: var(--color-bg-tertiary);
+      color: var(--color-text-primary);
+    }
+
+    .mock-content {
+      flex: 1;
+      padding: var(--spacing-md);
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+    }
+
+    .mock-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 28px;
+      padding: 0 var(--spacing-md);
+      background: var(--color-bg-secondary);
+      border-top: 1px solid var(--color-border);
+      font-size: var(--font-size-xs);
+      color: var(--color-text-muted);
+    }
+
+    /* ============================================
+       Shared Status Tokens
+       ============================================ */
+    .status-ready { --status-color: var(--color-success); --status-bg: var(--color-success-light); }
+    .status-checking { --status-color: var(--color-warning); --status-bg: var(--color-warning-light); }
+    .status-missing { --status-color: var(--color-error); --status-bg: var(--color-error-light); }
+
+    /* ============================================
+       Design 1: Toolbar Chip
+       ============================================ */
+    .agent-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: var(--radius-full);
+      background: var(--status-bg);
+      color: var(--status-color);
+      font-size: var(--font-size-xs);
+      font-weight: 500;
+      border: 1px solid transparent;
+      cursor: default;
+      transition: all 150ms ease;
+    }
+
+    .agent-chip.missing {
+      cursor: pointer;
+      border-color: currentColor;
+    }
+
+    .agent-chip-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    .agent-chip.checking .agent-chip-dot {
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ============================================
+       Design 2: Icon-Only + Tooltip
+       ============================================ */
+    .agent-icon-btn {
+      position: relative;
+      width: 32px;
+      height: 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      border-radius: var(--radius-md);
+      background: transparent;
+      color: var(--status-color);
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+
+    .agent-icon-btn:hover {
+      background: var(--status-bg);
+    }
+
+    .agent-icon-btn .badge {
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--status-color);
+      border: 2px solid var(--color-bg-secondary);
+    }
+
+    .agent-tooltip {
+      position: absolute;
+      top: calc(100% + 8px);
+      right: 0;
+      min-width: 220px;
+      padding: 10px 12px;
+      background: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      color: var(--color-text-primary);
+      font-size: var(--font-size-xs);
+      z-index: 50;
+      opacity: 0;
+      visibility: hidden;
+      transform: translateY(-4px);
+      transition: all 150ms ease;
+    }
+
+    .agent-icon-btn:hover .agent-tooltip,
+    .agent-icon-btn:focus .agent-tooltip {
+      opacity: 1;
+      visibility: visible;
+      transform: translateY(0);
+    }
+
+    .agent-tooltip-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+      font-weight: 600;
+    }
+
+    .agent-tooltip-hint {
+      color: var(--color-text-secondary);
+      line-height: 1.5;
+    }
+
+    /* ============================================
+       Design 3: Learning Header Bar
+       ============================================ */
+    .learning-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 16px;
+      background: var(--color-bg-secondary);
+      border-bottom: 1px solid var(--color-border);
+      font-size: var(--font-size-sm);
+    }
+
+    .learning-header-left {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+    }
+
+    .learning-header-status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--status-color);
+      font-weight: 500;
+    }
+
+    .status-pill {
+      padding: 2px 8px;
+      border-radius: var(--radius-full);
+      background: var(--status-bg);
+      font-size: var(--font-size-xs);
+    }
+
+    /* ============================================
+       Design 4: Footer Status Bar
+       ============================================ */
+    .status-bar-section {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .status-bar-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--status-color);
+    }
+
+    .status-bar-text {
+      color: var(--color-text-secondary);
+    }
+
+    .status-bar-text strong {
+      color: var(--status-color);
+      font-weight: 500;
+    }
+
+    /* ============================================
+       Design 5: Settings/Connectivity Card
+       ============================================ */
+    .agent-connect-card {
+      padding: var(--spacing-md);
+      background: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+    }
+
+    .agent-connect-header {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .agent-connect-title {
+      font-weight: 600;
+      font-size: var(--font-size-sm);
+      color: var(--color-text-primary);
+    }
+
+    .agent-connect-meta {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-secondary);
+      margin-bottom: var(--spacing-md);
+    }
+
+    .agent-connect-actions {
+      display: flex;
+      gap: var(--spacing-sm);
+    }
+
+    .btn-sm {
+      padding: 6px 12px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--color-border);
+      background: var(--color-bg-secondary);
+      color: var(--color-text-primary);
+      font-size: var(--font-size-xs);
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+
+    .btn-sm:hover {
+      background: var(--color-bg-tertiary);
+    }
+
+    .btn-primary-sm {
+      background: var(--color-accent);
+      color: white;
+      border-color: var(--color-accent);
+    }
+
+    .btn-primary-sm:hover {
+      background: var(--color-accent-hover);
+    }
+
+    /* ============================================
+       Design 6: Inline Toast / Floating Badge
+       ============================================ */
+    .agent-toast {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: 8px 12px;
+      background: var(--color-bg-primary);
+      border: 1px solid var(--color-border);
+      border-left: 3px solid var(--status-color);
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      font-size: var(--font-size-sm);
+      max-width: 320px;
+    }
+
+    .agent-toast-icon {
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 50%;
+      background: var(--status-bg);
+      color: var(--status-color);
+      flex-shrink: 0;
+    }
+
+    .agent-toast-body {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .agent-toast-title {
+      font-weight: 600;
+      color: var(--color-text-primary);
+    }
+
+    .agent-toast-hint {
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-xs);
+    }
+
+    .agent-toast-close {
+      border: none;
+      background: transparent;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      line-height: 1;
+      padding: 0;
+      width: 20px;
+      height: 20px;
+    }
+
+    /* ============================================
+       State Controls (for prototype only)
+       ============================================ */
+    .controls {
+      position: sticky;
+      bottom: 0;
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      padding: var(--spacing-md);
+      background: var(--color-bg-secondary);
+      border-top: 1px solid var(--color-border);
+      font-size: var(--font-size-sm);
+    }
+
+    .control-group {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+    }
+
+    .control-label {
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+
+    .control-btn {
+      padding: 6px 12px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      cursor: pointer;
+      font-size: var(--font-size-xs);
+    }
+
+    .control-btn.active {
+      background: var(--color-accent);
+      color: white;
+      border-color: var(--color-accent);
+    }
+
+    .note {
+      color: var(--color-text-tertiary);
+      font-size: var(--font-size-xs);
+    }
+  </style>
+</head>
+<body>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Claude Code Agent 状态指示器</h1>
+      <p class="page-subtitle">6 版设计方案，统一显示「Agent 是否可用」</p>
+    </div>
+    <button class="theme-toggle" id="themeToggle">🌙 切换主题</button>
+  </div>
+
+  <div class="design-grid">
+    <!-- Design 1: Toolbar Chip -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 A：工具栏胶囊标签</h2>
+        <p class="design-card-desc">放在主工具栏，最直观。适合常驻显示。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="mock-window">
+          <div class="mock-toolbar">
+            <div class="mock-toolbar-left">
+              <button class="btn-icon" title="打开文件">📄</button>
+              <button class="btn-icon" title="学习模式">🎓</button>
+            </div>
+            <div class="mock-toolbar-right">
+              <div class="agent-chip status-ready" id="chipA">
+                <span class="agent-chip-dot"></span>
+                <span class="agent-chip-text">Agent 就绪</span>
+              </div>
+              <button class="btn-icon" title="设置">⚙️</button>
+            </div>
+          </div>
+          <div class="mock-content">
+            主内容区……
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Design 2: Icon-Only + Tooltip -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 B：图标 + Tooltip</h2>
+        <p class="design-card-desc">节省空间，hover 看详情。适合工具栏拥挤的场景。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="mock-window">
+          <div class="mock-toolbar">
+            <div class="mock-toolbar-left">
+              <button class="btn-icon" title="打开文件">📄</button>
+              <button class="btn-icon" title="学习模式">🎓</button>
+            </div>
+            <div class="mock-toolbar-right">
+              <button class="agent-icon-btn status-ready" id="iconB" aria-label="Claude Code Agent 状态">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                  <path d="M2 17l10 5 10-5"/>
+                  <path d="M2 12l10 5 10-5"/>
+                </svg>
+                <span class="badge"></span>
+                <span class="agent-tooltip">
+                  <span class="agent-tooltip-row">
+                    <span class="agent-chip-dot"></span>
+                    <span class="agent-tooltip-title">Agent 已就绪</span>
+                  </span>
+                  <span class="agent-tooltip-hint">Claude Code SDK 已检测到，可正常使用 AI 学习功能。</span>
+                </span>
+              </button>
+              <button class="btn-icon" title="设置">⚙️</button>
+            </div>
+          </div>
+          <div class="mock-content">
+            主内容区……
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Design 3: Learning Header Bar -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 C：学习模式顶栏</h2>
+        <p class="design-card-desc">只在学习模式显示，不影响主界面。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="mock-window">
+          <div class="learning-header">
+            <div class="learning-header-left">
+              <span>📚 Transformer 基础</span>
+              <span class="learning-header-status status-ready" id="headerC">
+                <span class="status-pill">Agent</span>
+                <span>已连接</span>
+              </span>
+            </div>
+            <div>第 3 / 12 章</div>
+          </div>
+          <div class="mock-content">
+            学习内容区……
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Design 4: Footer Status Bar -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 D：底部状态栏</h2>
+        <p class="design-card-desc">经典 IDE 风格，低调常驻。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="mock-window">
+          <div class="mock-content">
+            主内容区……
+          </div>
+          <div class="mock-footer">
+            <div class="status-bar-section">
+              <span>Markdown</span>
+            </div>
+            <div class="status-bar-section status-ready" id="footerD">
+              <span class="status-bar-dot"></span>
+              <span class="status-bar-text">Claude Code Agent <strong>已就绪</strong></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Design 5: Settings/Connectivity Card -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 E：设置面板卡片</h2>
+        <p class="design-card-desc">作为设置页或学习项目创建时的连接检查。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="agent-connect-card status-ready" id="cardE">
+          <div class="agent-connect-header">
+            <div class="agent-chip-dot"></div>
+            <span class="agent-connect-title">Claude Code Agent</span>
+            <span class="status-pill">已连接</span>
+          </div>
+          <div class="agent-connect-meta">
+            版本: 0.24.1 · SDK: @anthropic-ai/claude-agent-sdk · 上次检测: 刚刚
+          </div>
+          <div class="agent-connect-actions">
+            <button class="btn-sm btn-primary-sm">重新检测</button>
+            <button class="btn-sm">查看日志</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Design 6: Inline Toast -->
+    <div class="design-card">
+      <div class="design-card-header">
+        <h2 class="design-card-title">方案 F：浮动提示条</h2>
+        <p class="design-card-desc">检测失败时弹出，引导用户安装。非常驻。</p>
+      </div>
+      <div class="design-card-body">
+        <div class="mock-window" style="position:relative;">
+          <div class="mock-toolbar">
+            <div class="mock-toolbar-left">
+              <button class="btn-icon" title="打开文件">📄</button>
+              <button class="btn-icon" title="学习模式">🎓</button>
+            </div>
+          </div>
+          <div class="mock-content">
+            <div class="agent-toast status-missing" id="toastF" style="margin-top: 8px;">
+              <span class="agent-toast-icon">!</span>
+              <div class="agent-toast-body">
+                <div class="agent-toast-title">未检测到 Claude Code Agent</div>
+                <div class="agent-toast-hint">AI 学习功能需要安装 Agent SDK。</div>
+              </div>
+              <button class="agent-toast-close">×</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="control-group">
+      <span class="control-label">全局状态：</span>
+      <button class="control-btn" data-state="checking">检测中</button>
+      <button class="control-btn active" data-state="ready">已就绪</button>
+      <button class="control-btn" data-state="missing">未安装</button>
+    </div>
+    <span class="note">点击按钮可预览不同状态在各方案中的效果</span>
+  </div>
+
+  <script>
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle');
+    themeToggle.addEventListener('click', () => {
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+      document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+      themeToggle.textContent = isDark ? '🌙 切换主题' : '☀️ 切换主题';
+    });
+
+    // State labels per design
+    const labels = {
+      chipA: { checking: ['检测中…', 'Agent'], ready: ['Agent 就绪', 'Agent'], missing: ['Agent 未安装', 'Agent'] },
+      iconB: { checking: ['检测中', 'Agent'], ready: ['Agent 已就绪', 'Agent'], missing: ['Agent 未安装', 'Agent'] },
+      headerC: { checking: ['检测中', '检测中'], ready: ['已连接', '已连接'], missing: ['未连接', '未连接'] },
+      footerD: { checking: ['检测中', '检测中'], ready: ['已就绪', '已就绪'], missing: ['未安装', '未安装'] },
+      cardE: { checking: ['检测中', '检测中'], ready: ['已连接', '已连接'], missing: ['未连接', '未连接'] },
+      toastF: { checking: ['检测中', '检测中'], ready: ['已连接', '已连接'], missing: ['未安装', '未安装'] }
+    };
+
+    const hints = {
+      checking: '正在检测 Claude Code Agent…',
+      ready: 'Claude Code SDK 已检测到，可正常使用 AI 学习功能。',
+      missing: '未检测到 @anthropic-ai/claude-agent-sdk，请安装后重试。'
+    };
+
+    function setState(state) {
+      // Update control buttons
+      document.querySelectorAll('.control-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.state === state);
+      });
+
+      // Update chip A
+      const chip = document.getElementById('chipA');
+      chip.className = `agent-chip ${state === 'missing' ? 'missing' : ''} status-${state}`;
+      chip.classList.toggle('checking', state === 'checking');
+      chip.querySelector('.agent-chip-text').textContent = labels.chipA[state][0];
+
+      // Update icon B
+      const iconBtn = document.getElementById('iconB');
+      iconBtn.className = `agent-icon-btn status-${state}`;
+      const tooltipTitle = iconBtn.querySelector('.agent-tooltip-title');
+      const tooltipHint = iconBtn.querySelector('.agent-tooltip-hint');
+      tooltipTitle.textContent = state === 'ready' ? 'Agent 已就绪' : state === 'checking' ? '正在检测…' : 'Agent 未安装';
+      tooltipHint.textContent = hints[state];
+
+      // Update header C
+      const header = document.getElementById('headerC');
+      header.className = `learning-header-status status-${state}`;
+      header.querySelector('.status-pill').textContent = labels.headerC[state][1];
+      header.lastElementChild.textContent = labels.headerC[state][0];
+
+      // Update footer D
+      const footer = document.getElementById('footerD');
+      footer.className = `status-bar-section status-${state}`;
+      footer.querySelector('strong').textContent = labels.footerD[state][0];
+
+      // Update card E
+      const card = document.getElementById('cardE');
+      card.className = `agent-connect-card status-${state}`;
+      card.querySelector('.agent-connect-title').textContent = state === 'ready' ? 'Claude Code Agent' : state === 'checking' ? '检测中…' : 'Claude Code Agent 未连接';
+      card.querySelector('.status-pill').textContent = labels.cardE[state][1];
+
+      // Update toast F
+      const toast = document.getElementById('toastF');
+      toast.className = `agent-toast status-${state}`;
+      toast.querySelector('.agent-toast-title').textContent = state === 'ready' ? 'Agent 已就绪' : state === 'checking' ? '正在检测 Agent…' : '未检测到 Claude Code Agent';
+      toast.querySelector('.agent-toast-hint').textContent = hints[state];
+    }
+
+    document.querySelectorAll('.control-btn').forEach(btn => {
+      btn.addEventListener('click', () => setState(btn.dataset.state));
+    });
+
+    // Close toast demo
+    document.querySelectorAll('.agent-toast-close').forEach(btn => {
+      btn.addEventListener('click', () => btn.closest('.agent-toast').style.display = 'none');
+    });
+  </script>
+</body>
+</html>
