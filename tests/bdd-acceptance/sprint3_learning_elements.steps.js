@@ -250,7 +250,7 @@ steps.when('用户打开该文档', async function() {
   this.openedContent = fs.readFileSync(chapterPath, 'utf-8');
 });
 
-steps.when('文档在学习模式下渲染', async function() {
+steps.when('文档在课程模式下渲染', async function() {
   // Try multiple sources for the markdown content
   if (!this.openedContent) {
     if (this.openedChapter && fs.existsSync(this.openedChapter)) {
@@ -388,7 +388,7 @@ steps.when('选中后选项高亮', async function() {
 // Then
 // ============================================
 
-steps.then('渲染学习模式头部栏', async function() {
+steps.then('渲染课程模式头部栏', async function() {
   if (!this.projectDir) throw new Error('Project not initialized');
   // Verify project.json is readable
   const projectJsonPath = path.join(this.learningDir, 'project.json');

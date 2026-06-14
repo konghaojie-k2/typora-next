@@ -1,35 +1,35 @@
-Feature: 学习模式下的文档渲染和测验
+Feature: 课程模式下的文档渲染和测验
 
   作为正在学习项目文档的用户
   我想要沉浸式的学习体验
   以便更好地理解和掌握知识
 
-  Scenario: 打开学习项目文档自动进入学习模式
+  Scenario: 打开学习项目文档自动进入课程模式
     Given 文档所在文件夹包含 .learning/project.json
     When 用户打开该文档
-    Then 渲染学习模式头部栏
+    Then 渲染课程模式头部栏
     And 头部栏显示项目名称"理解 Transformer"
     And 头部栏显示"第 3/8 章"
     And 头部栏显示预计时长"25 分钟"
     And 头部栏有"标记完成"按钮
 
-  Scenario: 学习模式下渲染概念卡片
+  Scenario: 课程模式下渲染概念卡片
     Given 文档中包含 `!concept` 块
-    When 文档在学习模式下渲染
+    When 文档在课程模式下渲染
     Then `!concept` 渲染为黄色背景的交互卡片
     And 卡片显示概念名称
     And 悬停时显示快速解释弹窗
 
-  Scenario: 学习模式下渲染思考题
+  Scenario: 课程模式下渲染思考题
     Given 文档中包含 `!question` 块
-    When 文档在学习模式下渲染
+    When 文档在课程模式下渲染
     Then `!question` 渲染为可点击的问题卡片
     And 初始只显示问题标题
     And 点击"查看解释"后展开答案内容
 
-  Scenario: 学习模式下渲染测验题
+  Scenario: 课程模式下渲染测验题
     Given 文档中包含 `!quiz` 块
-    When 文档在学习模式下渲染
+    When 文档在课程模式下渲染
     Then `!quiz` 渲染为单选/多选题 UI
     And 选项显示为可点击卡片
     And 选中后选项高亮

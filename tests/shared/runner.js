@@ -21,6 +21,8 @@ function parseFeature(content) {
   const scenarios = [];
   let currentScenario = null;
   let featureName = '';
+  let backgroundSteps = [];
+  let inBackground = false;
 
   for (const rawLine of lines) {
     const line = rawLine.trim();
@@ -28,19 +30,29 @@ function parseFeature(content) {
 
     if (line.startsWith('Feature:')) {
       featureName = line.replace('Feature:', '').trim();
+    } else if (line.startsWith('Background:')) {
+      inBackground = true;
+      backgroundSteps = [];
     } else if (line.startsWith('Scenario:')) {
       if (currentScenario) scenarios.push(currentScenario);
       currentScenario = {
         name: line.replace('Scenario:', '').trim(),
-        steps: [],
+        steps: backgroundSteps.map(s => ({ ...s })),
         feature: featureName
       };
+      inBackground = false;
     } else if (line.startsWith('Given ') || line.startsWith('When ') || line.startsWith('Then ') || line.startsWith('And ')) {
-      if (currentScenario) {
-        currentScenario.steps.push({
-          keyword: line.split(' ')[0],
-          text: line.substring(line.indexOf(' ') + 1)
-        });
+      let text = line.substring(line.indexOf(' ') + 1);
+      // Minimal Gherkin escape unescaping
+      text = text.replace(/\\\(/g, '(').replace(/\\\)/g, ')');
+      const step = {
+        keyword: line.split(' ')[0],
+        text: text
+      };
+      if (inBackground) {
+        backgroundSteps.push(step);
+      } else if (currentScenario) {
+        currentScenario.steps.push(step);
       }
     }
   }

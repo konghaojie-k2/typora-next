@@ -155,7 +155,7 @@ steps.given('该项目已完成{int}/{int}章', async function(completed, total)
 // ============================================
 
 steps.when('点击工具栏{string}按钮', async function(label) {
-  if (label === '学习模式') {
+  if (label === '课程模式') {
     this.learningHubOpened = true;
     // Simulate opening hub - load project list
     const list = new ProjectList();
@@ -165,7 +165,7 @@ steps.when('点击工具栏{string}按钮', async function(label) {
   }
 });
 
-steps.when('打开学习模式', async function() {
+steps.when('打开课程模式', async function() {
   this.learningHubOpened = true;
   const list = new ProjectList();
   await list.initPath();

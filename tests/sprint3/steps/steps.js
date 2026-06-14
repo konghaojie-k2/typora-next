@@ -6,7 +6,7 @@
  * 真实文件系统验证见 tests/bdd-acceptance/sprint3_learning_elements.steps.js
  */
 
-const { StepRegistry } = require('./runner');
+const { StepRegistry } = require('../../shared/runner');
 const steps = new StepRegistry();
 
 // ============================================
@@ -87,7 +87,7 @@ steps.when('用户打开该文档', async function() {
   this.opened = true;
 });
 
-steps.when('文档在学习模式下渲染', async function() {
+steps.when('文档在课程模式下渲染', async function() {
   this.rendered = true;
 });
 
@@ -169,7 +169,7 @@ steps.when('用户关闭测验模态框', async function() {
 // Then
 // ============================================
 
-steps.then('渲染学习模式头部栏', async function() {
+steps.then('渲染课程模式头部栏', async function() {
   T.assert(this.learningModeActive, 'learning mode should be active');
 });
 

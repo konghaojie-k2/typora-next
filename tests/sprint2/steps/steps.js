@@ -165,7 +165,7 @@ steps.then('用户可双击打开阅读', async function() {
   }
 });
 
-steps.then('文档以学习模式渲染（显示头部栏）', async function() {
+steps.then('文档以课程模式渲染（显示头部栏）', async function() {
   // Verified by learning-renderer unit tests
 });
 
@@ -294,12 +294,12 @@ steps.given('用户在学习项目列表页面', async function() {
 });
 
 steps.when('点击工具栏{string}按钮', async function(btn) {
-  if (btn === '学习模式') {
+  if (btn === '课程模式') {
     this.hubOpen = true;
   }
 });
 
-steps.when('打开学习模式', async function() {
+steps.when('打开课程模式', async function() {
   this.hubOpen = true;
 });
 

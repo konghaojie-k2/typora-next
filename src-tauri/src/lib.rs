@@ -2045,6 +2045,57 @@ mod explanation_persistence {
     }
 }
 
+// ============================================
+// Sprint 9: Exploration Mode Session Persistence
+// ============================================
+
+mod exploration_persistence {
+    use std::path::PathBuf;
+    use tauri::Manager;
+
+    pub fn get_exploration_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+        let data_dir = app
+            .path()
+            .app_local_data_dir()
+            .map_err(|e| format!("无法获取应用数据目录: {}", e))?;
+        let dir = data_dir.join("exploration-sessions");
+        let _ = std::fs::create_dir_all(&dir);
+        Ok(dir)
+    }
+
+    pub fn session_file_path(app: &tauri::AppHandle, file_name: &str) -> Result<PathBuf, String> {
+        let dir = get_exploration_dir(app)?;
+        Ok(dir.join(format!("{}.json", file_name)))
+    }
+}
+
+#[tauri::command]
+async fn read_exploration_session(file_name: String, app: tauri::AppHandle) -> Result<String, String> {
+    let path = exploration_persistence::session_file_path(&app, &file_name)?;
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    std::fs::read_to_string(&path)
+        .map_err(|e| format!("读取探索会话失败: {}", e))
+}
+
+#[tauri::command]
+async fn write_exploration_session(file_name: String, content: String, app: tauri::AppHandle) -> Result<(), String> {
+    let path = exploration_persistence::session_file_path(&app, &file_name)?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("写入探索会话失败: {}", e))
+}
+
+#[tauri::command]
+async fn delete_exploration_session(file_name: String, app: tauri::AppHandle) -> Result<(), String> {
+    let path = exploration_persistence::session_file_path(&app, &file_name)?;
+    if path.exists() {
+        std::fs::remove_file(&path)
+            .map_err(|e| format!("删除探索会话失败: {}", e))?;
+    }
+    Ok(())
+}
+
 // Commands defined in ai_agent.rs to avoid macro issues
 // ============================================
 // Sprint 4: Forgetting Curve Review System
@@ -2809,7 +2860,8 @@ pub fn run() {
             create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
-            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat
+            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
+            read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

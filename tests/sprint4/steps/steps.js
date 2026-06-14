@@ -8,7 +8,7 @@
  * 真实文件系统验证见 tests/bdd-acceptance/sprint4_review.steps.js
  */
 
-const { StepRegistry } = require('./runner');
+const { StepRegistry } = require('../../shared/runner');
 
 // Minimal mock for headless environment
 if (typeof global.window === 'undefined') global.window = {};

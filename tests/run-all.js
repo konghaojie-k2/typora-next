@@ -180,18 +180,25 @@ async function main() {
     console.log(`${YELLOW}Filter: ${types.join(', ')} only${RESET}`);
   }
 
-  // Discover sprints
+  // Discover sprints dynamically
   const sprints = [];
-  for (let i = 1; i <= 8; i++) {
-    const sprint = discoverSprint(i);
-    if (sprint && (
-      sprint.unitTests.length > 0 ||
-      sprint.integrationTests.length > 0 ||
-      sprint.hasBDD
-    )) {
-      sprints.push(sprint);
+  const entries = fs.readdirSync(TESTS_ROOT, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isDirectory() && entry.name.startsWith('sprint')) {
+      const sprintNum = parseInt(entry.name.replace('sprint', ''), 10);
+      if (!isNaN(sprintNum)) {
+        const sprint = discoverSprint(sprintNum);
+        if (sprint && (
+          sprint.unitTests.length > 0 ||
+          sprint.integrationTests.length > 0 ||
+          sprint.hasBDD
+        )) {
+          sprints.push(sprint);
+        }
+      }
     }
   }
+  sprints.sort((a, b) => a.id - b.id);
 
   const sprintsToRun = targetSprint
     ? sprints.filter(s => s.id === targetSprint)

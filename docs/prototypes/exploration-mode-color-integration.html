@@ -1,0 +1,1101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>探索模式配色融合方案</title>
+  <style>
+    :root {
+      --font-main: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', Roboto, sans-serif;
+      --font-mono: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+
+      --font-size-xs: 0.75rem;
+      --font-size-sm: 0.875rem;
+      --font-size-base: 1rem;
+
+      --spacing-xs: 0.25rem;
+      --spacing-sm: 0.5rem;
+      --spacing-md: 1rem;
+      --spacing-lg: 1.5rem;
+
+      --radius-sm: 0.25rem;
+      --radius-md: 0.5rem;
+      --radius-lg: 0.75rem;
+      --radius-xl: 1rem;
+      --radius-full: 9999px;
+
+      --transition-fast: 150ms ease;
+
+      /* Light theme app variables */
+      --color-text-primary: #1a1a2e;
+      --color-text-secondary: #4a4a68;
+      --color-text-muted: #9ca3af;
+      --color-bg-primary: #ffffff;
+      --color-bg-secondary: #f8fafc;
+      --color-bg-tertiary: #f1f5f9;
+      --color-border: #e2e8f0;
+      --color-accent: #3b82f6;
+      --color-accent-hover: #2563eb;
+      --color-accent-light: #dbeafe;
+      --color-success: #10b981;
+      --color-error: #ef4444;
+
+      /* Exploration accent: Teal — close to the main blue, but clearly distinct */
+      --expl-bg: #f0fdfa;
+      --expl-text: #115e59;
+      --expl-border: #99f6e4;
+      --expl-active-bg: #ccfbf1;
+      --expl-active-text: #134e4a;
+      --expl-active-border: #14b8a6;
+      --expl-btn-bg: #14b8a6;
+      --expl-btn-hover: #0d9488;
+    }
+
+    [data-theme="dark"] {
+      --color-text-primary: #f1f5f9;
+      --color-text-secondary: #cbd5e1;
+      --color-text-muted: #64748b;
+      --color-bg-primary: #0f172a;
+      --color-bg-secondary: #1e293b;
+      --color-bg-tertiary: #334155;
+      --color-border: #334155;
+      --color-accent: #60a5fa;
+      --color-accent-hover: #93c5fd;
+      --color-accent-light: #1e3a5f;
+
+      --expl-bg: #134e4a;
+      --expl-text: #ccfbf1;
+      --expl-border: #0f766e;
+      --expl-active-bg: #115e59;
+      --expl-active-text: #99f6e4;
+      --expl-active-border: #2dd4bf;
+      --expl-btn-bg: #14b8a6;
+      --expl-btn-hover: #2dd4bf;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 2rem;
+      font-family: var(--font-main);
+      background: #f3f4f6;
+      color: #111827;
+    }
+
+    h1 { margin: 0 0 0.5rem; font-size: 1.6rem; }
+    .subtitle { color: #6b7280; margin-bottom: 2rem; font-size: 0.95rem; }
+    h2 { margin: 2rem 0 1rem; font-size: 1.15rem; }
+    .desc { color: #4b5563; margin: -0.5rem 0 1rem; font-size: 0.9rem; }
+
+    .versions {
+      display: flex;
+      flex-direction: column;
+      gap: 2rem;
+    }
+
+    .version-card {
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
+    }
+
+    .windows {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .mock-label {
+      font-size: 0.75rem;
+      color: #6b7280;
+      margin-bottom: 0.25rem;
+    }
+
+    /* ---- App window mock ---- */
+    .app-mock {
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      border: 1px solid var(--color-border);
+      font-size: var(--font-size-sm);
+      color: var(--color-text-primary);
+      background: var(--color-bg-primary);
+    }
+
+    .toolbar {
+      height: 42px;
+      background: var(--color-bg-secondary);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      padding: 0 var(--spacing-sm);
+      gap: var(--spacing-sm);
+    }
+
+    .toolbar-btn {
+      width: 24px;
+      height: 24px;
+      border-radius: var(--radius-md);
+      background: var(--color-bg-tertiary);
+      border: 1px solid var(--color-border);
+    }
+
+    .tabs-bar {
+      height: 36px;
+      background: var(--color-bg-secondary);
+      border-bottom: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+
+    .tabs-list {
+      display: flex;
+      align-items: center;
+      height: 100%;
+      padding: 0 var(--spacing-sm);
+      gap: 2px;
+      width: 100%;
+    }
+
+    .tab-item {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      padding: var(--spacing-xs) var(--spacing-md);
+      background: var(--color-bg-tertiary);
+      border: 1px solid var(--color-border);
+      border-bottom: none;
+      border-radius: var(--radius-md) var(--radius-md) 0 0;
+      color: var(--color-text-secondary);
+      font-size: var(--font-size-sm);
+      cursor: pointer;
+      max-width: 180px;
+      min-width: 80px;
+      transition: all var(--transition-fast);
+      user-select: none;
+      position: relative;
+      top: 1px;
+    }
+
+    .tab-item:hover {
+      background: var(--color-bg-primary);
+      color: var(--color-text-primary);
+    }
+
+    .tab-item.active {
+      background: var(--color-bg-primary);
+      color: var(--color-accent);
+      border-color: var(--color-accent);
+      border-bottom: 1px solid var(--color-bg-primary);
+      z-index: 1;
+    }
+
+    .tab-label {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      flex: 1;
+    }
+
+    .tab-close {
+      padding: 2px;
+      background: transparent;
+      border: none;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      border-radius: var(--radius-sm);
+      font-size: 14px;
+      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      flex-shrink: 0;
+    }
+
+    .tab-close:hover {
+      background: var(--color-error);
+      color: white;
+    }
+
+    .tab-item.exploration-mode-tab {
+      background-color: var(--expl-bg);
+      color: var(--expl-text);
+      border-color: var(--expl-border);
+    }
+
+    .tab-item.exploration-mode-tab.active {
+      background-color: var(--expl-active-bg);
+      color: var(--expl-active-text);
+      border-bottom-color: var(--expl-active-border);
+    }
+
+    /* ---- Exploration layout (base) ---- */
+    .exploration-body {
+      height: 320px;
+      padding: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .exploration-wrapper {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+    }
+
+    .exploration-article-panel {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-height: 100px;
+      flex: 0 0 55%;
+    }
+
+    .exploration-article-content {
+      flex: 1;
+      overflow: auto;
+      padding: var(--spacing-md);
+      background-color: var(--color-bg-primary);
+    }
+
+    .exploration-article-content h3 {
+      margin-top: 0;
+      color: var(--color-text-primary);
+    }
+
+    .exploration-article-content p {
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+    }
+
+    .exploration-splitter {
+      flex: 0 0 8px;
+      background-color: var(--color-border);
+      cursor: row-resize;
+      position: relative;
+      transition: background-color var(--transition-fast);
+    }
+
+    .exploration-splitter::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 24px;
+      height: 2px;
+      background-color: var(--color-text-muted);
+      border-radius: 1px;
+    }
+
+    .exploration-chat-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: row;
+      overflow: hidden;
+      min-height: 120px;
+      background-color: var(--color-bg-secondary);
+      border-top: 1px solid var(--color-border);
+    }
+
+    .exploration-chat-sidebar {
+      flex: 0 0 150px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--color-border);
+      background-color: var(--color-bg-secondary);
+      overflow: hidden;
+    }
+
+    .exploration-new-conv-btn {
+      margin: var(--spacing-sm);
+      padding: var(--spacing-xs) var(--spacing-sm);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background-color: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      cursor: pointer;
+      font-size: var(--font-size-sm);
+      transition: all var(--transition-fast);
+    }
+
+    .exploration-conv-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 var(--spacing-xs);
+    }
+
+    .exploration-conv-item {
+      padding: var(--spacing-sm);
+      margin-bottom: var(--spacing-xs);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: background-color var(--transition-fast);
+      overflow: hidden;
+    }
+
+    .exploration-conv-item:hover {
+      background-color: var(--color-bg-tertiary);
+    }
+
+    .exploration-conv-item.active {
+      background-color: var(--color-accent-light);
+    }
+
+    .exploration-conv-title {
+      font-size: var(--font-size-sm);
+      font-weight: 500;
+      color: var(--color-text-primary);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .exploration-conv-time {
+      font-size: var(--font-size-xs);
+      color: var(--color-text-muted);
+      margin-top: 2px;
+    }
+
+    .exploration-chat-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .exploration-messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--spacing-md);
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-md);
+    }
+
+    .exploration-message-row {
+      display: flex;
+      max-width: 100%;
+    }
+
+    .exploration-message-row.user { justify-content: flex-end; }
+    .exploration-message-row.assistant { justify-content: flex-start; }
+
+    .exploration-message-bubble {
+      max-width: 80%;
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-radius: var(--radius-lg);
+      font-size: var(--font-size-sm);
+      line-height: 1.6;
+      word-wrap: break-word;
+    }
+
+    .exploration-message-row.user .exploration-message-bubble {
+      background-color: var(--color-accent);
+      color: #ffffff;
+    }
+
+    .exploration-message-row.assistant .exploration-message-bubble {
+      background-color: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      border: 1px solid var(--color-border);
+    }
+
+    .exploration-input-area {
+      flex: 0 0 auto;
+      display: flex;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-sm) var(--spacing-md);
+      border-top: 1px solid var(--color-border);
+      background-color: var(--color-bg-primary);
+    }
+
+    .exploration-input {
+      flex: 1;
+      min-height: 36px;
+      padding: var(--spacing-sm);
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background-color: var(--color-bg-primary);
+      color: var(--color-text-primary);
+      font-family: inherit;
+      font-size: var(--font-size-sm);
+      outline: none;
+    }
+
+    .exploration-send-btn {
+      flex: 0 0 auto;
+      padding: var(--spacing-xs) var(--spacing-md);
+      border: none;
+      border-radius: var(--radius-md);
+      background-color: var(--color-accent);
+      color: #ffffff;
+      cursor: pointer;
+      font-size: var(--font-size-sm);
+      transition: background-color var(--transition-fast);
+    }
+
+    .exploration-send-btn:hover { background-color: var(--color-accent-hover); }
+
+    /* ========================================
+       Version overrides
+       ======================================== */
+
+    /* ---- V2: Accent borders only ---- */
+    .v2 .exploration-wrapper {
+      border-top: 3px solid var(--expl-active-border);
+    }
+
+    .v2 .exploration-article-content {
+      border-left: 3px solid var(--expl-active-border);
+    }
+
+    .v2 .exploration-chat-panel {
+      border-top-color: var(--expl-active-border);
+    }
+
+    .v2 .exploration-chat-sidebar {
+      border-right-color: var(--expl-active-border);
+    }
+
+    .v2 .exploration-splitter {
+      background-color: var(--expl-border);
+    }
+
+    .v2 .exploration-splitter::after {
+      background-color: var(--expl-text);
+    }
+
+    .v2 .exploration-conv-item.active {
+      background-color: var(--expl-bg);
+      color: var(--expl-text);
+    }
+
+    .v2 .exploration-conv-item.active .exploration-conv-title {
+      color: var(--expl-active-text);
+    }
+
+    .v2 .exploration-input:focus {
+      border-color: var(--expl-active-border);
+    }
+
+    .v2 .exploration-new-conv-btn:hover {
+      border-color: var(--expl-active-border);
+      color: var(--expl-text);
+    }
+
+    /* ---- V3: Tinted panels ---- */
+    .v3 .exploration-article-content {
+      background-color: color-mix(in srgb, var(--color-bg-primary) 96%, var(--expl-active-border));
+      border-left: 3px solid var(--expl-active-border);
+    }
+
+    .v3 .exploration-chat-panel {
+      background-color: color-mix(in srgb, var(--color-bg-secondary) 92%, var(--expl-active-border));
+      border-top-color: var(--expl-active-border);
+    }
+
+    .v3 .exploration-chat-sidebar {
+      background-color: color-mix(in srgb, var(--color-bg-secondary) 88%, var(--expl-active-border));
+      border-right-color: var(--expl-active-border);
+    }
+
+    .v3 .exploration-conv-item.active {
+      background-color: var(--expl-active-bg);
+    }
+
+    .v3 .exploration-conv-item.active .exploration-conv-title {
+      color: var(--expl-active-text);
+    }
+
+    .v3 .exploration-message-row.user .exploration-message-bubble {
+      background-color: var(--expl-btn-bg);
+    }
+
+    .v3 .exploration-message-row.user .exploration-message-bubble:hover {
+      background-color: var(--expl-btn-hover);
+    }
+
+    .v3 .exploration-input:focus {
+      border-color: var(--expl-active-border);
+    }
+
+    .v3 .exploration-send-btn {
+      background-color: var(--expl-btn-bg);
+    }
+
+    .v3 .exploration-send-btn:hover {
+      background-color: var(--expl-btn-hover);
+    }
+
+    .v3 .exploration-splitter {
+      background-color: var(--expl-border);
+    }
+
+    /* ---- V4: Header bar + colored accents ---- */
+    .v4 .exploration-article-panel {
+      position: relative;
+    }
+
+    .v4 .exploration-article-panel::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: linear-gradient(90deg, var(--expl-active-border), transparent 70%);
+      z-index: 2;
+      pointer-events: none;
+    }
+
+    .v4 .exploration-article-content {
+      border-left: 3px solid var(--expl-active-border);
+    }
+
+    .v4 .exploration-chat-panel {
+      border-top: 2px solid var(--expl-active-border);
+    }
+
+    .v4 .exploration-chat-main::before {
+      content: '探索对话';
+      display: block;
+      padding: var(--spacing-xs) var(--spacing-md);
+      font-size: var(--font-size-xs);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: var(--expl-active-text);
+      background: var(--expl-bg);
+      border-bottom: 1px solid var(--expl-border);
+    }
+
+    .v4 .exploration-conv-item.active {
+      background-color: var(--expl-active-bg);
+    }
+
+    .v4 .exploration-conv-item.active .exploration-conv-title {
+      color: var(--expl-active-text);
+    }
+
+    .v4 .exploration-message-row.user .exploration-message-bubble {
+      background-color: var(--expl-btn-bg);
+    }
+
+    .v4 .exploration-input:focus {
+      border-color: var(--expl-active-border);
+    }
+
+    .v4 .exploration-send-btn {
+      background-color: var(--expl-btn-bg);
+    }
+
+    .v4 .exploration-send-btn:hover {
+      background-color: var(--expl-btn-hover);
+    }
+
+    .v4 .exploration-splitter {
+      background-color: var(--expl-active-border);
+    }
+
+    .v4 .exploration-splitter::after {
+      background-color: var(--expl-active-text);
+    }
+
+    .note {
+      margin-top: 2rem;
+      padding: 1rem;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      border-radius: var(--radius-md);
+      color: #4b5563;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>探索模式：让 Tab 颜色与阅读区融为一体的方案</h1>
+  <p class="subtitle">
+    主基调仍是蓝色，探索模式使用青色（Teal）作为区分色——与蓝色相邻、和谐但不冲突。<br>
+    每个方案都提供浅色 / 深色两种视图，重点是让阅读区也能感受到“探索模式”的氛围。
+  </p>
+
+  <div class="versions">
+    <!-- V1: Tab only (baseline) -->
+    <section class="version-card v1">
+      <h2>方案 1：Tab 染色（当前做法）</h2>
+      <p class="desc">只有 Tab 变成青色，阅读区保持原样。作为对比基准。</p>
+      <div class="windows">
+        <div>
+          <div class="mock-label">Light</div>
+          <div class="app-mock" data-theme="light">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mock-label">Dark</div>
+          <div class="app-mock" data-theme="dark">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- V2: Accent borders -->
+    <section class="version-card v2">
+      <h2>方案 2：强调边框</h2>
+      <p class="desc">把青色延伸到阅读区的边框：顶部边线、文章面板左边线、聊天面板顶部分隔线、侧边栏右边线。视觉冲击最小，但立刻让阅读区和 Tab 产生关联。</p>
+      <div class="windows">
+        <div>
+          <div class="mock-label">Light</div>
+          <div class="app-mock" data-theme="light">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mock-label">Dark</div>
+          <div class="app-mock" data-theme="dark">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- V3: Tinted panels -->
+    <section class="version-card v3">
+      <h2>方案 3：面板淡染色</h2>
+      <p class="desc">给文章区和聊天区都加上极淡的青色底色，让用户一进入探索模式就能感知到“整个空间都变了”。用户气泡和发送按钮也改用青色，强化归属。</p>
+      <div class="windows">
+        <div>
+          <div class="mock-label">Light</div>
+          <div class="app-mock" data-theme="light">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mock-label">Dark</div>
+          <div class="app-mock" data-theme="dark">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- V4: Header bar -->
+    <section class="version-card v4">
+      <h2>方案 4：顶部色带 + 对话头部标识</h2>
+      <p class="desc">文章区顶部有一条从左到右渐隐的色带，聊天区头部显示“探索对话”标签，分隔条和发送按钮也用青色。整体感强，但不会大面积改变背景色。</p>
+      <div class="windows">
+        <div>
+          <div class="mock-label">Light</div>
+          <div class="app-mock" data-theme="light">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="mock-label">Dark</div>
+          <div class="app-mock" data-theme="dark">
+            <div class="toolbar"><div class="toolbar-btn"></div><div class="toolbar-btn"></div><div class="toolbar-btn"></div></div>
+            <div class="tabs-bar">
+              <div class="tabs-list">
+                <div class="tab-item"><span class="tab-label">README.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item active"><span class="tab-label">notes.md</span><span class="tab-close">×</span></div>
+                <div class="tab-item exploration-mode-tab active"><span class="tab-label">transformer.md</span><span class="tab-close">×</span></div>
+              </div>
+            </div>
+            <div class="exploration-body">
+              <div class="exploration-wrapper">
+                <div class="exploration-article-panel">
+                  <div class="exploration-article-content">
+                    <h3>Attention Is All You Need</h3>
+                    <p>We propose a new simple network architecture, the Transformer, based solely on attention mechanisms... (exploration article content)</p>
+                  </div>
+                </div>
+                <div class="exploration-splitter"></div>
+                <div class="exploration-chat-panel">
+                  <div class="exploration-chat-sidebar">
+                    <button class="exploration-new-conv-btn">+ 新建对话</button>
+                    <div class="exploration-conv-list">
+                      <div class="exploration-conv-item active">
+                        <div class="exploration-conv-title">核心观点</div>
+                        <div class="exploration-conv-time">2 小时前</div>
+                      </div>
+                      <div class="exploration-conv-item">
+                        <div class="exploration-conv-title">新对话</div>
+                        <div class="exploration-conv-time">刚刚</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="exploration-chat-main">
+                    <div class="exploration-messages">
+                      <div class="exploration-message-row user">
+                        <div class="exploration-message-bubble">这篇文章的核心观点是什么？</div>
+                      </div>
+                      <div class="exploration-message-row assistant">
+                        <div class="exploration-message-bubble">核心观点是：完全依赖注意力机制来建模序列，无需 RNN/CNN。</div>
+                      </div>
+                    </div>
+                    <div class="exploration-input-area">
+                      <textarea class="exploration-input" placeholder="输入问题，Enter 发送"></textarea>
+                      <button class="exploration-send-btn">发送</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div class="note">
+    说明：<br>
+    1. 这里用青色（Teal）作探索模式色，因为它和主蓝色相邻，容易融合；最终颜色可以替换。<br>
+    2. 每个方案都是独立的 CSS class（.v1 / .v2 / .v3 / .v4），可以单独摘出来用。<br>
+    3. 挑一个你最喜欢的方案（或组合），我把它写进 <code>dist/styles/exploration.css</code> 并重新 build。
+  </div>
+</body>
+</html>

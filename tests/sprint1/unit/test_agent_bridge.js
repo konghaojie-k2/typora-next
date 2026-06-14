@@ -10,7 +10,8 @@ const {
   collectAgentOutput,
   planCourse,
   generateChapters,
-  checkAgentSDK
+  checkAgentSDK,
+  chatWithAgent
 } = require('../../../agent-bridge');
 
 const mockSDK = require('../../mock-agent-sdk');
@@ -183,4 +184,67 @@ TestRunner.test('checkAgentSDK returns availability object', () => {
 
 // Run
 console.log('Running Agent Bridge TDD tests...\n');
+
+// ============================================
+// Test: chatWithAgent (pure-function chat interface)
+// ============================================
+
+TestRunner.test('chatWithAgent throws on empty message', async () => {
+  let threw = false;
+  try {
+    await chatWithAgent(mockSDK.query, {}, { article: 'x', history: [], message: '   ' });
+  } catch (e) {
+    threw = true;
+  }
+  TestRunner.assert(threw, 'Should throw when message is empty');
+});
+
+TestRunner.test('chatWithAgent returns assistant text from mock SDK', async () => {
+  const originalWrite = process.stdout.write;
+  process.stdout.write = () => true;
+  const out = await chatWithAgent(mockSDK.query, {}, {
+    article: 'Attention is all you need.',
+    history: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: 'hello' }],
+    message: '能举个例子吗'
+  });
+  process.stdout.write = originalWrite;
+  TestRunner.assert(typeof out === 'string' && out.length > 0, 'Should return non-empty string');
+});
+
+TestRunner.test('chatWithAgent uses custom systemPrompt when provided', async () => {
+  let capturedPrompt = null;
+  const fakeQuery = async ({ prompt }) => {
+    capturedPrompt = prompt;
+    return (async function* () {
+      yield { type: 'result', subtype: 'success', result: 'ok' };
+    })();
+  };
+  const originalWrite = process.stdout.write;
+  process.stdout.write = () => true;
+  await chatWithAgent(fakeQuery, {}, {
+    article: '',
+    history: [],
+    message: 'q',
+    systemPrompt: 'CUSTOM-SYS-MARKER'
+  });
+  process.stdout.write = originalWrite;
+  TestRunner.assert(capturedPrompt.includes('CUSTOM-SYS-MARKER'), 'Should pass through custom system prompt');
+});
+
+TestRunner.test('chatWithAgent has no internal state between calls (pure function)', async () => {
+  let callCount = 0;
+  const countingQuery = async () => (async function* () {
+    callCount++;
+    yield { type: 'result', subtype: 'success', result: 'reply ' + callCount };
+  })();
+  const originalWrite = process.stdout.write;
+  process.stdout.write = () => true;
+  const r1 = await chatWithAgent(countingQuery, {}, { article: 'a', history: [], message: 'q1' });
+  const r2 = await chatWithAgent(countingQuery, {}, { article: 'a', history: [], message: 'q2' });
+  process.stdout.write = originalWrite;
+  TestRunner.assertEquals(callCount, 2, 'Each call should hit the engine once');
+  TestRunner.assertEquals(r1, 'reply 1', 'First call should produce reply 1');
+  TestRunner.assertEquals(r2, 'reply 2', 'Second call should produce reply 2');
+});
+
 TestRunner.run();

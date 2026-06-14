@@ -13,7 +13,7 @@ Feature: 学习进度追踪和知识图谱
   Scenario: 用户打开学习项目弹出仪表盘
     Given 用户有一个进行中的学习项目"理解 Transformer"
     And 该项目章节已生成且有学习记录
-    When 用户在学习模式中点击该项目
+    When 用户在课程模式中点击该项目
     Then 弹出项目仪表盘 modal
     And modal 标题显示项目名称
     And 顶部显示统计数据（已掌握/学习中/有困难/未开始 概念数）

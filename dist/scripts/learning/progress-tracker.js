@@ -276,7 +276,7 @@
           <div style="display:flex;gap:8px;align-items:center;">
             ${actionBtn}
             <button class="learning-kg-btn" id="learningKGBtn" title="知识图谱">🧠 图谱</button>
-            <button class="learning-exit-btn" id="learningExitBtn" title="退出学习模式">退出</button>
+            <button class="learning-exit-btn" id="learningExitBtn" title="退出课程模式">退出</button>
             <button class="learning-progress-close-btn" id="learningProgressClose">×</button>
           </div>
         </div>

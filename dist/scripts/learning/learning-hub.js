@@ -124,7 +124,7 @@
     overlay.innerHTML = `
       <div class="learning-hub">
         <div class="learning-hub-header">
-          <h2>学习模式</h2>
+          <h2>课程模式</h2>
           <button class="learning-hub-close" id="learningHubClose">×</button>
         </div>
         <div class="learning-hub-list" id="learningHubList"></div>

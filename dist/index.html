@@ -10,6 +10,8 @@
   <link href="vendor/prism/prism-tomorrow.min.css" rel="stylesheet">
   <!-- Main styles -->
   <link rel="stylesheet" href="styles/main.css">
+  <!-- Exploration mode styles -->
+  <link rel="stylesheet" href="styles/exploration.css">
   <!-- Learning mode styles -->
   <link rel="stylesheet" href="styles/learning.css">
 </head>
@@ -79,7 +81,7 @@
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </button>
-          <button class="btn-icon" id="newLearningProjectBtn" title="学习模式">
+          <button class="btn-icon" id="newLearningProjectBtn" title="课程模式">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2L2 7l10 5 10-5-10-5z"/>
               <path d="M2 17l10 5 10-5"/>
@@ -389,6 +391,9 @@
   <script src="scripts/learning/knowledge-graph-manager.js"></script>
   <script src="scripts/learning/knowledge-graph-dashboard.js"></script>
   <script src="scripts/learning/review-summary-modal.js"></script>
+  <script src="scripts/learning/exploration-session.js"></script>
+  <script src="scripts/markdown-utils.js"></script>
+  <script src="scripts/learning/exploration-ui.js"></script>
   <script src="scripts/learning/mode-integration.js"></script>
   <!-- Sprint 8: Socratic Review (8a MVP) -->
   <script src="scripts/learning/socratic-state.js"></script>

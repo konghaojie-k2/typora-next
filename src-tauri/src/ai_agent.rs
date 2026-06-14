@@ -1098,3 +1098,78 @@ pub async fn socratic_chat(
     log::info!("[Sprint8b] socratic_chat SUCCESS: content_len={}, done={}", result.content.len(), result.done);
     Ok(result)
 }
+
+// ============================================
+// Sprint 9: Exploration Mode Chat via Agent SDK
+// ============================================
+
+/// Free-form AI dialogue about an article (exploration mode)
+#[tauri::command]
+pub async fn explore_chat(
+    article: String,
+    history: Vec<serde_json::Value>,
+    message: String,
+    app_handle: tauri::AppHandle,
+) -> Result<String, String> {
+    log::info!("[Sprint9] explore_chat START: article_len={}, history_len={}, message_len={}",
+        article.len(), history.len(), message.len());
+
+    let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+    log::info!("[Sprint9] explore_chat: bridge_path={:?}", bridge_path);
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "article": article,
+            "history": history,
+            "message": message,
+        }
+    });
+    log::info!("[Sprint9] explore_chat: payload_len={}", payload.to_string().len());
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("explore")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[Sprint9] explore_chat: spawning node process...");
+    let output = cmd.output()
+        .map_err(|e| {
+            log::error!("[Sprint9] explore_chat: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    log::info!("[Sprint9] explore_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
+        output.status.code(), output.stdout.len(), output.stderr.len());
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[Sprint9] explore_chat: agent failed: stderr={}", stderr);
+        return Err(format!("Agent exploration chat failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::info!("[Sprint9] explore_chat: raw_stdout_len={}", stdout.len());
+
+    if stdout.is_empty() {
+        return Err("Agent returned empty exploration response".to_string());
+    }
+
+    log::info!("[Sprint9] explore_chat SUCCESS: response_len={}", stdout.len());
+    Ok(stdout)
+}

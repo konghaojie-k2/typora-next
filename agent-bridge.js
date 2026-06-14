@@ -429,6 +429,86 @@ async function socraticChat(queryFn, config, args) {
   return { content, done };
 }
 
+/**
+ * Generic chat — pure function interface for the LLM.
+ *
+ * Receives the full article + accumulated history + the latest user message,
+ * and returns a single assistant reply. The caller (UI / session) owns
+ * multi-turn state; this function is stateless and engine-agnostic, so
+ * swapping the underlying agent implementation only requires changing
+ * queryFn without touching call sites.
+ *
+ * @param {Function} queryFn - Agent SDK query function (or mock)
+ * @param {object} config - API config
+ * @param {object} args - { article, history, message, systemPrompt? }
+ * @returns {Promise<string>} assistant response
+ */
+async function chatWithAgent(queryFn, config, args) {
+  const { article, history, message, systemPrompt } = args;
+
+  if (!message || message.trim().length === 0) {
+    throw new Error('消息不能为空');
+  }
+
+  const historyText = (history || []).map(h => {
+    const role = h.role === 'user' ? '用户' : 'AI';
+    return `${role}: ${h.content}`;
+  }).join('\n');
+
+  const defaultSystem = `你是一位耐心、有洞察力的阅读伙伴。用户正在自由探索一篇文章，你可以：
+- 用清晰的解释和贴切的类比帮助理解
+- 联系相关知识拓宽视野
+- 坦诚面对不确定的内容
+- 用自然、对话式的语气交流`;
+
+  const system = (systemPrompt && systemPrompt.trim().length > 0)
+    ? systemPrompt
+    : defaultSystem;
+
+  const stream = queryFn({
+    prompt: `${system}
+
+用户正在深度阅读一篇文章，并希望与你探讨其中的思想。
+
+请根据文章内容和已有对话，回应用户。回复中可以使用 Markdown 格式（标题、加粗、列表、引用块等）来增强可读性。
+
+---
+
+## 文章全文
+
+${article || '（未提供文章内容）'}
+
+---
+
+## 已有对话
+
+${historyText || '（尚未有对话）'}
+
+---
+
+## 用户最新问题
+
+${message}
+
+请直接给出你的回复。如果合适，可以在结尾提出一个启发性追问。`,
+
+    options: {
+      allowedTools: []
+    }
+  });
+
+  const output = await collectAgentOutput(stream);
+
+  if (!output || output.trim().length === 0) {
+    throw new Error('Agent returned empty response');
+  }
+
+  return output.trim();
+}
+
+// Backwards-compat alias (Sprint 9 used this name)
+const exploreChat = chatWithAgent;
+
 // ============================================
 // Agent SDK Availability Check
 // ============================================
@@ -533,6 +613,16 @@ async function main() {
         log('info', 'Socratic stage completed', { done: socraticResult.done, content_length: socraticResult.content.length });
         process.exit(0);
         break;
+      case 'chat':
+      case 'explore': {
+        log('info', 'Starting chat stage', { article_length: taskArgs.article?.length, history_length: taskArgs.history?.length, message: taskArgs.message });
+        const chatResult = await chatWithAgent(queryFn, config, taskArgs);
+        // Output plain text for Rust to capture
+        console.log(chatResult);
+        log('info', 'Chat stage completed', { response_length: chatResult.length });
+        process.exit(0);
+        break;
+      }
       default:
         emitError(`未知阶段: ${stage}`);
         process.exit(1);
@@ -555,6 +645,8 @@ module.exports = {
   generateChapters,
   explainText,
   socraticChat,
+  exploreChat,
+  chatWithAgent,
   checkAgentSDK,
   emit,
   emitError,

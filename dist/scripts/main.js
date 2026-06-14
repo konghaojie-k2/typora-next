@@ -3,6 +3,22 @@
  * WebView frontend for Tauri backend
  */
 
+// ============================================
+// Agent Bridge (frontend adapter)
+// Engine-agnostic pure-function interface. Replace the implementation
+// (or the underlying agent-bridge.js stage) to swap LLM backends without
+// touching call sites.
+// ============================================
+window.agentBridge = {
+  async chatWithAgent({ article, history, message }) {
+    if (!window.__TAURI__) {
+      throw new Error('AI backend unavailable in web preview');
+    }
+    const { invoke } = window.__TAURI__.core;
+    return await invoke('explore_chat', { article, history, message });
+  }
+};
+
 (function() {
   'use strict';
 
@@ -320,7 +336,8 @@
       content,
       baseDir,
       name: getFileName(path),
-      scrollTop: 0
+      scrollTop: 0,
+      mode: 'normal'
     };
 
     state.tabs.push(tab);
@@ -385,7 +402,14 @@
       closingTab.scrollTop = elements.markdownBody.scrollTop;
     }
 
+    const closedPath = state.tabs[index].path;
     state.tabs.splice(index, 1);
+
+    // If no other tab still references this file, tear down its exploration panel
+    const stillOpen = state.tabs.some(t => t.path === closedPath);
+    if (!stillOpen) {
+      closeExplorationPanelForFile(closedPath);
+    }
 
     if (state.tabs.length === 0) {
       state.activeTab = -1;
@@ -456,6 +480,7 @@
     menu.style.top = event.clientY + 'px';
 
     const tab = state.tabs[index];
+    const inLearningMode = document.body.classList.contains('learning-mode');
     const items = [
       { label: '在文件夹中显示', action: () => {
         if (tab && tab.path) {
@@ -463,12 +488,23 @@
             console.error('打开文件夹失败:', err);
           });
         }
-      }},
+      }}
+    ];
+
+    if (tab && tab.path.toLowerCase().endsWith('.md') && !inLearningMode) {
+      const panel = explorationPanels.get(tab.path);
+      items.push({
+        label: panel && panel.isOpen() ? '关闭探索面板' : '打开探索面板',
+        action: () => toggleExplorationPanel(tab.path)
+      });
+    }
+
+    items.push(
       { label: '分享打包', action: () => shareDocument(index) },
       { label: '关闭', action: () => closeTab(index) },
       { label: '关闭其他', action: () => closeOtherTabs(index) },
       { label: '关闭全部', action: () => closeAllTabs() }
-    ];
+    );
 
     items.forEach((item, i) => {
       if (i > 0) {
@@ -477,13 +513,15 @@
         menu.appendChild(sep);
       }
       const el = document.createElement('div');
-      el.className = 'tab-context-menu-item';
+      el.className = 'tab-context-menu-item' + (item.disabled ? ' disabled' : '');
       el.textContent = item.label;
-      el.addEventListener('click', () => {
-        item.action();
-        menu.remove();
-        activeContextMenu = null;
-      });
+      if (!item.disabled) {
+        el.addEventListener('click', () => {
+          item.action();
+          menu.remove();
+          activeContextMenu = null;
+        });
+      }
       menu.appendChild(el);
     });
 
@@ -505,12 +543,141 @@
     }, 0);
   }
 
+  function showFileTreeContextMenu(event, filePath) {
+    // Remove existing menu
+    if (activeContextMenu) {
+      activeContextMenu.remove();
+      activeContextMenu = null;
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu file-tree-context-menu';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+
+    const inLearningMode = document.body.classList.contains('learning-mode');
+    const items = [
+      { label: '打开', action: () => openTreeFile(filePath) }
+    ];
+
+    if (!inLearningMode) {
+      const panel = explorationPanels.get(filePath);
+      items.push({
+        label: panel && panel.isOpen() ? '关闭探索面板' : '打开探索面板',
+        action: () => openFileInExplorationMode(filePath)
+      });
+    }
+
+    items.push(
+      { label: '在文件夹中显示', action: () => {
+        if (filePath) {
+          invoke('show_in_folder', { path: filePath }).catch(err => {
+            console.error('打开文件夹失败:', err);
+          });
+        }
+      }}
+    );
+
+    items.forEach((item, i) => {
+      if (i > 0) {
+        const sep = document.createElement('div');
+        sep.className = 'tab-context-menu-separator';
+        menu.appendChild(sep);
+      }
+      const el = document.createElement('div');
+      el.className = 'tab-context-menu-item' + (item.disabled ? ' disabled' : '');
+      el.textContent = item.label;
+      if (!item.disabled) {
+        el.addEventListener('click', () => {
+          item.action();
+          menu.remove();
+          activeContextMenu = null;
+        });
+      }
+      menu.appendChild(el);
+    });
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+
+    // Close menu on click elsewhere
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        activeContextMenu = null;
+        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('contextmenu', closeMenu);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('contextmenu', closeMenu);
+    }, 0);
+  }
+
+  function showMarkdownContextMenu(event) {
+    const tab = state.tabs[state.activeTab];
+    if (!tab || !tab.path.toLowerCase().endsWith('.md')) return;
+    if (document.body.classList.contains('learning-mode')) return;
+
+    event.preventDefault();
+
+    if (activeContextMenu) {
+      activeContextMenu.remove();
+      activeContextMenu = null;
+    }
+
+    const menu = document.createElement('div');
+    menu.className = 'tab-context-menu markdown-context-menu';
+    menu.style.left = event.clientX + 'px';
+    menu.style.top = event.clientY + 'px';
+
+    const panel = explorationPanels.get(tab.path);
+    const items = [
+      {
+        label: panel && panel.isOpen() ? '关闭探索面板' : '打开探索面板',
+        action: () => toggleExplorationPanel(tab.path)
+      }
+    ];
+
+    items.forEach((item) => {
+      const el = document.createElement('div');
+      el.className = 'tab-context-menu-item' + (item.disabled ? ' disabled' : '');
+      el.textContent = item.label;
+      if (!item.disabled) {
+        el.addEventListener('click', () => {
+          item.action();
+          menu.remove();
+          activeContextMenu = null;
+        });
+      }
+      menu.appendChild(el);
+    });
+
+    document.body.appendChild(menu);
+    activeContextMenu = menu;
+
+    const closeMenu = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        activeContextMenu = null;
+        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('contextmenu', closeMenu);
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', closeMenu);
+      document.addEventListener('contextmenu', closeMenu);
+    }, 0);
+  }
+
   function renderTabs() {
     elements.tabsList.innerHTML = '';
 
     state.tabs.forEach((tab, index) => {
       const tabEl = document.createElement('div');
-      tabEl.className = 'tab-item' + (index === state.activeTab ? ' active' : '');
+      tabEl.className = 'tab-item' +
+        (index === state.activeTab ? ' active' : '');
 
       const label = document.createElement('span');
       label.className = 'tab-label';
@@ -543,6 +710,7 @@
   async function loadTabContent(index) {
     if (index < 0 || index >= state.tabs.length) return;
     const tab = state.tabs[index];
+
     await renderMarkdown(tab.content, tab.baseDir);
 
     // Update file tree active state
@@ -565,6 +733,10 @@
 
   async function renderMarkdown(content, baseDir = '') {
     try {
+      // Reset exploration mode styling when rendering normal markdown
+      elements.markdownBody.classList.remove('exploration-mode');
+      elements.markdownBody.style.display = state.sourceMode ? 'none' : 'block';
+
       const html = await invoke('render_markdown', { content });
       elements.markdownBody.innerHTML = html;
 
@@ -647,6 +819,96 @@
       console.error('Failed to render markdown:', err);
       elements.markdownBody.innerHTML = `<p class="error">渲染失败: ${err.message}</p>`;
     }
+  }
+
+  // ============================================
+  // Exploration Panel (floating, per-file, fully decoupled from Tab mode)
+  // ============================================
+  // The panel is an independent tool — Tab is always a plain Tab. The user
+  // opens/closes the panel from any of three context-menu entries; the panel
+  // keeps its position/size per file. Closing the panel is not "leaving
+  // exploration" — the next right-click shows the same panel toggle again.
+  const explorationPanels = new Map();
+
+  function getOrCreateExplorationPanel(tab) {
+    if (!tab || !tab.path.toLowerCase().endsWith('.md')) return null;
+    let panel = explorationPanels.get(tab.path);
+    if (!panel) {
+      panel = new window.ExplorationUI({
+        filePath: tab.path,
+        fileContent: tab.content
+      });
+      explorationPanels.set(tab.path, panel);
+    } else {
+      panel.fileContent = tab.content;
+    }
+    return panel;
+  }
+
+  function closeExplorationPanelForFile(filePath) {
+    const panel = explorationPanels.get(filePath);
+    if (panel) {
+      panel.unmount();
+      explorationPanels.delete(filePath);
+    }
+  }
+
+  /**
+   * Toggle the exploration panel for a given file.
+   * Opens it if closed, closes it if open. The Tab itself is not modified.
+   */
+  function toggleExplorationPanel(filePath) {
+    if (!filePath || !filePath.toLowerCase().endsWith('.md')) return;
+    let panel = explorationPanels.get(filePath);
+    if (!panel) {
+      // Find the tab for this file to get current content
+      const tab = state.tabs.find(t => t.path === filePath);
+      if (!tab) return;
+      panel = getOrCreateExplorationPanel(tab);
+    }
+    if (!panel) return;
+    if (panel.isOpen()) {
+      panel.close();
+    } else {
+      panel.open();
+    }
+  }
+
+  /**
+   * Open the file in a normal Tab AND open the exploration panel for it.
+   * Used by the file-tree right-click "Open exploration panel".
+   */
+  function openFileInExplorationMode(filePath) {
+    const existingIndex = state.tabs.findIndex(t => t.path === filePath);
+    if (existingIndex >= 0) {
+      state.activeTab = existingIndex;
+      renderTabs();
+      loadTabContent(existingIndex);
+      toggleExplorationPanel(filePath);
+      return;
+    }
+
+    invoke('open_file', { path: filePath }).then(result => {
+      if (result && result.content) {
+        const tab = {
+          path: result.path,
+          content: result.content,
+          baseDir: result.base_dir || '',
+          name: getFileName(result.path),
+          scrollTop: 0
+        };
+        state.tabs.push(tab);
+        state.activeTab = state.tabs.length - 1;
+        renderTabs();
+        loadTabContent(state.activeTab);
+        watchCurrentFile(result.path);
+        saveUIState();
+        toggleExplorationPanel(filePath);
+      }
+    }).catch(err => {
+      console.error('Failed to open file in exploration mode:', err);
+      showError('无法打开文件: ' + err);
+    });
   }
 
   // ============================================
@@ -947,7 +1209,7 @@
         badge = document.createElement('span');
         badge.id = 'learningModeBadge';
         badge.className = 'learning-mode-badge';
-        badge.textContent = '🎓 学习模式';
+        badge.textContent = '🎓 课程模式';
         const toolbarRight = document.querySelector('.toolbar-right');
         if (toolbarRight) {
           toolbarRight.insertBefore(badge, toolbarRight.firstChild);
@@ -1031,6 +1293,13 @@
           openTreeFile(entry.path);
         }
       });
+
+      if (!entry.is_dir && entry.path.toLowerCase().endsWith('.md')) {
+        item.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          showFileTreeContextMenu(e, entry.path);
+        });
+      }
 
       li.appendChild(item);
 
@@ -3055,6 +3324,10 @@
       elements.clearRecentFiles.addEventListener('click', clearRecentFiles);
     }
 
+    if (elements.markdownBody) {
+      elements.markdownBody.addEventListener('contextmenu', showMarkdownContextMenu);
+    }
+
     // Search bar events
     if (elements.searchInput) {
       elements.searchInput.addEventListener('input', (e) => {
@@ -3251,7 +3524,7 @@
       return;
     }
     if (!document.body.classList.contains('learning-mode')) {
-      showToast('请先进入学习模式', 'info');
+      showToast('请先进入课程模式', 'info');
       return;
     }
     // Use the active tab's path as project root (rough heuristic)
