@@ -39,3 +39,6 @@ progress.md
 
 # Agent bridge logs
 agent-bridge.log
+
+# Design docs (design discussions, prototypes, ADRs)
+/docs/
