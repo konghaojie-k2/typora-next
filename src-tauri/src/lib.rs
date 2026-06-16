@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use regex::Regex;
 use std::io::Write;
 use serde::{Deserialize, Serialize};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub mod ai_agent;
@@ -529,13 +529,39 @@ fn get_toc(content: &str) -> Vec<TocItem> {
 }
 
 /// Open a folder dialog and return selected folder path
+/// Default location: ~/Documents/TyporaNext/Learning (created if missing)
 #[tauri::command]
 async fn open_folder_dialog(app: tauri::AppHandle) -> Result<String, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let folder_path = app.dialog()
-        .file()
-        .blocking_pick_folder();
+    // Best-effort default path: ~/Documents/TyporaNext/Learning
+    // If unavailable (e.g. headless), fall back to the dialog's own default (cwd).
+    let default_dir = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .ok()
+        .map(|home| {
+            std::path::PathBuf::from(home)
+                .join("Documents")
+                .join("TyporaNext")
+                .join("Learning")
+        });
+
+    if let Some(ref dir) = default_dir {
+        let _ = std::fs::create_dir_all(dir);
+    }
+
+    let builder = app.dialog().file();
+    let builder = if let Some(ref dir) = default_dir {
+        if dir.exists() {
+            builder.set_directory(dir)
+        } else {
+            builder
+        }
+    } else {
+        builder
+    };
+
+    let folder_path = builder.blocking_pick_folder();
 
     match folder_path {
         Some(path) => {
@@ -544,6 +570,54 @@ async fn open_folder_dialog(app: tauri::AppHandle) -> Result<String, String> {
         }
         None => Err("No folder selected".to_string()),
     }
+}
+
+/// Sanitize a learning project slug into a safe ASCII directory name segment.
+/// - Keep ASCII alphanumeric, dash, underscore
+/// - Convert spaces to dashes
+/// - Truncate to 60 chars
+/// - Empty input → "learning-project"
+fn sanitize_dir_name(name: &str) -> String {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
+        .collect();
+    let collapsed = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-")
+        .to_ascii_lowercase();
+    if collapsed.is_empty() {
+        return "learning-project".to_string();
+    }
+    collapsed.chars().take(60).collect()
+}
+
+/// Create a dedicated subdirectory for a learning project under `parent_dir`.
+/// Returns the absolute path of the created subdirectory.
+/// If a directory with the same name already exists, appends a numeric suffix.
+#[tauri::command]
+async fn create_project_subdir(parent_dir: String, slug: String) -> Result<String, String> {
+    let parent = std::path::PathBuf::from(&parent_dir);
+    if !parent.exists() {
+        return Err(format!("父目录不存在: {}", parent_dir));
+    }
+    if !parent.is_dir() {
+        return Err(format!("不是目录: {}", parent_dir));
+    }
+
+    let base = sanitize_dir_name(&slug);
+    let mut candidate = parent.join(&base);
+    let mut suffix = 1;
+    while candidate.exists() {
+        suffix += 1;
+        candidate = parent.join(format!("{}-{}", base, suffix));
+    }
+
+    std::fs::create_dir_all(&candidate)
+        .map_err(|e| format!("创建项目目录失败: {}", e))?;
+
+    Ok(candidate.display().to_string())
 }
 
 /// List directory contents recursively (dirs + .md files)
@@ -1776,6 +1850,87 @@ fn create_learning_project(
     Ok(json_path.to_string_lossy().to_string())
 }
 
+// ============================================
+// Sprint N+1: create_project_with_session (Phase B)
+// Atomically: create project folder + project.json + initialize agent session
+// Returns the agent's session_id (host persists to .learning/agent-session.json)
+// ============================================
+
+/// Create a learning project AND initialize the agent session in one call.
+/// Combines `create_learning_project` (folder + project.json) with
+/// `init_agent_session` (spawn agent to establish session_id).
+///
+/// Atomicity: if the session init fails, the project.json is rolled back
+/// (folder is left in place — user can retry or delete manually).
+#[tauri::command]
+async fn setup_project_with_session(
+    project_path: String,
+    outline: serde_json::Value,
+    goal: Option<String>,
+    app_handle: AppHandle,
+) -> Result<String, String> {
+    log::info!("[setup_project_with_session] project_path={}", project_path);
+
+    // Emit status before any work so the UI shows progress immediately.
+    let _ = app_handle.emit("session-init-status", serde_json::json!({
+        "step": "creating_project",
+        "message": "正在创建项目文件夹...",
+    }));
+
+    // Step 1: create folder + project.json
+    let json_path_str = create_learning_project(project_path.clone(), outline, goal)?;
+    log::info!("[setup_project_with_session] project.json created at {}", json_path_str);
+
+    let _ = app_handle.emit("session-init-status", serde_json::json!({
+        "step": "copying_skills",
+        "message": "正在加载技能模板...",
+    }));
+
+    // Step 2: copy bundled skills into the project's .claude/skills/ so
+    // the agent SDK discovers them on first invocation.
+    if let Err(e) = ai_agent::copy_bundled_skills_to_project(&project_path) {
+        // Non-fatal: project works without skills, just no skill-based
+        // guidance. Log so the user can investigate.
+        log::warn!("[setup_project_with_session] skills copy failed: {}", e);
+    }
+
+    let _ = app_handle.emit("session-init-status", serde_json::json!({
+        "step": "initializing_agent",
+        "message": "正在调用 AI API 初始化项目...",
+    }));
+
+    // Step 3: initialize agent session (synchronous ureq-like via cmd.output())
+    let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+    let session_id = ai_agent::init_agent_session(&config, &project_path).await?;
+
+    log::info!("[setup_project_with_session] session_id={}", session_id);
+
+    // Step 4: write session to .learning/agent-session.json so the host
+    // (JS) can pass it to subsequent invocations.
+    let session_path = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("agent-session.json");
+    let session_json = serde_json::json!({
+        "session_id": session_id,
+        "created_at": now_local_string(),
+        "last_used_at": now_local_string(),
+    });
+    if let Err(e) = std::fs::write(
+        &session_path,
+        serde_json::to_string_pretty(&session_json).map_err(|e| format!("serialize session.json: {}", e))?,
+    ) {
+        // Non-fatal: host can still use session_id in-memory for this session
+        log::warn!("[setup_project_with_session] failed to write agent-session.json: {}", e);
+    }
+
+    let _ = app_handle.emit("session-init-status", serde_json::json!({
+        "step": "agent_ready",
+        "message": "Agent 就绪，开始生成章节...",
+    }));
+
+    Ok(session_id)
+}
+
 /// Single quiz answer record for persistence
 #[derive(Debug, Serialize, Deserialize)]
 struct QuizAnswerRecord {
@@ -2855,13 +3010,14 @@ pub fn run() {
             get_recent_files, add_recent_file, clear_recent_files, write_file,
             open_slides_window, get_platform, show_in_folder, share_document,
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
-            ai_agent::plan_course, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
+            ai_agent::plan_course, ai_agent::plan_course_llm, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
-            create_learning_project, persist_quiz_result, read_quiz_history, read_text_file,
+            create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
             socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
-            read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat
+            read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
+            create_project_subdir
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

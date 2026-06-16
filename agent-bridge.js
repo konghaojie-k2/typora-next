@@ -16,7 +16,24 @@ const path = require('path');
 // ============================================
 // Logging
 // ============================================
-const LOG_FILE = path.join(process.cwd(), 'agent-bridge.log');
+// Resolution order for log directory:
+//  1. TYPORA_NEXT_LOG_DIR env var (set by Rust on install / production runs)
+//  2. Script directory (__dirname) — colocated with agent-bridge.js
+//  3. Process CWD — last-resort fallback
+function _resolveLogDir() {
+  if (process.env.TYPORA_NEXT_LOG_DIR) return process.env.TYPORA_NEXT_LOG_DIR;
+  return __dirname;
+}
+
+const LOG_DIR = _resolveLogDir();
+const LOG_FILE = path.join(LOG_DIR, 'agent-bridge.log');
+
+// Announce log location on stderr (not stdout — stdout is reserved for JSON events)
+// so debugging "where did the logs go" is trivial.
+try {
+  fs.mkdirSync(LOG_DIR, { recursive: true });
+} catch (_) { /* ignore */ }
+process.stderr.write(`[agent-bridge] log file: ${LOG_FILE}\n`);
 
 function log(level, message, data = null) {
   const timestamp = new Date().toISOString();
@@ -26,7 +43,13 @@ function log(level, message, data = null) {
   try {
     fs.appendFileSync(LOG_FILE, line + '\n', 'utf-8');
   } catch (e) {
-    // Ignore log write errors
+    // Final fallback: try CWD if the resolved dir is not writable
+    try {
+      const fallback = path.join(process.cwd(), 'agent-bridge.log');
+      fs.appendFileSync(fallback, line + '\n', 'utf-8');
+    } catch (_) {
+      // Ignore log write errors
+    }
   }
 
   console.error(`[${level}] ${message}`);
@@ -55,14 +78,53 @@ function emitError(message, details = {}) {
 /**
  * Collect all assistant output from stream
  * @param {AsyncIterable} stream - Agent SDK query stream
+ * @param {Function} onMessage - Optional callback for each stream message
  */
-async function collectAgentOutput(stream) {
+/**
+ * Extract text content from an SDK message.
+ *
+ * Two shapes to handle:
+ *   1. `stream_event` (only emitted when `includePartialMessages: true`)
+ *      — wraps an upstream SSE event; text chunks come through
+ *        `content_block_delta` with a `BetaTextDelta` payload
+ *        (`{ type: 'text_delta', text: '...' }`).
+ *   2. `assistant` (the cumulative message, always emitted) — content lives in
+ *      `msg.message.content[]` (array of text blocks), NOT in `msg.content`.
+ *
+ * Returning a string is fine: callers concatenate, so each delta is just a
+ * tiny piece that joins into the full output.
+ */
+function _extractAssistantText(msg) {
+  if (!msg) return '';
+  // Per-chunk text from the upstream SSE stream
+  if (msg.type === 'stream_event'
+      && msg.event
+      && msg.event.type === 'content_block_delta'
+      && msg.event.delta
+      && typeof msg.event.delta.text === 'string') {
+    return msg.event.delta.text;
+  }
+  // Full assistant message fallback (also handles the final cumulative state)
+  if (msg.type === 'assistant' && msg.message && msg.message.content) {
+    return msg.message.content
+      .filter(b => b.type === 'text')
+      .map(b => b.text)
+      .join('');
+  }
+  return '';
+}
+
+async function collectAgentOutput(stream, onMessage) {
   const chunks = [];
   let finalResult = null;
 
   for await (const msg of stream) {
-    if (msg.type === 'assistant' && msg.content) {
-      chunks.push(msg.content);
+    if (onMessage) {
+      onMessage(msg);
+    }
+    const text = _extractAssistantText(msg);
+    if (text) {
+      chunks.push(text);
     }
     if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
       finalResult = msg.result;
@@ -71,6 +133,127 @@ async function collectAgentOutput(stream) {
 
   // Prefer final result if available (it's the complete output)
   // Otherwise fall back to concatenated assistant chunks
+  return finalResult || chunks.join('');
+}
+
+/**
+ * Build query options, threading `session_id` through to the SDK as `resume`.
+ * Per the Phase B design: 1 project = 1 session. All agent activities in a
+ * project share the session so the agent has cumulative memory.
+ *
+ * If `sessionId` is null/undefined, no `resume` is set (a fresh session is
+ * created). The host (Rust) is responsible for persisting the session_id
+ * to `.learning/agent-session.json` after initSession().
+ *
+ * @param {object} baseOptions - options WITHOUT resume
+ * @param {string|null|undefined} sessionId
+ * @returns {object} options with resume set (or omitted)
+ */
+function _buildQueryOptions(baseOptions, sessionId) {
+  const opts = { ...(baseOptions || {}) };
+  if (sessionId) {
+    opts.resume = sessionId;
+  }
+  return opts;
+}
+
+/**
+ * Try to consume the stream from a session-resumed query. If the SDK throws
+ * during iteration (e.g. expired session), fall back to a fresh query and
+ * emit a `session_refresh` event with the new session_id. The host updates
+ * `.learning/agent-session.json` on receiving this event.
+ *
+ * Used by every stage that supports `session_id`. The fallback chain:
+ *   1. query({ resume: sessionId, ... })
+ *   2. catch → warn → query({ ... no resume ... })
+ *   3. capture new session_id from first message that has one
+ *   4. emit session_refresh event
+ *
+ * @param {Function} queryFn
+ * @param {object} baseArgs - prompt + options WITHOUT resume
+ * @param {string|null} sessionId
+ * @param {Function} onMessage - (msg) => void
+ * @returns {Promise<string>} collected output text
+ */
+async function collectAgentOutputWithRecovery(queryFn, baseArgs, sessionId, onMessage) {
+  // First attempt: with resume (if sessionId provided)
+  if (sessionId) {
+    const optsWithResume = _buildQueryOptions(baseArgs.options, sessionId);
+    const stream = queryFn({ prompt: baseArgs.prompt, options: optsWithResume });
+    try {
+      return await _consumeStreamCollectingSession(stream, onMessage, /* expectedSessionId */ sessionId);
+    } catch (e) {
+      // Resume failed — log and fall through to fresh
+      log('warn', 'Session resume failed, falling back to fresh session', {
+        attempted_session_id: sessionId,
+        error: e.message
+      });
+    }
+  }
+  // Fresh attempt
+  const stream = queryFn(baseArgs);
+  // Capture the new session_id from the first message that has one
+  let newSessionId = null;
+  const wrappedOnMessage = (msg) => {
+    if (!newSessionId && msg && typeof msg === 'object' && msg.session_id) {
+      newSessionId = msg.session_id;
+    }
+    if (onMessage) onMessage(msg);
+  };
+  const result = await _consumeStreamCollectingSession(stream, wrappedOnMessage, null);
+  if (newSessionId) {
+    log('info', 'Fresh session established', { session_id: newSessionId });
+    if (sessionId) {
+      // We were trying to resume and it failed — notify host of new session
+      emit('session_refresh', { old_session_id: sessionId, new_session_id: newSessionId });
+    }
+  }
+  return result;
+}
+
+async function _consumeStreamCollectingSession(stream, onMessage, expectedSessionId) {
+  const chunks = [];
+  let finalResult = null;
+  // Track which tool_use blocks we've already emitted progress for, to avoid
+  // double-logging when the SDK re-emits them in cumulative messages.
+  const emittedToolUseIds = new Set();
+  for await (const msg of stream) {
+    if (onMessage) onMessage(msg);
+
+    // Existing: extract assistant text
+    const text = _extractAssistantText(msg);
+    if (text) chunks.push(text);
+
+    // NEW: emit progress_log for tool_use blocks so the user sees activity
+    // mid-chapter (Read, Write, Glob) instead of a single "生成中" line.
+    if (msg.type === 'assistant' && msg.message && Array.isArray(msg.message.content)) {
+      for (const block of msg.message.content) {
+        if (!block || block.type !== 'tool_use') continue;
+        const toolUseId = block.id || `${block.name}-${chunks.length}`;
+        if (emittedToolUseIds.has(toolUseId)) continue;
+        emittedToolUseIds.add(toolUseId);
+        const toolName = block.name;
+        const toolInput = block.input || {};
+        let logText = null;
+        if (toolName === 'Write' && toolInput.file_path) {
+          logText = `✓ 正在写 ${path.basename(toolInput.file_path)}`;
+        } else if (toolName === 'Read' && toolInput.file_path) {
+          logText = `📖 正在读 ${path.basename(toolInput.file_path)}`;
+        } else if (toolName === 'Glob' && toolInput.pattern) {
+          logText = `🔍 正在搜索 ${toolInput.pattern}`;
+        } else if (toolName === 'Grep' && toolInput.pattern) {
+          logText = `🔍 正在搜索内容 ${toolInput.pattern}`;
+        }
+        if (logText) {
+          emit('progress_log', { text: logText });
+        }
+      }
+    }
+
+    if (msg.type === 'result' && msg.subtype === 'success' && msg.result) {
+      finalResult = msg.result;
+    }
+  }
   return finalResult || chunks.join('');
 }
 
@@ -141,6 +324,7 @@ async function planCourse(queryFn, config, args) {
 输出格式（必须是纯 JSON）：
 \`\`\`json
 {
+  "project_slug": "diffusion-model",
   "chapters": [
     {
       "title": "章节标题",
@@ -150,13 +334,23 @@ async function planCourse(queryFn, config, args) {
   ],
   "total_duration": 170
 }
-\`\`\``,
+\`\`\`
+
+注意：
+- project_slug 是用英文小写字母和短横线组成的目录名（kebab-case），用于作为文件系统目录名，比如 "diffusion-model" / "attention-mechanism" / "react-basics"。最多 50 字符。`,
     options: {
-      allowedTools: []
+      allowedTools: [],
+      includePartialMessages: true
     }
   });
 
-  const output = await collectAgentOutput(stream);
+  // Drain the stream so it finishes; we don't surface text to the UI.
+  // The `status` and `outline` events below carry all the user-visible
+  // feedback. Dumping the in-progress JSON into progress_log bloated the
+  // planning log with content the user reads from the final outline anyway.
+  const output = await collectAgentOutput(stream, (msg) => {
+    _extractAssistantText(msg);
+  });
 
   // Parse JSON from agent output
   let outline;
@@ -182,22 +376,44 @@ async function planCourse(queryFn, config, args) {
 
   outline.total_duration = outline.chapters.reduce((sum, ch) => sum + ch.duration_minutes, 0);
 
+  // Sanitize project_slug (English kebab-case). Fallback to a safe default if missing or invalid.
+  if (typeof outline.project_slug !== 'string' || !/^[a-z0-9][a-z0-9-]{0,49}$/.test(outline.project_slug)) {
+    outline.project_slug = 'learning-project';
+  }
+
   emit('outline', { outline });
 }
 
 /**
  * Generate chapters (testable)
+ * If `args.chapter_indices` is provided, only those indices are generated
+ * (used by sliding-window mode to add a single next chapter on demand).
  * @param {Function} queryFn - Agent SDK query function or mock
  * @param {object} config - API config
- * @param {object} args - { project_path, outline }
+ * @param {object} args - { project_path, outline, chapter_indices? }
  */
 async function generateChapters(queryFn, config, args) {
-  const { project_path, outline } = args;
-  const chapters = outline.chapters;
-  const total = chapters.length;
+  const { project_path, outline, chapter_indices } = args;
+  const allChapters = outline.chapters;
+  const total = allChapters.length;
 
-  for (let i = 0; i < total; i++) {
-    const chapter = chapters[i];
+  // Sliding-window: only generate the requested indices. Caller must include
+  // `outline` with the full chapter list (we still need title/concepts for each).
+  let indicesToGenerate;
+  if (Array.isArray(chapter_indices) && chapter_indices.length > 0) {
+    indicesToGenerate = chapter_indices
+      .filter(idx => Number.isInteger(idx) && idx >= 0 && idx < total);
+    if (indicesToGenerate.length === 0) {
+      emit('complete', { total_generated: 0 });
+      return;
+    }
+  } else {
+    indicesToGenerate = allChapters.map((_, i) => i);
+  }
+
+  for (let step = 0; step < indicesToGenerate.length; step++) {
+    const i = indicesToGenerate[step];
+    const chapter = allChapters[i];
 
     emit('progress', {
       current: i + 1,
@@ -206,110 +422,75 @@ async function generateChapters(queryFn, config, args) {
       status: 'generating'
     });
 
+    // Build "previous chapters" context from the full outline (not just what we
+    // generated in this run) so the LLM sees the entire syllabus regardless of
+    // sliding-window mode.
     const prevContext = i > 0
-      ? `前面已生成的章节：\n${chapters.slice(0, i).map((ch, idx) => `${idx + 1}. ${ch.title}`).join('\n')}`
+      ? `前面已生成的章节：\n${allChapters.slice(0, i).map((ch, idx) => `${idx + 1}. ${ch.title}`).join('\n')}`
       : '这是第一章。';
 
-    const stream = queryFn({
-      prompt: `你是一个资深的技术写作专家。请生成以下章节的完整学习材料，包括 Markdown 内容、章末测验和概念依赖关系。
-
-第 ${i + 1} 章：${chapter.title}
-预计时长：${chapter.duration_minutes} 分钟
-核心概念：${chapter.concepts.join('、')}
+    // Phase D: minimal prompt. The agent reads the chapter-generation skill
+    // (and its references/content-format.md) for the actual format spec,
+    // then uses Write tool to create the 3 output files. Host does not
+    // parse or write — the agent owns end-to-end file creation.
+    const chapterPrompt = `请使用 chapter-generation skill 生成第 ${i + 1} 章。
+- chapter_index: ${i}
+- chapter_title: ${JSON.stringify(chapter.title)}
+- duration_minutes: ${chapter.duration_minutes}
+- concepts: ${JSON.stringify(chapter.concepts)}
+- project_path: ${JSON.stringify(project_path)}
+- previous_chapters: ${JSON.stringify(allChapters.slice(0, i).map((ch) => ch.title))}
 
 ${prevContext}
 
-请严格按以下格式输出三个部分，每个部分用标记行分隔：
-
----MARKDOWN_START---
-[Markdown 章节内容，要求：]
-- 深入浅出：用生活化类比解释复杂概念
-- 逻辑连贯：每章结尾引出下一章的内容（如果有）
-- 有自己的思考：不仅罗列知识点，还要解释"为什么"
-- 适度总结：关键概念后给出简洁总结
-- 可视化：鼓励使用 Mermaid 图表、表格
-- 每章必须包含：
-  - 至少 2 个 \`> [!concept]\` 概念卡片
-  - 至少 1 个 \`> [!question]\` 思考题（带 \`> [!answer]\` 答案）
-  - 至少 1 个 \`> [!quiz]\` 测验题
----MARKDOWN_END---
-
----QUIZ_JSON_START---
-[章末综合测验 JSON，格式如下：]
-{
-  "chapter_file": "${generateFilename(i, chapter.title)}",
-  "chapter_title": "${chapter.title}",
-  "questions": [
-    {
-      "id": "q1",
-      "qtype": "single",
-      "question": "...",
-      "options": [{"label": "A", "text": "..."}, {"label": "B", "text": "..."}],
-      "correct": "A",
-      "weak_concepts": ["概念名"],
-      "related_section": "1.2 节标题",
-      "suggestion": "答错时的建议"
-    }
-  ],
-  "adaptive_rules": { "mastered_threshold": 0.8, "learning_threshold": 0.5, "max_questions": 5 }
-}
-要求：3-5 题，覆盖本章核心概念，单选 60% + 多选 20% + 开放题 20%
----QUIZ_JSON_END---
-
----CONCEPTS_JSON_START---
-[本章概念及依赖关系 JSON，格式如下：]
-{
-  "chapter": "${generateFilename(i, chapter.title)}",
-  "concepts": [
-    {
-      "id": "concept-slug",
-      "name": "概念中文名",
-      "depends_on": ["上游概念id1", "上游概念id2"]
-    }
-  ]
-}
-要求：提取本章所有核心概念，depends_on 只列出本章首次引入但依赖前面章节的概念
----CONCEPTS_JSON_END---`,
-      options: {
-        allowedTools: []
-      }
-    });
+重要：
+1. chapter-generation skill 的 SKILL.md 和 content-format.md 已经在 init session 里读过，session context 里就有；除非内容不全再 Read 补充，否则直接用 Write 写文件。
+2. 写完三个文件后，按 SKILL.md 的 MUST-VERIFY checklist 逐项检查，不通过就改。
+3. 三个文件必须都存在且 quiz.json 顶层必须有 \`questions\` 字段（不是空对象、不是其他名字）。`;
 
     try {
-      const raw = await collectAgentOutput(stream);
+      // Drain the stream silently. Per the user's "取消" feedback, we no
+      // longer emit any progress_log for chapter generation — `status` and
+      // `progress` events already provide all the liveness feedback needed,
+      // and the .md file is the canonical place to read the content.
+      // Phase B: thread session_id through so the agent has project memory
+      // and previous chapters already loaded in context.
+      // Phase D: agent uses Write tool to create files; host no longer parses.
+      const raw = await collectAgentOutputWithRecovery(
+        queryFn,
+        {
+          prompt: chapterPrompt,
+          options: {
+            // Allow Write so the agent can persist the .md / .quiz.json / .concepts.json
+            allowedTools: ['Read', 'Write', 'Glob', 'Grep'],
+            // Discover all bundled skills (chapter-generation + project-onboarding
+            // + explanation + socratic-review live in .claude/skills/ of the project)
+            skills: 'all',
+            // Project files are at the project root; agent uses cwd
+            cwd: project_path,
+            includePartialMessages: true
+          }
+        },
+        args.session_id,
+        (msg) => { _extractAssistantText(msg); }
+      );
 
-      if (!raw || raw.trim().length < 100) {
-        throw new Error('Generated content is too short');
-      }
-
-      // Parse three sections
-      const mdMatch = raw.match(/---MARKDOWN_START---\n?([\s\S]*?)---MARKDOWN_END---/);
-      const quizMatch = raw.match(/---QUIZ_JSON_START---\n?([\s\S]*?)---QUIZ_JSON_END---/);
-      const conceptsMatch = raw.match(/---CONCEPTS_JSON_START---\n?([\s\S]*?)---CONCEPTS_JSON_END---/);
-
-      const markdown = mdMatch ? mdMatch[1].trim() : raw.trim();
-      const quizJson = quizMatch ? quizMatch[1].trim() : '';
-      const conceptsJson = conceptsMatch ? conceptsMatch[1].trim() : '';
-
-      if (markdown.length < 100) {
-        throw new Error('Markdown content is too short');
+      if (!raw || raw.trim().length < 5) {
+        // With Phase D, the agent's text response is just a confirmation line
+        // like "第 2 章已生成: ...". Anything shorter means something failed.
+        throw new Error('Agent response too short — likely Write tool failure or session error');
       }
 
       const filename = generateFilename(i, chapter.title);
+      // Sanity check: did the agent actually write the .md file?
+      // If not, the file is missing from disk and we should mark as failed
+      // so the user can retry.
       const filepath = path.join(project_path, filename);
-      const baseName = filename.replace(/\.md$/, '');
-
-      // Write Markdown
-      fs.writeFileSync(filepath, markdown, 'utf-8');
-
-      // Write quiz.json
-      if (quizJson) {
-        fs.writeFileSync(path.join(project_path, `${baseName}.quiz.json`), quizJson, 'utf-8');
-      }
-
-      // Write concepts.json
-      if (conceptsJson) {
-        fs.writeFileSync(path.join(project_path, `${baseName}.concepts.json`), conceptsJson, 'utf-8');
+      if (!fs.existsSync(filepath)) {
+        throw new Error(
+          `Agent did not write expected file: ${filename}. ` +
+          `Agent response: ${raw.slice(0, 200)}`
+        );
       }
 
       emit('chapter_complete', {
@@ -318,8 +499,8 @@ ${prevContext}
         title: chapter.title
       });
 
-      // Small delay to avoid rate limiting
-      if (i < total - 1) {
+      // Small delay to avoid rate limiting (only between chapters in the same run)
+      if (step < indicesToGenerate.length - 1) {
         await new Promise(r => setTimeout(r, 500));
       }
     } catch (e) {
@@ -331,7 +512,7 @@ ${prevContext}
     }
   }
 
-  emit('complete', { total_generated: total });
+  emit('complete', { total_generated: indicesToGenerate.length });
 }
 
 /**
@@ -356,8 +537,7 @@ async function explainText(queryFn, config, args) {
   // and emit() writes JSON to stdout via console.log, which pollutes the result.
   // Status updates are not needed for this short-lived operation.
 
-  const stream = queryFn({
-    prompt: `你是一个擅长用生活化类比解释技术概念的导师。
+  const explainPrompt = `你是一个擅长用生活化类比解释技术概念的导师。
 
 请用通俗易懂的语言解释以下概念，长度控制在 ${maxLen} 字以内。
 要求：
@@ -369,13 +549,21 @@ async function explainText(queryFn, config, args) {
 需要解释的概念：${limitedText}
 ${context ? `上下文：${context}` : ''}
 
-直接输出解释文本，不要包含任何 JSON 格式或代码块。`,
-    options: {
-      allowedTools: []
-    }
-  });
+直接输出解释文本，不要包含任何 JSON 格式或代码块。`;
 
-  const output = await collectAgentOutput(stream);
+  const output = await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt: explainPrompt,
+      options: {
+        // Read for project context lookup; Read-only otherwise
+        allowedTools: ['Read', 'Glob', 'Grep'],
+        skills: 'all',  // explanation skill is one of the bundled skills
+        includePartialMessages: true
+      }
+    },
+    args.session_id
+  );
 
   if (!output || output.trim().length === 0) {
     throw new Error('Agent 返回了解释为空');
@@ -405,17 +593,22 @@ async function socraticChat(queryFn, config, args) {
 
   log('info', 'Starting socratic review', { project_path, concept_titles });
 
-  const stream = queryFn({
-    prompt: `开始苏格拉底复习。当前概念簇：${concept_titles.join('、')}`,
-    options: {
-      cwd: project_path,
-      permissionMode: 'bypassPermissions',
-      allowDangerouslySkipPermissions: true,
-      skills: ['socratic-review'],
-    }
-  });
+  const socraticPrompt = `开始苏格拉底复习。当前概念簇：${concept_titles.join('、')}`;
 
-  const output = await collectAgentOutput(stream);
+  const output = await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt: socraticPrompt,
+      options: {
+        cwd: project_path,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        skills: 'all',
+        includePartialMessages: true,
+      }
+    },
+    args.session_id
+  );
 
   if (!output || output.trim().length === 0) {
     throw new Error('Agent returned empty socratic response');
@@ -427,6 +620,87 @@ async function socraticChat(queryFn, config, args) {
 
   log('info', 'Socratic review turn complete', { done, content_length: content.length });
   return { content, done };
+}
+
+/**
+ * Initialize an agent session in the given project workspace.
+ * Used by `create_project_with_session` (Rust) when a project is first created.
+ * The agent is spawned with `cwd: project_path` and `allowedTools: []` (no
+ * mutations during init — we just need a session id). The first system/
+ * assistant message carries the session_id; we emit it as `session_init`.
+ *
+ * Subsequent agent activities (generate, explain, socratic, chat) pass
+ * `resume: <session_id>` to share this session — the agent remembers the
+ * project, prior turns, and any context the user has established.
+ *
+ * @param {Function} queryFn - Agent SDK query function or mock
+ * @param {object} config - API config
+ * @param {object} args - { project_path }
+ * @returns {Promise<{ session_id: string }>}
+ */
+async function initSession(queryFn, config, args) {
+  const { project_path } = args;
+  if (!project_path) {
+    throw new Error('initSession requires project_path');
+  }
+
+  // Inline chapter-generation skill references into the init prompt so the
+  // agent has them in session context. Without this, every chapter generation
+  // re-issues 3 Read tool calls (SKILL.md, content-format.md, examples.md) =
+  // ~1.5-2s × N chapters wasted on redundant reads.
+  const skillRefPaths = [
+    `${project_path}/.claude/skills/chapter-generation/SKILL.md`,
+    `${project_path}/.claude/skills/chapter-generation/references/content-format.md`
+  ];
+  const MAX_REF_BYTES = 24 * 1024; // 24KB cap to keep init prompt bounded
+  const inlinedRefs = [];
+  for (const refPath of skillRefPaths) {
+    try {
+      const content = fs.readFileSync(refPath, 'utf-8');
+      if (content.length > MAX_REF_BYTES) {
+        inlinedRefs.push(`=== ${path.basename(refPath)} (truncated to ${MAX_REF_BYTES} bytes) ===\n${content.slice(0, MAX_REF_BYTES)}\n... (省略 ${content.length - MAX_REF_BYTES} 字节)`);
+      } else {
+        inlinedRefs.push(`=== ${path.basename(refPath)} ===\n${content}`);
+      }
+    } catch (e) {
+      log('warn', 'initSession: failed to inline skill reference', { refPath, error: e.message });
+    }
+  }
+  const refsSection = inlinedRefs.length
+    ? `\n\n以下是项目里 chapter-generation skill 的核心参考资料，请先阅读理解：\n\n${inlinedRefs.join('\n\n')}\n`
+    : '';
+
+  const stream = queryFn({
+    prompt: `请使用 project-onboarding skill 了解这个项目，并返回项目摘要。
+
+项目路径：${project_path}${refsSection}`,
+    options: {
+      cwd: project_path,
+      // Allow Read/Glob during onboarding (per project-onboarding SKILL.md)
+      allowedTools: ['Read', 'Glob', 'Grep'],
+      skills: 'all',   // Agent SDK discovers all SKILL.md under cwd/.claude/skills/
+      includePartialMessages: false
+    }
+  });
+
+  let sessionId = null;
+  for await (const msg of stream) {
+    // All SDK message types that carry a session_id
+    if (!sessionId && msg && typeof msg === 'object' && msg.session_id) {
+      sessionId = msg.session_id;
+    }
+    if (msg.type === 'result') {
+      break;
+    }
+  }
+
+  if (!sessionId) {
+    throw new Error('Failed to obtain session_id from agent stream');
+  }
+
+  log('info', 'initSession: session established', { session_id: sessionId });
+  emit('session_init', { session_id: sessionId });
+  return { session_id: sessionId };
 }
 
 /**
@@ -465,8 +739,7 @@ async function chatWithAgent(queryFn, config, args) {
     ? systemPrompt
     : defaultSystem;
 
-  const stream = queryFn({
-    prompt: `${system}
+  const chatPrompt = `${system}
 
 用户正在深度阅读一篇文章，并希望与你探讨其中的思想。
 
@@ -490,14 +763,21 @@ ${historyText || '（尚未有对话）'}
 
 ${message}
 
-请直接给出你的回复。如果合适，可以在结尾提出一个启发性追问。`,
+请直接给出你的回复。如果合适，可以在结尾提出一个启发性追问。`;
 
-    options: {
-      allowedTools: []
-    }
-  });
-
-  const output = await collectAgentOutput(stream);
+  const output = await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt: chatPrompt,
+      options: {
+        // Read-only chat; agent can read project files for context
+        allowedTools: ['Read', 'Glob', 'Grep'],
+        skills: 'all',
+        includePartialMessages: true
+      }
+    },
+    args.session_id
+  );
 
   if (!output || output.trim().length === 0) {
     throw new Error('Agent returned empty response');
@@ -592,13 +872,13 @@ async function main() {
         process.exit(0);
         break;
       case 'generate':
-        log('info', 'Starting generate stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length });
+        log('info', 'Starting generate stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length, session_id: taskArgs.session_id || null });
         await generateChapters(queryFn, config, taskArgs);
         log('info', 'Generate stage completed');
         process.exit(0);
         break;
       case 'explain':
-        log('info', 'Starting explain stage', { text_length: taskArgs.text?.length, context_length: taskArgs.context?.length });
+        log('info', 'Starting explain stage', { text_length: taskArgs.text?.length, context_length: taskArgs.context?.length, session_id: taskArgs.session_id || null });
         const explanation = await explainText(queryFn, config, taskArgs);
         // Output explanation as plain text to stdout for Rust to capture
         console.log(explanation);
@@ -606,11 +886,19 @@ async function main() {
         process.exit(0);
         break;
       case 'socratic':
-        log('info', 'Starting socratic stage', { project_path: taskArgs.project_path, concept_titles: taskArgs.concept_titles });
+        log('info', 'Starting socratic stage', { project_path: taskArgs.project_path, concept_titles: taskArgs.concept_titles, session_id: taskArgs.session_id || null });
         const socraticResult = await socraticChat(queryFn, config, taskArgs);
         // Output JSON for Rust to parse
         console.log(JSON.stringify(socraticResult));
         log('info', 'Socratic stage completed', { done: socraticResult.done, content_length: socraticResult.content.length });
+        process.exit(0);
+        break;
+      case 'init':
+        log('info', 'Starting init stage', { project_path: taskArgs.project_path });
+        const initResult = await initSession(queryFn, config, taskArgs);
+        // Output JSON for Rust to parse
+        console.log(JSON.stringify(initResult));
+        log('info', 'Init stage completed', { session_id: initResult.session_id });
         process.exit(0);
         break;
       case 'chat':
@@ -647,6 +935,7 @@ module.exports = {
   socraticChat,
   exploreChat,
   chatWithAgent,
+  initSession,
   checkAgentSDK,
   emit,
   emitError,

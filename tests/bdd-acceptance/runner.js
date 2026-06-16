@@ -102,9 +102,10 @@ async function runAcceptanceTests() {
 
   // Sprint 5: Mermaid Fix Apply (AI 修复持久化)
   console.log(`\n${YELLOW}▶ Sprint 5: Mermaid Fix Apply${RESET}`);
+  const sprint5FeaturesDir = path.join(__dirname, '../sprint5/features');
   const sprint5Steps = require('./sprint5_mermaid_apply_fix.steps');
   const sprint5Result = await runFeatureFile(
-    path.join(sprint4FeaturesDir, 'sprint5_mermaid_apply_fix.feature'),
+    path.join(sprint5FeaturesDir, 'sprint5_mermaid_apply_fix.feature'),
     sprint5Steps
   );
   totalPassed += sprint5Result.passed;
@@ -113,9 +114,10 @@ async function runAcceptanceTests() {
 
   // Sprint 6: Explain Conversation (AI 解释 + 追问)
   console.log(`\n${YELLOW}▶ Sprint 6: Explain Conversation${RESET}`);
+  const sprint6FeaturesDir = path.join(__dirname, '../sprint6/features');
   const sprint6Steps = require('./sprint6_explain_conversation.steps');
   const sprint6Result = await runFeatureFile(
-    path.join(sprint4FeaturesDir, 'sprint6_explain_conversation.feature'),
+    path.join(sprint6FeaturesDir, 'sprint6_explain_conversation.feature'),
     sprint6Steps
   );
   totalPassed += sprint6Result.passed;
@@ -123,9 +125,10 @@ async function runAcceptanceTests() {
 
   // Sprint 8: Socratic Review (V2 Notebook, 8a MVP: 核心状态 + 触发 + 集群 + 存档, LLM 留 8b)
   console.log(`\n${YELLOW}▶ Sprint 8: Socratic Review (8a MVP)${RESET}`);
+  const sprint8FeaturesDir = path.join(__dirname, '../sprint8/features');
   const sprint8Steps = require('./sprint8_socratic_review.steps');
   const sprint8Result = await runFeatureFile(
-    path.join(sprint4FeaturesDir, 'sprint8_socratic_review.feature'),
+    path.join(sprint8FeaturesDir, 'sprint8_socratic_review.feature'),
     sprint8Steps
   );
   totalPassed += sprint8Result.passed;

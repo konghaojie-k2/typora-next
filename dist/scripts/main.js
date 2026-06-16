@@ -318,6 +318,22 @@ window.agentBridge = {
   // Tab Management
   // ============================================
   async function addTab(path, content, baseDir) {
+    // Scope check: if learning mode is scoped to a project and the user
+    // opens a file outside it, warn that course mode will be exited.
+    if (_learningProjectPath) {
+      // Normalize both paths to lower-case backslash for reliable comparison
+      const projectNorm = _learningProjectPath.replace(/\//g, '\\').toLowerCase();
+      const fileNorm = path.replace(/\//g, '\\').toLowerCase();
+      if (!fileNorm.startsWith(projectNorm)) {
+        const msg = '当前处于课程模式，打开非课程文件将退出课程模式。\n\n章节生成可能会被中断。确定要打开这个文件吗？';
+        const ok = await _showConfirm(msg);
+        if (!ok) {
+          return; // User cancelled, don't open the file
+        }
+        setLearningMode(false); // Full teardown
+      }
+    }
+
     const existingIndex = state.tabs.findIndex(t => t.path === path);
     if (existingIndex >= 0) {
       // Tab already open, switch to it
@@ -1199,7 +1215,52 @@ window.agentBridge = {
   /**
    * Toggle learning mode visual indicator
    */
-  function setLearningMode(enabled) {
+  // Track which project workspace learning mode is scoped to.
+  // When a file is opened outside this path, learning mode is visually
+  // suppressed (no CSS class) but NOT torn down — generation continues.
+  let _learningProjectPath = null;
+
+  // DOM-based confirm dialog (reliable in Tauri WebView where browser confirm() may not work)
+  function _showConfirm(msg) {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:99999;';
+      const box = document.createElement('div');
+      box.style.cssText = 'background:var(--color-bg-primary,#fff);border-radius:12px;padding:24px;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:inherit;';
+      const p = document.createElement('p');
+      p.style.cssText = 'margin:0 0 20px;font-size:14px;line-height:1.6;color:var(--color-text-primary,#1f2937);white-space:pre-wrap;';
+      p.textContent = msg;
+      box.appendChild(p);
+      const btnRow = document.createElement('div');
+      btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = '取消';
+      cancelBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:1px solid var(--color-border,#e5e7eb);background:var(--color-bg-primary,#fff);cursor:pointer;font-size:14px;font-family:inherit;';
+      const okBtn = document.createElement('button');
+      okBtn.textContent = '确定';
+      okBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-size:14px;font-family:inherit;';
+      btnRow.appendChild(cancelBtn);
+      btnRow.appendChild(okBtn);
+      box.appendChild(btnRow);
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      cancelBtn.focus();
+      cancelBtn.addEventListener('click', () => { overlay.remove(); resolve(false); });
+      okBtn.addEventListener('click', () => { overlay.remove(); resolve(true); });
+    });
+  }
+
+  function setLearningMode(enabled, projectPath) {
+    if (enabled && projectPath) {
+      _learningProjectPath = projectPath;
+    } else if (!enabled) {
+      _learningProjectPath = null;
+      // Full state cleanup: hide progress panel, restore orb, exit learning mode UI
+      const panel = document.getElementById('learningProgressPanel');
+      const orb = document.getElementById('learningModeOrb');
+      if (panel) panel.style.display = 'none';
+      if (orb) orb.style.display = 'none';
+    }
     document.body.classList.toggle('learning-mode', enabled);
 
     // Insert/remove badge in toolbar
@@ -4449,7 +4510,22 @@ window.agentBridge = {
     switchSidebarTab,
     buildTOC,
     filterFileTree,
-    invoke
+    invoke,
+
+    /**
+     * Refresh the file tree sidebar from the currently opened folder.
+     * Used by progress-tracker after chapters are generated so new files appear immediately.
+     */
+    async refreshFileTree() {
+      if (state.currentFolder) {
+        try {
+          const entries = await invoke('list_directory', { path: state.currentFolder });
+          renderFileTree(entries);
+        } catch (err) {
+          console.warn('[TyporaNext] refreshFileTree failed:', err);
+        }
+      }
+    }
   };
 
 })();

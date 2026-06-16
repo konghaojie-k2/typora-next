@@ -170,6 +170,60 @@ TestRunner.test('generateChapters writes files with mock SDK', async () => {
 });
 
 // ============================================
+// Test: generateChapters with chapter_indices (sliding-window)
+// ============================================
+
+TestRunner.test('generateChapters respects chapter_indices (sliding window)', async () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-bridge-'));
+  const events = [];
+  const originalWrite = process.stdout.write;
+  process.stdout.write = (chunk) => {
+    const line = typeof chunk === 'string' ? chunk : chunk.toString();
+    try { events.push(JSON.parse(line.trim())); } catch (e) {}
+    return true;
+  };
+
+  const outline = {
+    project_slug: 'sliding-test',
+    chapters: [
+      { title: '第一章 入门', duration_minutes: 10, concepts: ['A'] },
+      { title: '第二章 进阶', duration_minutes: 20, concepts: ['B'] },
+      { title: '第三章 实战', duration_minutes: 30, concepts: ['C'] },
+      { title: '第四章 总结', duration_minutes: 10, concepts: ['D'] }
+    ]
+  };
+
+  // Only request chapters 0 and 2 (sliding-window subset)
+  await generateChapters(mockSDK.query, {}, {
+    project_path: tmpDir,
+    outline,
+    chapter_indices: [0, 2]
+  });
+
+  process.stdout.write = originalWrite;
+
+  // Only files for indices 0 and 2 should be on disk
+  const files = fs.readdirSync(tmpDir);
+  TestRunner.assert(files.includes('00-第一章-入门.md'), 'Should have chapter 0 file');
+  TestRunner.assert(files.includes('02-第三章-实战.md'), 'Should have chapter 2 file');
+  TestRunner.assert(!files.some(f => f.startsWith('01-')), 'Should NOT have chapter 1 file');
+  TestRunner.assert(!files.some(f => f.startsWith('03-')), 'Should NOT have chapter 3 file');
+
+  // Only 2 chapter_complete events should have been emitted
+  const completeEvents = events.filter(e => e.type === 'chapter_complete');
+  TestRunner.assertEquals(completeEvents.length, 2, 'Should emit exactly 2 chapter_complete events');
+  TestRunner.assertEquals(completeEvents[0].data.index, 0, 'First complete event is index 0');
+  TestRunner.assertEquals(completeEvents[1].data.index, 2, 'Second complete event is index 2');
+
+  // Cleanup
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ============================================
 // Test: checkAgentSDK
 // ============================================
 

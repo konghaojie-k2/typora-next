@@ -330,6 +330,8 @@
             <div class="learning-spinner"></div>
             <p>AI 正在设计学习路径...</p>
             <p class="learning-loading-hint">根据你的目标和难度，规划最佳学习路线</p>
+            <p class="learning-countdown" id="learningCountdown">剩余时间：05:00</p>
+            <div class="learning-planning-log" id="learningPlanningLog"></div>
           </div>
         </div>
 
@@ -349,15 +351,36 @@
   </div>
 
   <!-- Learning Progress Panel (shown during chapter generation) -->
-  <div id="learningProgressPanel" class="learning-progress-panel" style="display: none;">
-    <div class="learning-progress-header">
-      <h3>学习进度</h3>
-      <button id="learningProgressClose" class="learning-progress-close-btn">×</button>
-    </div>
-    <div class="learning-progress-bar-container">
-      <div class="learning-progress-bar">
-        <div class="learning-progress-fill" style="width: 0%"></div>
+  <!-- Generation Progress Overlay (centered, like init status panel) -->
+  <div id="generationProgressOverlay" class="gen-progress-overlay" style="display: none;">
+    <div class="gen-progress-card">
+      <div class="gen-progress-header">
+        <h2 class="gen-progress-title">正在生成学习内容</h2>
+        <button class="gen-progress-minimize" id="genProgressMinimize" title="最小化">—</button>
       </div>
+      <div class="gen-progress-bar-wrap">
+        <div class="gen-progress-bar">
+          <div class="gen-progress-fill" id="genProgressFill" style="width: 0%"></div>
+        </div>
+        <span class="gen-progress-count" id="genProgressCount">0/0 章已完成</span>
+      </div>
+      <div class="gen-progress-chapters" id="genProgressChapters"></div>
+      <div class="gen-progress-log" id="genProgressLog"></div>
+    </div>
+  </div>
+
+  <!-- Learning Progress Panel (bottom-right, post-generation) -->
+  <div id="learningProgressPanel" class="learning-progress-panel" style="display: none;">
+    <div class="learning-progress-header-row">
+      <div class="learning-progress-title">学习进度</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="learning-kg-btn" id="learningKGBtn" title="知识图谱">🧠 图谱</button>
+        <button class="learning-exit-btn" id="learningExitBtn" title="退出课程模式">退出</button>
+        <button class="learning-progress-close-btn" id="learningProgressClose">×</button>
+      </div>
+    </div>
+    <div class="learning-progress-bar">
+      <div class="learning-progress-fill" style="width: 0%"></div>
       <span class="learning-progress-text">0/0 章已完成</span>
     </div>
     <div class="learning-chapter-list" id="learningChapterList"></div>

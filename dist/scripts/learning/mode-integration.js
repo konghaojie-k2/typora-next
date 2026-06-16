@@ -308,7 +308,11 @@
     } catch (err) {
       console.error('[QuizDebug] onQuizStart error:', err);
       const msg = (err && err.message) || String(err);
-      if (window.showToast) window.showToast('❌ 加载测验失败: ' + msg, 'error');
+      if (window.showToast) {
+        window.showToast('❌ ' + msg, 'error');
+      }
+      // Show visible alert so the user definitely sees the error
+      alert('❌ 加载测验失败:\n\n' + msg);
     }
   }
 

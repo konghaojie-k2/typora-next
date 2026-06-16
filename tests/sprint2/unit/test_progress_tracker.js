@@ -239,6 +239,67 @@ TestRunner.test('setChapterFile stores file path', () => {
 });
 
 // ============================================
+// Test: Retry state machine (Sprint log-verbosity + retry-fix regression)
+// ============================================
+
+TestRunner.test('failed → not_generated is a valid transition (for retry reset)', () => {
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'C1' }]);
+
+  manager.setStatus(0, 'generating');
+  manager.setStatus(0, 'failed');
+  // The retry handler resets failed back to not_generated so the sliding
+  // window will pick it up. Without this transition the retry button is
+  // a silent no-op.
+  manager.setStatus(0, 'not_generated');
+  TestRunner.assertEquals(manager.getStatus(0), 'not_generated',
+    'failed should be allowed to go back to not_generated for retry');
+});
+
+TestRunner.test('completed → not_generated is NOT valid (no infinite retry loop)', () => {
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'C1' }]);
+
+  manager.setStatus(0, 'generating');
+  manager.setStatus(0, 'ready');
+  manager.setStatus(0, 'completed');
+  TestRunner.assertThrows(
+    () => manager.setStatus(0, 'not_generated'),
+    'Should reject retry on already-completed chapter'
+  );
+});
+
+TestRunner.test('not_generated → not_generated is NOT valid (no-op safety)', () => {
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'C1' }]);
+  TestRunner.assertThrows(
+    () => manager.setStatus(0, 'not_generated'),
+    'Should reject same-state transition'
+  );
+});
+
+TestRunner.test('full retry flow: failed → not_generated → generating → ready works end-to-end', () => {
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'C1' }, { title: 'C2' }]);
+
+  // First attempt: chapter 1 fails
+  manager.setStatus(1, 'generating');
+  manager.setStatus(1, 'failed');
+  TestRunner.assertEquals(manager.getStatus(1), 'failed');
+
+  // User clicks retry
+  manager.setStatus(1, 'not_generated');
+  TestRunner.assertEquals(manager.getStatus(1), 'not_generated',
+    'After retry click, chapter should be back in the queue');
+
+  // Sliding window picks it up
+  manager.setStatus(1, 'generating');
+  manager.setStatus(1, 'ready');
+  TestRunner.assertEquals(manager.getStatus(1), 'ready',
+    'Chapter should complete successfully on second attempt');
+});
+
+// ============================================
 // Mock Implementation Loader
 // ============================================
 

@@ -108,6 +108,18 @@ const COMMAND_REGISTRY = {
     jsParams: ['goal', 'level', 'hours'],
     rustFile: 'ai_agent.rs',
   },
+  plan_course_llm: {
+    // Phase A: synchronous LLM call (replaces plan_course Agent SDK path)
+    category: 'learning',
+    jsParams: ['goal', 'level', 'hours'],
+    rustFile: 'ai_agent.rs',
+  },
+  setup_project_with_session: {
+    // Phase B: atomic create project + init agent session
+    category: 'learning',
+    jsParams: ['projectPath', 'outline', 'goal'],
+    rustFile: 'lib.rs',
+  },
   generate_chapters: {
     category: 'learning',
     jsParams: ['projectPath', 'outline'],

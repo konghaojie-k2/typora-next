@@ -31,7 +31,7 @@
     'generating': ['ready', 'failed'],
     'ready': ['completed', 'generating'],
     'completed': [],
-    'failed': ['generating']
+    'failed': ['generating', 'not_generated']  // not_generated = reset for sliding-window retry
   };
 
   // Status display config
@@ -151,6 +151,10 @@
             if (event.data.file) {
               this.setChapterFile(event.data.index, event.data.file);
             }
+          }
+          // Refresh file tree so new files appear in sidebar immediately
+          if (window.TyporaNext && window.TyporaNext.refreshFileTree) {
+            window.TyporaNext.refreshFileTree();
           }
           break;
 
@@ -289,6 +293,7 @@
         </div>
       `;
 
+
       this._bindEvents();
     }
 
@@ -386,6 +391,7 @@
       if (!el) return;
 
       const chapter = this.manager.chapters[index];
+      const prevStatus = el.dataset.status;
       const icon = STATUS_ICONS[chapter.status];
       const label = STATUS_LABELS[chapter.status];
 
@@ -406,6 +412,69 @@
         const progress = this.manager.getProgress();
         text.textContent = `${progress.completed}/${progress.total} 章已完成`;
       }
+
+      // Notify listeners of state transitions
+      if (prevStatus !== chapter.status) {
+        if (this.onChapterStatusChange) {
+          this.onChapterStatusChange(index, prevStatus, chapter.status);
+        }
+      }
+    }
+
+    /**
+     * Append a streamed log line to the progress panel's log box.
+     * Lines are kept in memory (max 100) so they survive ui.render() cycles.
+     */
+    appendProgressLog(text) {
+      // Log lines are now shown exclusively via the centered overlay
+      // (GenerationOverlay.appendLog). The bottom-right panel no longer
+      // has a log area — clean and focused on the chapter list.
+      if (!text) return;
+      if (!Array.isArray(this._progressLogLines)) {
+        this._progressLogLines = [];
+      }
+      this._progressLogLines.push(text);
+      while (this._progressLogLines.length > 100) {
+        this._progressLogLines.shift();
+      }
+    }
+
+    /**
+     * Show inline progress during generation — a prominent, styled log area
+     * that appears above the chapter list. Styled to match init-status-panel.
+     * Each line shows tool activity: "📖 正在读 SKILL.md" / "✓ 正在写 01-xxx.md"
+     */
+    showInlineProgress(text) {
+      if (!text) return;
+      // Find or create the inline progress container
+      let inlineEl = this.container.querySelector('.gen-progress-inline');
+      if (!inlineEl) {
+        inlineEl = document.createElement('div');
+        inlineEl.className = 'gen-progress-inline';
+        // Insert before the chapter list so it's prominent
+        const chapterList = this.container.querySelector('.learning-chapter-list');
+        if (chapterList) {
+          chapterList.parentNode.insertBefore(inlineEl, chapterList);
+        } else {
+          this.container.appendChild(inlineEl);
+        }
+      }
+      // Determine line style: ✓ → done, 📖/🔍 → active
+      const isDone = text.startsWith('✓');
+      const isActive = text.startsWith('📖') || text.startsWith('🔍');
+      const line = document.createElement('div');
+      line.className = 'log-line' + (isDone ? ' done' : isActive ? ' active' : '');
+      if (isActive) {
+        line.innerHTML = '<span class="spinner-inline"></span> ' + this._escapeHtml(text);
+      } else {
+        line.textContent = text;
+      }
+      inlineEl.appendChild(line);
+      inlineEl.scrollTop = inlineEl.scrollHeight;
+      // Cap at 20 lines
+      while (inlineEl.children.length > 20) {
+        inlineEl.removeChild(inlineEl.firstChild);
+      }
     }
 
     _escapeHtml(text) {
@@ -420,10 +489,13 @@
   // Agent Event Bridge
   // ============================================
   class AgentEventBridge {
-    constructor(manager, ui) {
+    constructor(manager, ui, overlay) {
       this.manager = manager;
       this.ui = ui;
+      this.overlay = overlay; // GenerationOverlay (centered progress)
       this._bound = false;
+      this._generationDone = false;
+      this._graphRebuildTimer = null;
     }
 
     /**
@@ -453,13 +525,482 @@
       // Update UI for the affected chapter
       if (payload.type === 'progress' && payload.data.current) {
         this.ui.updateChapter(payload.data.current - 1);
+        if (this.overlay) this.overlay.updateChapter(payload.data.current - 1, 'active');
       } else if (payload.type === 'chapter_complete' && typeof payload.data.index === 'number') {
         this.ui.updateChapter(payload.data.index);
+        if (this.overlay) this.overlay.updateChapter(payload.data.index, 'done');
+        // After a chapter finishes, the knowledge graph is missing the new
+        // concepts/edges. Trigger a background rebuild so the dashboard
+        // shows the new graph the next time the user opens it. We do this
+        // async (no await) so the UI update isn't blocked.
+        if (this.ui && this.ui.projectPath && window.KnowledgeGraphManager) {
+          const projectPath = this.ui.projectPath;
+          // Debounce: if multiple chapter_complete arrive in quick succession,
+          // skip rebuilds until 1.5s of quiet. Last one wins.
+          if (this._graphRebuildTimer) clearTimeout(this._graphRebuildTimer);
+          this._graphRebuildTimer = setTimeout(async () => {
+            if (this.overlay) this.overlay.appendLog('正在重建知识图谱...');
+            try {
+              const kgm = new window.KnowledgeGraphManager(projectPath);
+              await kgm.buildGraph();
+              if (this.overlay) this.overlay.appendLog('✓ 知识图谱已更新');
+            } catch (e) {
+              const errMsg = e?.message || String(e);
+              console.warn('[ProgressTracker] background graph rebuild failed:', errMsg);
+              if (this.overlay) this.overlay.appendLog('❌ 知识图谱重建失败: ' + errMsg.slice(0, 100));
+            }
+          }, 1500);
+        }
       } else if (payload.type === 'chapter_failed' && typeof payload.data.index === 'number') {
         this.ui.updateChapter(payload.data.index);
+        if (this.overlay) this.overlay.updateChapter(payload.data.index, 'failed');
       } else if (payload.type === 'complete') {
         this.ui.render();
+        // Final refresh of file tree to ensure all generated files appear
+        if (window.TyporaNext && window.TyporaNext.refreshFileTree) {
+          window.TyporaNext.refreshFileTree();
+        }
+        // Force a final graph rebuild once all chapters are done.
+        if (this.ui && this.ui.projectPath && window.KnowledgeGraphManager) {
+          if (this._graphRebuildTimer) clearTimeout(this._graphRebuildTimer);
+          (async () => {
+            if (this.overlay) this.overlay.appendLog('正在重建知识图谱...');
+            try {
+              const kgm = new window.KnowledgeGraphManager(this.ui.projectPath);
+              await kgm.buildGraph();
+              if (this.overlay) this.overlay.appendLog('✓ 知识图谱已更新');
+            } catch (e) {
+              const errMsg = e?.message || String(e);
+              console.warn('[ProgressTracker] final graph rebuild failed:', errMsg);
+              if (this.overlay) this.overlay.appendLog('❌ 知识图谱重建失败: ' + errMsg.slice(0, 100));
+            }
+          })();
+        }
+        // Mark generation as done — stop the inline progress animation
+        this._generationDone = true;
+        // Auto-minimize the centered overlay to orb after a short delay.
+        // Mark as done so subsequent orb clicks restore the bottom-right
+        // learning progress panel instead of the overlay.
+        if (this.overlay) {
+          this.overlay.done();
+          setTimeout(() => this.overlay.minimize(), 3000);
+        }
+      } else if (payload.type === 'progress_log' && payload.data && payload.data.text) {
+        // Streamed log line (used by both planning and chapter generation)
+        if (this.ui && this.ui.appendProgressLog) {
+          this.ui.appendProgressLog(payload.data.text);
+        }
+        // Also show in the centered overlay
+        if (this.overlay) {
+          this.overlay.appendLog(payload.data.text);
+        }
       }
+
+      // Always re-sync UI from manager state to handle missed events when panel was hidden
+      this._refreshPanel();
+    }
+
+    /**
+     * Re-render panel if it's currently visible so the user always sees
+     * the latest state, even after reopening the panel from the orb.
+     */
+    _refreshPanel() {
+      if (!this.ui || !this.ui.container) return;
+      const visible = this.ui.container.style.display !== 'none';
+      if (visible) {
+        // Update the progress bar / counters (which updateChapter doesn't touch)
+        const progress = this.manager.getProgress();
+        const fill = this.ui.container.querySelector('.learning-progress-fill');
+        const text = this.ui.container.querySelector('.learning-progress-text');
+        if (fill) fill.style.width = `${this.manager.getProgressPercentage()}%`;
+        if (text) text.textContent = `${progress.completed}/${progress.total} 章已完成`;
+      }
+    }
+  }
+
+  /**
+   * GenerationOverlay — centered progress overlay during chapter generation.
+   * Shows chapter list + streaming log in a card similar to init status panel.
+   * Can be minimized to the orb; auto-minimizes on completion.
+   */
+  class GenerationOverlay {
+    constructor(chapters, projectPath) {
+      this.chapters = chapters;
+      this.projectPath = projectPath;
+      this.overlay = document.getElementById('generationProgressOverlay');
+      this.orb = document.getElementById('learningModeOrb');
+      this._logLines = [];
+      this._done = false;
+      this._chapterStatuses = chapters.map(() => 'pending'); // pending | active | done | failed
+      this._init();
+    }
+
+    _init() {
+      if (!this.overlay) return;
+
+      // Render chapter list
+      const chaptersEl = this.overlay.querySelector('#genProgressChapters');
+      if (chaptersEl) {
+        chaptersEl.innerHTML = this.chapters.map((ch, i) => `
+          <div class="gen-progress-chapter-item pending" data-index="${i}">
+            <div class="gen-progress-chapter-icon">${i + 1}</div>
+            <div>${this._escapeHtml(ch.title)}</div>
+          </div>
+        `).join('');
+      }
+
+      // Update progress count
+      this._updateCount();
+
+      // Minimize button
+      const minBtn = this.overlay.querySelector('#genProgressMinimize');
+      if (minBtn) {
+        minBtn.addEventListener('click', () => this.minimize());
+      }
+
+      // Show overlay
+      this.overlay.style.display = 'flex';
+      if (this.orb) this.orb.style.display = 'none';
+    }
+
+    /**
+     * Update a chapter's status in the overlay
+     * @param {number} index
+     * @param {'pending'|'active'|'done'|'failed'} status
+     */
+    updateChapter(index, status) {
+      if (!this.overlay) return;
+      this._chapterStatuses[index] = status;
+      const item = this.overlay.querySelector(`.gen-progress-chapter-item[data-index="${index}"]`);
+      if (!item) return;
+
+      item.className = `gen-progress-chapter-item ${status}`;
+      const icon = item.querySelector('.gen-progress-chapter-icon');
+      if (icon) {
+        if (status === 'done') {
+          icon.textContent = '✓';
+        } else if (status === 'failed') {
+          icon.textContent = '✗';
+        } else if (status === 'active') {
+          icon.innerHTML = '<div class="gen-progress-chapter-spinner"></div>';
+        } else {
+          icon.textContent = String(index + 1);
+        }
+      }
+      this._updateCount();
+      this._updateFill();
+    }
+
+    /**
+     * Append a log line to the progress log area
+     */
+    appendLog(text) {
+      if (!this.overlay || !text) return;
+      this._logLines.push(text);
+      const logEl = this.overlay.querySelector('#genProgressLog');
+      if (!logEl) return;
+
+      const isDone = text.startsWith('✓');
+      const isActive = text.startsWith('📖') || text.startsWith('🔍');
+      const line = document.createElement('div');
+      line.className = 'log-line' + (isDone ? ' done' : isActive ? ' active' : '');
+      if (isActive) {
+        line.innerHTML = '<span class="spinner-inline"></span> ' + this._escapeHtml(text);
+      } else {
+        line.textContent = text;
+      }
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+      while (logEl.children.length > 30) {
+        logEl.removeChild(logEl.firstChild);
+      }
+    }
+
+    /**
+     * Minimize overlay to orb
+     */
+    minimize() {
+      if (this.overlay) this.overlay.style.display = 'none';
+      if (this.orb) this.orb.style.display = 'flex';
+    }
+
+    /**
+     * Restore overlay from orb
+     */
+    restore() {
+      if (this.overlay) this.overlay.style.display = 'flex';
+      if (this.orb) this.orb.style.display = 'none';
+    }
+
+    /**
+     * Mark overlay as "generation done". After this, orb click will restore
+     * the bottom-right learning progress panel instead of the centered overlay.
+     */
+    done() {
+      this._done = true;
+    }
+
+    /**
+     * Hide overlay completely (after generation is done and user has seen the result)
+     */
+    hide() {
+      if (this.overlay) this.overlay.style.display = 'none';
+    }
+
+    _updateCount() {
+      const countEl = this.overlay && this.overlay.querySelector('#genProgressCount');
+      if (!countEl) return;
+      const done = this._chapterStatuses.filter(s => s === 'done').length;
+      countEl.textContent = `${done}/${this.chapters.length} 章已完成`;
+    }
+
+    _updateFill() {
+      const fillEl = this.overlay && this.overlay.querySelector('#genProgressFill');
+      if (!fillEl) return;
+      const done = this._chapterStatuses.filter(s => s === 'done').length;
+      fillEl.style.width = `${(done / this.chapters.length) * 100}%`;
+    }
+
+    _escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, c => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+    }
+  }
+
+  // ============================================
+  // Filesystem Polling (fallback for missed agent-events)
+  // ============================================
+
+  /**
+   * Poll the project directory every POLL_INTERVAL_MS to detect chapter .md files
+   * that exist on disk but are not yet marked ready in our state machine.
+   * Stops once every chapter is in a terminal state (ready/completed/failed).
+   */
+  const POLL_INTERVAL_MS = 3000;
+  function startFileSystemPolling(projectPath, manager, ui, bridge) {
+    if (!window.__TAURI__ || !projectPath) return;
+    if (startFileSystemPolling._interval) clearInterval(startFileSystemPolling._interval);
+
+    async function pollOnce() {
+      // Stop if all chapters are in a terminal state
+      const progress = manager.getProgress();
+      const unfinished = progress.not_generated + progress.generating + progress.failed;
+      if (unfinished === 0) {
+        if (startFileSystemPolling._interval) {
+          clearInterval(startFileSystemPolling._interval);
+          startFileSystemPolling._interval = null;
+        }
+        return;
+      }
+
+      try {
+        const entries = await window.__TAURI__.core.invoke('list_directory', { path: projectPath });
+        const filesOnDisk = new Set(
+          (entries || [])
+            .filter(e => e.is_file && /\.md$/i.test(e.name))
+            .map(e => e.name)
+        );
+
+        let anyChange = false;
+        for (let i = 0; i < manager.chapters.length; i++) {
+          const ch = manager.chapters[i];
+          if (ch.status === 'ready' || ch.status === 'completed' || ch.status === 'failed') continue;
+
+          // Try to find a chapter file on disk matching this chapter
+          const expectedFile = _guessChapterFileName(i, ch.title);
+          if (filesOnDisk.has(expectedFile)) {
+            // Replay a synthetic chapter_complete event so the rest of the pipeline (UI + hub) runs
+            console.log(`[ProgressTracker] FS poll: found ${expectedFile} for chapter ${i}, syncing state`);
+            try {
+              manager.setStatus(i, 'ready');
+            } catch (_) {
+              // Already in a non-pending state, skip
+              continue;
+            }
+            manager.setChapterFile(i, expectedFile);
+            ui.updateChapter(i);
+            anyChange = true;
+
+            // Persist progress into learning hub so resume works
+            if (window.LearningHub && window.LearningHub.updateProjectProgress) {
+              const updated = manager.getProgress();
+              window.LearningHub.updateProjectProgress(projectPath, updated.completed, updated.total).catch(() => {});
+            }
+          }
+        }
+
+        if (anyChange) {
+          // Re-render panel if visible so progress bar updates
+          if (ui.container.style.display !== 'none') {
+            const fill = ui.container.querySelector('.learning-progress-fill');
+            const text = ui.container.querySelector('.learning-progress-text');
+            const updated = manager.getProgress();
+            if (fill) fill.style.width = `${manager.getProgressPercentage()}%`;
+            if (text) text.textContent = `${updated.completed}/${updated.total} 章已完成`;
+          }
+        }
+      } catch (err) {
+        console.warn('[ProgressTracker] FS poll failed:', err);
+      }
+    }
+
+    // Kick off after a short delay so the first batch of agent-events can land first
+    setTimeout(pollOnce, 2000);
+    startFileSystemPolling._interval = setInterval(pollOnce, POLL_INTERVAL_MS);
+  }
+
+  /**
+   * Mirror agent-bridge.js generateFilename() to predict the on-disk name.
+   * Format: NN-{sanitized-title}.md (zero-padded index)
+   */
+  function _guessChapterFileName(index, title) {
+    const paddedIndex = String(index).padStart(2, '0');
+    const safeTitle = (title || `chapter-${index}`)
+      .replace(/[^一-龥a-zA-Z0-9]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    return `${paddedIndex}-${safeTitle}.md`;
+  }
+
+  // ============================================
+  // Sliding-Window Pre-Generation
+  // ============================================
+  // Strategy: when the user starts a project, pre-generate the first N chapters
+  // (N=2 by default). As the user completes chapters (status → 'completed'),
+  // the next pending chapter is automatically enqueued for generation, so the
+  // user never waits more than the time for one chapter to become ready.
+  //
+  // Why sliding-window: a project with 11 chapters (e.g. "扩散模型") would
+  // otherwise take 5-15 minutes to pre-generate everything. With the window
+  // the user starts reading in ~1 chapter-time.
+  const DEFAULT_WINDOW_SIZE = 2;
+  const windowState = {
+    projectPath: null,
+    totalChapters: 0,
+    windowSize: DEFAULT_WINDOW_SIZE,
+    initialTriggered: false,
+    inFlight: false  // serialize to avoid concurrent generate_chapters calls
+  };
+
+  /**
+   * Initialize sliding-window for a new project.
+   * @param {string} projectPath
+   * @param {number} totalChapters
+   * @param {number} windowSize - how many chapters to pre-generate (default 2)
+   */
+  function initSlidingWindow(projectPath, totalChapters, windowSize) {
+    windowState.projectPath = projectPath;
+    windowState.totalChapters = totalChapters;
+    windowState.windowSize = (typeof windowSize === 'number' && windowSize > 0)
+      ? windowSize
+      : DEFAULT_WINDOW_SIZE;
+    windowState.initialTriggered = false;
+    windowState.inFlight = false;
+  }
+
+  /**
+   * Compute which chapter indices are currently "in the window" and need to
+   * exist on disk. These are the chapters that are either pending generation
+   * (not_generated) OR the next-N unstarted chapters ahead of the highest
+   * completed chapter.
+   */
+  function _computeWindowIndices(manager) {
+    if (!manager && window.LearningProgress && window.LearningProgress._manager) {
+      manager = window.LearningProgress._manager;
+    }
+    if (!manager) {
+      // No manager available: trigger the first windowSize chapters
+      const total = windowState.totalChapters;
+      const indices = [];
+      const limit = Math.min(total, windowState.windowSize);
+      for (let i = 0; i < limit; i++) indices.push(i);
+      return indices;
+    }
+    const total = manager.chapters.length;
+    // Highest completed index (-1 if none completed yet)
+    const completedIdx = manager.chapters.reduce((max, ch, i) =>
+      ch.status === 'completed' ? Math.max(max, i) : max, -1);
+    // Window end (exclusive): completedIdx + 1 + windowSize
+    const windowEnd = Math.min(total, completedIdx + 1 + windowState.windowSize);
+    // Window start: at least the first chapter, or 0 if nothing is completed
+    const windowStart = completedIdx + 1;
+    const indices = [];
+    for (let i = windowStart; i < windowEnd; i++) {
+      if (manager.chapters[i].status === 'not_generated') {
+        indices.push(i);
+      }
+    }
+    return indices;
+  }
+
+  /**
+   * Trigger generation of the current sliding-window chapters.
+   * Safe to call repeatedly: it bails out if a request is already in flight.
+   * @param {object} manager - ChapterStatusManager
+   * @param {object} outline - full outline (needed for chapter titles/concepts)
+   * @param {string} projectPath
+   */
+  async function triggerSlidingWindow(manager, outline, projectPath) {
+    if (windowState.inFlight) {
+      console.log('[SlidingWindow] Already in flight, skipping');
+      return;
+    }
+    if (!window.__TAURI__) return;
+
+    const indices = _computeWindowIndices(manager);
+    if (indices.length === 0) {
+      console.log('[SlidingWindow] Nothing to generate, window satisfied');
+      return;
+    }
+
+    windowState.inFlight = true;
+    console.log(`[SlidingWindow] Triggering generation for chapters [${indices.join(', ')}]`);
+
+    // Mark them as 'generating' optimistically so the UI shows progress
+    for (const i of indices) {
+      try {
+        manager.setStatus(i, 'generating');
+      } catch (_) {
+        // May already be in a different state (e.g. ready) due to FS poll
+      }
+    }
+    // Refresh UI
+    if (window.LearningProgress && window.LearningProgress._ui) {
+      const ui = window.LearningProgress._ui;
+      for (const i of indices) {
+        if (ui.updateChapter) ui.updateChapter(i);
+      }
+    }
+
+    try {
+      // Phase B: read session_id from .learning/agent-session.json so the
+      // agent has project memory across chapter generations. If the file
+      // is missing (legacy project) or unreadable, fall through with no
+      // session_id — agent will start fresh for this project.
+      let sessionId = null;
+      try {
+        const { exists, readTextFile } = window.__TAURI__.fs;
+        const sessionPath = (projectPath || windowState.projectPath) + '/.learning/agent-session.json';
+        if (await exists(sessionPath)) {
+          const data = JSON.parse(await readTextFile(sessionPath));
+          sessionId = data.session_id || null;
+        }
+      } catch (e) {
+        console.warn('[SlidingWindow] failed to read session, falling back to fresh:', e);
+      }
+
+      await window.__TAURI__.core.invoke('generate_chapters', {
+        projectPath: projectPath || windowState.projectPath,
+        outline,
+        chapterIndices: indices,
+        sessionId  // null is fine — Rust passes Option<String>
+      });
+      console.log('[SlidingWindow] generate_chapters returned', { sessionId: !!sessionId });
+    } catch (err) {
+      console.error('[SlidingWindow] generate_chapters failed:', err);
+    } finally {
+      windowState.inFlight = false;
     }
   }
 
@@ -474,12 +1015,46 @@
     STATUS_LABELS,
 
     /**
+     * Configure the sliding-window pre-generation size.
+     * Must be called BEFORE startGeneration() to take effect.
+     * @param {number} totalChapters
+     * @param {number} windowSize - how many chapters to pre-generate (default 2)
+     */
+    setInitialWindow(totalChapters, windowSize) {
+      initSlidingWindow(null, totalChapters, windowSize);
+    },
+
+    /**
+     * Manually trigger the next batch of windowed generations.
+     * Useful for "Generate" button or external controls (e.g. resume).
+     */
+    triggerNextChapters(outline, projectPath) {
+      // Make sure windowState has up-to-date projectPath + totalChapters
+      // (startGeneration normally sets this; resume may bypass it)
+      if (projectPath && !windowState.projectPath) {
+        windowState.projectPath = projectPath;
+      }
+      if (outline && outline.chapters && !windowState.totalChapters) {
+        windowState.totalChapters = outline.chapters.length;
+      }
+      return triggerSlidingWindow(null, outline, projectPath);
+    },
+
+    /**
      * Start generation flow (called from project-manager.js)
      * @param {object} outline - { chapters: [...] }
      * @param {string} projectPath
      */
     startGeneration(outline, projectPath) {
       console.log('[ProgressTracker] startGeneration called, chapters:', outline.chapters?.length, 'path:', projectPath);
+
+      // Point the sidebar file tree to the project directory so new chapters
+      // appear as they are generated, and refreshFileTree() on chapter_complete
+      // has the correct currentFolder context.
+      if (window.TyporaNext && window.TyporaNext.loadFolderPath) {
+        window.TyporaNext.loadFolderPath(projectPath);
+      }
+
       const manager = new ChapterStatusManager(outline.chapters);
       const container = document.getElementById('learningProgressPanel');
 
@@ -487,7 +1062,9 @@
 
       if (container) {
         console.log('[ProgressPanel] Found container, initializing UI');
-        container.style.display = 'flex';
+        // During generation, only the centered overlay is visible.
+        // The bottom-right panel stays hidden until post-generation (orb click).
+        container.style.display = 'none';
         if (orb) orb.style.display = 'none';
         const ui = new ProgressUI(container);
         ui.projectPath = projectPath;
@@ -520,91 +1097,138 @@
           }
         };
 
-        // Bind "Generate" button → start chapter generation
+        // Bind "Generate" button → start chapter generation (sliding window)
         ui.onGenerateClick = () => {
           const genBtn = container.querySelector('#learningGenerateBtn');
           if (genBtn) {
             genBtn.disabled = true;
             genBtn.textContent = '生成中...';
           }
-          if (window.__TAURI__) {
-            const { invoke } = window.__TAURI__.core;
-            invoke('generate_chapters', {
-              projectPath,
-              outline: { chapters: manager.chapters }
-            }).catch(err => {
-              console.error('[ProgressTracker] Failed to start generation:', err);
-              if (genBtn) {
-                genBtn.disabled = false;
-                genBtn.textContent = '🔄 开始生成';
-              }
+          triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath).then(() => {
+            if (genBtn) {
+              genBtn.disabled = false;
+              genBtn.textContent = '🔄 重新生成';
+            }
+          }).catch(err => {
+            console.error('[ProgressTracker] Sliding window trigger failed:', err);
+            if (genBtn) {
+              genBtn.disabled = false;
+              genBtn.textContent = '🔄 开始生成';
+            }
+          });
+        };
+
+        // Bind "图谱" button → open knowledge graph dashboard
+        ui.onOpenDashboard = async () => {
+          if (!window.KnowledgeGraphManager || !window.KnowledgeGraphDashboard) return;
+          try {
+            const kgBtn = container.querySelector('#learningKGBtn');
+            const originalText = kgBtn ? kgBtn.textContent : '';
+            if (kgBtn) kgBtn.textContent = '⏳ 图谱';
+
+            const kgm = new window.KnowledgeGraphManager(projectPath);
+            // Check freshness first — rebuild only if chapters were added.
+            const needsRebuild = await kgm.needsRebuild();
+            if (needsRebuild) {
+              await kgm.buildGraph();
+            }
+            const graph = await kgm.loadGraph();
+            const stats = graph ? kgm.computeStats(graph, null) : { total: 0, mastered: 0, learning: 0, struggling: 0, notStarted: 0 };
+            const projectName = projectPath.split(/[/\\]/).pop() || projectPath;
+            if (kgBtn) kgBtn.textContent = originalText;
+            const dashboard = new window.KnowledgeGraphDashboard({
+              onClose: () => dashboard.close()
             });
+            dashboard.show({ graph, stats, chapters: manager.chapters, projectName });
+          } catch (e) {
+            console.warn('[ProgressTracker] Failed to open KG dashboard:', e);
+            if (container.querySelector('#learningKGBtn')) {
+              container.querySelector('#learningKGBtn').textContent = '🧠 图谱';
+            }
+          }
+        };
+
+        // Bind "Retry" button on a failed chapter — reset to not_generated
+        // and re-trigger the sliding window. The sliding window only picks
+        // up not_generated chapters, so without this reset a failed chapter
+        // would stay failed forever.
+        ui.onRetryClick = (index) => {
+          console.log(`[ProgressTracker] Retry requested for chapter ${index}`);
+          try {
+            manager.setStatus(index, 'not_generated');
+          } catch (e) {
+            console.error('[ProgressTracker] Failed to reset chapter status:', e);
+            return;
+          }
+          if (ui.updateChapter) ui.updateChapter(index);
+          triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath);
+        };
+
+        // Sliding window: when a chapter becomes 'completed', enqueue the next
+        // unstarted chapter for generation. This is the core of "按需生成" —
+        // we never pre-generate more than the next N chapters.
+        ui.onChapterStatusChange = (index, prevStatus, newStatus) => {
+          console.log(`[ProgressTracker] Chapter ${index}: ${prevStatus} → ${newStatus}`);
+          if (newStatus === 'completed') {
+            // The user just finished a chapter. Slide the window forward.
+            triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath);
           }
         };
 
         // Enter learning mode
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
-          window.TyporaNext.setLearningMode(true);
+          window.TyporaNext.setLearningMode(true, projectPath);
         }
 
-        const bridge = new AgentEventBridge(manager, ui);
+        // Create centered generation overlay (like init status panel)
+        const overlay = new GenerationOverlay(outline.chapters, projectPath);
+
+        const bridge = new AgentEventBridge(manager, ui, overlay);
         bridge.bind();
 
-        // Click outside to close panel → show orb
-        const onClickOutside = (e) => {
-          if (!container.contains(e.target) && !orb.contains(e.target)) {
-            container.style.display = 'none';
-            orb.style.display = 'flex';
-            document.removeEventListener('click', onClickOutside);
-          }
-        };
-        // Delay to avoid immediate close from the same click that opened it
-        setTimeout(() => {
-          document.addEventListener('click', onClickOutside);
-        }, 100);
+        // Orb click: if generation still in progress, restore centered overlay;
+        // otherwise (post-generation), restore the bottom-right panel.
+        if (orb) {
+          orb.onclick = () => {
+            if (overlay._done) {
+              container.style.display = 'flex';
+              orb.style.display = 'none';
+              ui.render();
+            } else {
+              overlay.restore();
+            }
+          };
+        }
 
         // Exit learning mode handler
         ui.onExitLearningClick = () => {
+          overlay.hide();
           container.style.display = 'none';
           if (orb) orb.style.display = 'none';
-          document.removeEventListener('click', onClickOutside);
           if (window.TyporaNext) {
             if (window.TyporaNext.setLearningMode) window.TyporaNext.setLearningMode(false);
             if (window.TyporaNext.unloadFolder) window.TyporaNext.unloadFolder();
           }
         };
 
-        // Orb click → restore panel
-        if (orb) {
-          orb.onclick = () => {
-            container.style.display = 'flex';
-            orb.style.display = 'none';
-          };
-        }
-
         // Store references for external access
         this._manager = manager;
         this._ui = ui;
         this._bridge = bridge;
+
+        // Filesystem polling fallback — if an agent-event was missed while
+        // the panel was hidden, this brings the UI back in sync with reality.
+        startFileSystemPolling(projectPath, manager, ui, bridge);
       } else {
         console.error('[ProgressPanel] Container #learningProgressPanel not found!');
       }
 
-      // Call Rust to start generation
-      if (window.__TAURI__) {
-        const { invoke } = window.__TAURI__.core;
-        console.log('[ProgressTracker] Calling generate_chapters...');
-        invoke('generate_chapters', {
-          projectPath,
-          outline
-        }).then(() => {
-          console.log('[ProgressTracker] generate_chapters invoke returned OK');
-        }).catch(err => {
-          console.error('[ProgressTracker] Failed to start generation:', err);
-        });
-      } else {
-        console.error('[ProgressTracker] No Tauri available');
-      }
+      // Call Rust to start generation — sliding window (first N chapters)
+      console.log('[ProgressTracker] Sliding window: triggering initial generation');
+      initSlidingWindow(projectPath, outline.chapters?.length || 0, windowState.windowSize);
+      triggerSlidingWindow(manager, outline, projectPath).catch(err => {
+        console.error('[ProgressTracker] Initial sliding window trigger failed:', err);
+      });
     },
 
     /**

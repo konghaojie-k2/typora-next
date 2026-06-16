@@ -121,7 +121,7 @@
           window.TyporaNext.loadFolderPath(path);
         }
 
-        // Show knowledge graph dashboard modal (non-blocking)
+        // Auto-show KG dashboard on entry (builds graph if needed)
         showProjectDashboard(project, path).catch(e =>
           console.warn('[ProjectDashboard] Error:', e)
         );
@@ -191,6 +191,10 @@
    * Loads graph data (builds if needed), computes stats, shows modal.
    * Returns a promise that resolves when the user closes the modal or clicks "进入阅读".
    */
+  // Guard: prevent re-entrance when both auto-show (line 125) and button click
+  // call showProjectDashboard simultaneously.
+  let _showProjectDashboardBusy = false;
+
   async function showProjectDashboard(project, basePath) {
     // Compatibility: called as showProjectDashboard(basePath) from review-summary-modal
     if (typeof project === 'string' && !basePath) {
@@ -203,8 +207,13 @@
       console.warn('[ProjectDashboard] Modules not loaded, skipping');
       return;
     }
+    if (_showProjectDashboardBusy) {
+      console.log('[ProjectDashboard] Already busy, skipping duplicate call');
+      return;
+    }
 
     try {
+      _showProjectDashboardBusy = true;
       const kgm = new window.KnowledgeGraphManager(basePath);
 
       // Check if graph needs rebuild
@@ -271,6 +280,11 @@
       });
     } catch (e) {
       console.warn('[ProjectResume] showProjectDashboard error:', e);
+      if (window.showToast) {
+        window.showToast('❌ ' + (e.message || String(e)), 'error');
+      }
+    } finally {
+      _showProjectDashboardBusy = false;
     }
   }
 
@@ -347,31 +361,41 @@
           }
         };
 
-        // Bind "Generate" button → start chapter generation
+        // Sliding window: when a chapter becomes 'completed', enqueue the next
+        // unstarted chapter for generation. Same hook as progress-tracker.js
+        // so resume benefits from the same window logic.
+        ui.onChapterStatusChange = (index, prevStatus, newStatus) => {
+          if (newStatus === 'completed') {
+            const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+            if (triggerNext) {
+              triggerNext({ chapters: project.chapters }, basePath);
+            }
+          }
+        };
+
+        // Bind "Generate" button → start chapter generation (sliding window)
         ui.onGenerateClick = () => {
           const genBtn = container.querySelector('#learningGenerateBtn');
           if (genBtn) {
             genBtn.disabled = true;
             genBtn.textContent = '生成中...';
           }
-          if (window.__TAURI__) {
-            const { invoke } = window.__TAURI__.core;
-            invoke('generate_chapters', {
-              projectPath: basePath,
-              outline: { chapters: project.chapters }
-            }).catch(err => {
-              console.error('[ProjectResume] Failed to start generation:', err);
-              if (genBtn) {
-                genBtn.disabled = false;
-                genBtn.textContent = '🔄 开始生成';
-              }
-            });
+          const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+          if (triggerNext) {
+            triggerNext({ chapters: project.chapters }, basePath)
+              .catch(err => {
+                console.error('[ProjectResume] Failed to start generation:', err);
+                if (genBtn) {
+                  genBtn.disabled = false;
+                  genBtn.textContent = '🔄 开始生成';
+                }
+              });
           }
         };
 
         // Enter learning mode
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
-          window.TyporaNext.setLearningMode(true);
+          window.TyporaNext.setLearningMode(true, basePath);
         }
 
         const bridge = new AgentEventBridge(manager, ui);
@@ -397,9 +421,51 @@
           };
         }
 
-        // Knowledge graph dashboard button
-        ui.onOpenDashboard = () => {
-          showProjectDashboard(project, basePath);
+        // Knowledge graph dashboard button — direct open without rebuild
+        // check (auto-show at project entry handles the initial graph build).
+        // This just loads the existing graph file and opens the modal.
+        ui.onOpenDashboard = async () => {
+          const btn = container.querySelector('#learningKGBtn');
+          if (btn) btn.textContent = '⏳ 图谱';
+          try {
+            if (!window.KnowledgeGraphManager || !window.KnowledgeGraphDashboard) {
+              console.warn('[ProjectResume] KG modules not loaded');
+              return;
+            }
+            const kgm = new window.KnowledgeGraphManager(basePath);
+            let graph = await kgm.loadGraph();
+            // If no graph exists yet, wait a moment then force rebuild
+            if (!graph) {
+              await new Promise(r => setTimeout(r, 2000));
+              graph = await kgm.loadGraph();
+            }
+            if (!graph) {
+              await kgm.buildGraph();
+              graph = await kgm.loadGraph();
+            }
+            const stats = graph ? kgm.computeStats(graph, null) : null;
+            const chapters = (project && project.chapters || []).map((ch, i) => ({
+              file: ch.file || '',
+              title: ch.title || '第' + (i + 1) + '章',
+              status: ch.status || 'not_generated'
+            }));
+            const dashboard = new window.KnowledgeGraphDashboard({
+              onClose: () => dashboard.close()
+            });
+            dashboard.show({
+              graph,
+              stats,
+              chapters,
+              projectName: (project && project.name) || '学习项目'
+            });
+          } catch (e) {
+            console.error('[ProjectResume] KG open error:', e);
+            if (window.showToast) {
+              window.showToast('❌ 知识图谱加载失败', 'error');
+            }
+          } finally {
+            if (btn) btn.textContent = '🧠 图谱';
+          }
         };
 
         // Exit learning mode handler
@@ -446,20 +512,19 @@
       btn.disabled = true;
       btn.textContent = '生成中...';
 
-      // Call Rust to start generation
-      if (window.__TAURI__) {
-        const { invoke } = window.__TAURI__.core;
-        console.log('[ProjectResume] Calling generate_chapters...');
-        invoke('generate_chapters', {
-          projectPath: basePath,
-          outline: { chapters: project.chapters }
-        }).then(() => {
-          console.log('[ProjectResume] generate_chapters returned OK');
-        }).catch(err => {
-          console.error('[ProjectResume] Failed:', err);
-          btn.disabled = false;
-          btn.textContent = '继续生成';
-        });
+      // Sliding window: only generate the next pending chapters
+      const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+      if (triggerNext) {
+        console.log('[ProjectResume] Calling triggerNextChapters (sliding window)...');
+        triggerNext({ chapters: project.chapters }, basePath)
+          .then(() => {
+            console.log('[ProjectResume] triggerNextChapters returned OK');
+          })
+          .catch(err => {
+            console.error('[ProjectResume] Failed:', err);
+            btn.disabled = false;
+            btn.textContent = '继续生成';
+          });
       }
     });
 
