@@ -297,7 +297,10 @@
       const { ChapterStatusManager, ProgressUI, AgentEventBridge } = window.LearningProgress;
 
       const manager = new ChapterStatusManager(project.chapters);
-      // Restore actual statuses from project.json
+      // Restore actual statuses AND file paths from project.json.
+      // The ChapterStatusManager constructor hardcodes file: null, so without
+      // this restore, downstream code that matches by file (e.g. quiz → chapter
+      // index lookup in mode-integration.js) silently fails for resumed projects.
       project.chapters.forEach((ch, i) => {
         if (ch.status && ch.status !== 'not_generated' && ch.status !== '未生成') {
           // Map Chinese status names to English
@@ -316,6 +319,20 @@
             console.warn('[ProjectResume] Failed to restore status for chapter', i, e);
           }
         }
+        // Restore the on-disk file path so chapter.file lookups work after
+        // resume. Store the FULL path (basePath + filename) so _openChapterFile
+        // can find the file via Rust's open_file command.
+        if (ch.file) {
+          const sep = basePath.includes('\\') ? '\\' : '/';
+          const cleanedBase = basePath.replace(/[\\/]+$/, '');
+          const cleanedFile = ch.file.replace(/^[\\/]+/, '');
+          manager.chapters[i].file = cleanedBase + sep + cleanedFile;
+        }
+        // Restore quiz rating so the chapter list shows rating-aware icons
+        // (mastered=green, learning=blue, struggling=red).
+        if (ch.last_quiz_rating) {
+          manager.chapters[i].rating = ch.last_quiz_rating;
+        }
       });
 
       const container = document.getElementById('learningProgressPanel');
@@ -326,6 +343,50 @@
         const ui = new ProgressUI(container);
         ui.projectPath = basePath;
         ui.init(manager);
+
+        // Create centered generation overlay (hidden until user clicks
+        // "继续生成"). Passed to AgentEventBridge so progress_log events
+        // appear when generation runs.
+        const GenOverlay = window.LearningProgress && window.LearningProgress.GenerationOverlay;
+        const overlay = GenOverlay ? new GenOverlay(project.chapters, basePath) : null;
+        if (overlay) overlay.hide();
+
+        // State matrix: "继续生成" button conditions.
+        //   Row 3: not_generated→resume + 全部 completed(mastered/learning) → ✅
+        //   Row 8: completed→resume + 全部 completed/failed → ✅
+        //   Row 2/7: 有 ready 或 completed(struggling) → ❌
+        const hasAdvanceable = manager.chapters.some(ch =>
+          ch.status === 'completed' && (!ch.rating || ch.rating !== 'struggling')
+        );
+        const hasStuck = manager.chapters.some(ch =>
+          ch.status === 'ready' ||
+          (ch.status === 'completed' && ch.rating === 'struggling')
+        );
+        const hasPending = manager.chapters.some(ch => ch.status === 'not_generated');
+        if (hasAdvanceable && !hasStuck && hasPending) {
+          const genContainer = container.querySelector('.learning-chapter-list');
+          if (genContainer && !container.querySelector('.learning-resume-gen-btn')) {
+            const resumeBtn = document.createElement('button');
+            resumeBtn.className = 'learning-resume-gen-btn';
+            const pendingCount = manager.chapters.filter(ch => ch.status === 'not_generated').length;
+            resumeBtn.textContent = '📦 继续生成 (' + pendingCount + ' 章待生成)';
+            resumeBtn.addEventListener('click', () => {
+              resumeBtn.disabled = true;
+              resumeBtn.textContent = '生成中...';
+              if (overlay) overlay.restore();
+              const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+              if (triggerNext) {
+                triggerNext({ chapters: project.chapters }, basePath).catch(err => {
+                  console.error('[ProjectResume] triggerNextChapters failed:', err);
+                  resumeBtn.disabled = false;
+                  resumeBtn.textContent = '📦 继续生成 (' + pendingCount + ' 章待生成)';
+                  if (overlay) overlay.hide();
+                });
+              }
+            });
+            genContainer.after(resumeBtn);
+          }
+        }
 
         // Bind chapter click → open file for reading
         ui.onChapterClick = (index) => {
@@ -398,8 +459,18 @@
           window.TyporaNext.setLearningMode(true, basePath);
         }
 
-        const bridge = new AgentEventBridge(manager, ui);
+        const bridge = new AgentEventBridge(manager, ui, overlay);
         bridge.bind();
+
+        // Stash manager/ui on the global so triggerSlidingWindow() (called
+        // from triggerNextChapters below, and from the onChapterStatusChange
+        // hook) can locate them without re-deriving. In startGeneration this
+        // is done automatically; resume bypasses startGeneration.
+        if (window.LearningProgress) {
+          window.LearningProgress._manager = manager;
+          window.LearningProgress._ui = ui;
+          window.LearningProgress._bridge = bridge;
+        }
 
         // Click outside to close panel → show orb
         const onClickOutside = (e) => {

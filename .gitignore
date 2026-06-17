@@ -40,5 +40,9 @@ progress.md
 # Agent bridge logs
 agent-bridge.log
 
+# Debug logs (last seen: agent-stderr.log, rust-debug.log, stdout-dump.txt)
+*.log
+/tmp/
+
 # Design docs (design discussions, prototypes, ADRs)
 /docs/

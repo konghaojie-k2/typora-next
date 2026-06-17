@@ -5925,3 +5925,141 @@ body.learning-mode .toolbar {
   vertical-align: middle;
   margin-right: 4px;
 }
+
+/* Resume catch-up: highlight "重新生成" button when there are ungenerated
+   chapters waiting. Added 2026-06-17 so resumed projects signal action
+   needed without auto-generating (auto-generation gated by learning signal). */
+.learning-start-btn.learning-needs-generation {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4);
+  animation: learning-needs-generation-pulse 2s ease-in-out infinite;
+}
+
+.learning-start-btn.learning-needs-generation:hover {
+  background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+}
+
+@keyframes learning-needs-generation-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+  50% { box-shadow: 0 0 0 6px rgba(245, 158, 11, 0); }
+}
+
+/* 工具栏课程模式按钮 — 可点击，toggle 面板/浮动按钮 */
+.learning-mode-badge {
+  cursor: pointer;
+  user-select: none;
+  transition: opacity 0.15s;
+}
+.learning-mode-badge:hover {
+  opacity: 0.8;
+}
+
+/* ============================================
+   Quiz Rating Visualisation (Phase 1.5, 2026-06-17)
+   Completed chapters show rating-aware icons and colors.
+   ============================================ */
+
+/* Rating badge — small label between title and status text */
+.learning-chapter-rating {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  margin-left: 6px;
+  white-space: nowrap;
+  font-weight: 500;
+}
+.learning-chapter-rating.rating-mastered {
+  background: #d1fae5;
+  color: #065f46;
+}
+.learning-chapter-rating.rating-learning {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.learning-chapter-rating.rating-struggling {
+  background: #fee2e2;
+  color: #991b1b;
+}
+[data-theme="dark"] .learning-chapter-rating.rating-mastered {
+  background: #064e3b;
+  color: #6ee7b7;
+}
+[data-theme="dark"] .learning-chapter-rating.rating-learning {
+  background: #1e3a5f;
+  color: #93c5fd;
+}
+[data-theme="dark"] .learning-chapter-rating.rating-struggling {
+  background: #450a0a;
+  color: #fca5a5;
+}
+
+/* Chapter item border accent by rating */
+.learning-chapter-item.rating-mastered {
+  border-left: 3px solid #059669;
+}
+.learning-chapter-item.rating-learning {
+  border-left: 3px solid #3b82f6;
+}
+.learning-chapter-item.rating-struggling {
+  border-left: 3px solid #ef4444;
+}
+[data-theme="dark"] .learning-chapter-item.rating-mastered {
+  border-left-color: #34d399;
+}
+[data-theme="dark"] .learning-chapter-item.rating-learning {
+  border-left-color: #60a5fa;
+}
+[data-theme="dark"] .learning-chapter-item.rating-struggling {
+  border-left-color: #f87171;
+}
+
+/* Rating status bar between progress bar and chapter list */
+.learning-rating-status {
+  margin: 4px 12px 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+.learning-rating-status.warning {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #f59e0b;
+}
+.learning-rating-status.legend {
+  background: transparent;
+  display: flex;
+  gap: 12px;
+  color: var(--color-text-secondary);
+}
+[data-theme="dark"] .learning-rating-status.warning {
+  background: #451a03;
+  color: #fbbf24;
+  border-color: #d97706;
+}
+
+/* "继续生成" button below chapter list (resume path, completed→resume row).
+   Uses accent color and full width to stand out from the chapter list. */
+.learning-resume-gen-btn {
+  display: block;
+  margin: 8px 12px;
+  padding: 8px 14px;
+  width: calc(100% - 24px);
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.learning-resume-gen-btn:hover {
+  opacity: 0.85;
+}
+.learning-resume-gen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

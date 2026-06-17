@@ -1110,7 +1110,7 @@ pub fn build_extra_question(idx: usize, concept: &str, explanation: &str) -> Qui
 fn repair_json_quotes(raw: &str) -> String {
     let b = raw.as_bytes();
     let len = b.len();
-    let mut result = String::with_capacity(len + 32);
+    let mut result: Vec<u8> = Vec::with_capacity(len + 32);
     for i in 0..len {
         if b[i] == b'"' {
             // Escape `"` only when sandwiched between non-ASCII bytes.
@@ -1122,12 +1122,14 @@ fn repair_json_quotes(raw: &str) -> String {
                 && b[i + 1] == 0xef && b[i + 2] == 0xbc
                 && prev_non_ascii;
             if (prev_non_ascii && next_non_ascii) || next_is_cjk_punct {
-                result.push('\\');
+                result.push(b'\\');
             }
         }
-        result.push(b[i] as char);
+        result.push(b[i]);
     }
-    result
+    // SAFETY: we only inserted ASCII `\` (0x5C) alongside original bytes,
+    // which are valid UTF-8 (input is &str). Result is still valid UTF-8.
+    unsafe { String::from_utf8_unchecked(result) }
 }
 
 /// Read quiz questions from pre-generated .quiz.json (Sprint 3 refactored: no real-time AI)

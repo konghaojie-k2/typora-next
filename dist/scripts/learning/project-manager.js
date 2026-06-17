@@ -96,10 +96,17 @@
     if (toolbarBtn) {
       toolbarBtn.addEventListener('click', () => {
         if (document.body.classList.contains('learning-mode')) {
-          // Already in learning mode - toggle progress panel
+          // Already in learning mode - toggle panel/orb
           const panel = document.getElementById('learningProgressPanel');
-          if (panel) {
-            panel.style.display = panel.style.display === 'none' ? 'flex' : 'none';
+          const orb = document.getElementById('learningModeOrb');
+          if (panel && orb) {
+            if (panel.style.display === 'none' || panel.style.display === '') {
+              panel.style.display = 'flex';
+              orb.style.display = 'none';
+            } else {
+              panel.style.display = 'none';
+              orb.style.display = 'flex';
+            }
           }
         } else if (window.LearningHub) {
           window.LearningHub.open();

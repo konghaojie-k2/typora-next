@@ -311,8 +311,8 @@
       if (window.showToast) {
         window.showToast('❌ ' + msg, 'error');
       }
-      // Show visible alert so the user definitely sees the error
-      alert('❌ 加载测验失败:\n\n' + msg);
+      // Tauri WebView: alert()/confirm() don't work — rely on showToast above.
+      // (Previously had `alert(...)` as a fallback, but that also fails to render.)
     }
   }
 
@@ -527,6 +527,67 @@
 
       await window.__TAURI__.core.invoke('persist_quiz_result', payload);
       console.log('[QuizSaveHistory] persisted quiz result');
+
+      // Sync in-memory state: Rust already wrote ch["status"]="completed" to
+      // project.json, but ChapterStatusManager in the WebView doesn't know.
+      // Promote the matching chapter to 'completed' so the onChapterStatusChange
+      // hook in progress-tracker.js fires and sliding-window pre-generates the
+      // next batch. ready → completed is a valid state-machine transition.
+      //
+      // Phase 1 (2026-06-17): gate by quiz rating. "struggling" means the
+      // user didn't learn the chapter — sliding the window forward would
+      // generate content the user isn't ready for. Skip the trigger and
+      // surface a "需要重学本章" toast so the user knows to retake.
+      //
+      // chapter.file is now the FULL path (set in project-resume.js for
+      // resumed projects), so we match by basename.
+      if (window.LearningProgress && window.LearningProgress._manager) {
+        const mgr = window.LearningProgress._manager;
+        const basename = (p) => (p || '').split(/[/\\]/).pop();
+        const fileName = basename(payload.chapterFile);
+        const idx = mgr.chapters.findIndex(ch => basename(ch.file) === fileName);
+        if (idx >= 0) {
+          // Always persist the rating — even if already completed, the user
+          // might have retaken the quiz with a different result.
+          mgr.setRating(idx, payload.rating);
+
+          if (mgr.chapters[idx].status === 'completed') {
+            // Already completed — refresh rating badge in UI only.
+            window.LearningProgress._ui?.updateChapter(idx);
+            console.log('[QuizSaveHistory] chapter', idx, 'already completed, rating updated');
+          } else {
+            const rating = payload.rating;
+            if (rating === 'struggling') {
+              // Update rating display but don't slide forward.
+              window.LearningProgress._ui?.updateChapter(idx);
+              console.log('[QuizSaveHistory] chapter', idx, 'rating=struggling → skip sliding window, suggest retake');
+              if (window.showToast) {
+                window.showToast('📚 本章掌握薄弱，建议重学后再继续', 'info');
+              }
+            } else {
+              // mastered or learning → change status first, then update UI.
+              // updateChapter AFTER setStatus so onChapterStatusChange detects
+              // the ready→completed transition and fires triggerSlidingWindow.
+              try {
+                mgr.setStatus(idx, 'completed');
+                window.LearningProgress._ui?.updateChapter(idx);
+                console.log('[QuizSaveHistory] marked chapter', idx, 'completed (rating=' + rating + ') → sliding window triggered');
+              } catch (e) {
+                console.warn('[QuizSaveHistory] setStatus failed for chapter', idx, ':', e.message);
+                window.LearningProgress._ui?.updateChapter(idx);
+              }
+            }
+          }
+        } else {
+          // Diagnostic: log why the lookup failed. Common cause is resumed
+          // projects where chapter.file was null (fixed in project-resume.js).
+          console.warn('[QuizSaveHistory] no chapter matched fileName=', fileName);
+          console.log('[QuizSaveHistory] manager.chapters:');
+          mgr.chapters.forEach((ch, i) => {
+            console.log(`  [${i}] file=${JSON.stringify(ch.file)} status=${ch.status} title=${ch.title}`);
+          });
+        }
+      }
 
       // Sprint 8a: Trigger Socratic review if threshold reached
       _maybeTriggerSocratic();

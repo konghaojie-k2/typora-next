@@ -61,7 +61,8 @@
         duration_minutes: ch.duration_minutes || 0,
         concepts: ch.concepts || [],
         status: 'not_generated',
-        file: null
+        file: null,
+        rating: null           // set after quiz: 'mastered'|'learning'|'struggling'
       }));
     }
 
@@ -149,7 +150,11 @@
               // Invalid transition, ignore
             }
             if (event.data.file) {
-              this.setChapterFile(event.data.index, event.data.file);
+              // event.data.file is just the filename from agent-bridge.
+              // Prepend the project path so _openChapterFile can resolve it.
+              const projPath = this.ui && this.ui.projectPath;
+              const fullPath = _joinProjectPath(projPath, event.data.file);
+              this.setChapterFile(event.data.index, fullPath);
             }
           }
           // Refresh file tree so new files appear in sidebar immediately
@@ -207,6 +212,31 @@
     setChapterFile(index, file) {
       this._validateIndex(index);
       this.chapters[index].file = file;
+    }
+
+    /**
+     * Set chapter quiz rating (affects icon/color in chapter list)
+     * @param {number} index
+     * @param {'mastered'|'learning'|'struggling'} rating
+     */
+    setRating(index, rating) {
+      this._validateIndex(index);
+      const VALID = ['mastered', 'learning', 'struggling'];
+      if (rating && !VALID.includes(rating)) {
+        console.warn('[ChapterStatusManager] invalid rating:', rating);
+        return;
+      }
+      this.chapters[index].rating = rating;
+    }
+
+    /**
+     * Get chapter quiz rating
+     * @param {number} index
+     * @returns {string|null}
+     */
+    getRating(index) {
+      this._validateIndex(index);
+      return this.chapters[index].rating;
     }
 
     /**
@@ -288,6 +318,7 @@
           <div class="learning-progress-fill" style="width: ${pct}%"></div>
           <span class="learning-progress-text">${progress.completed}/${progress.total} 章已完成</span>
         </div>
+        ${this._renderRatingStatusBar()}
         <div class="learning-chapter-list">
           ${this.manager.chapters.map((ch, i) => this._renderChapterItem(ch, i)).join('')}
         </div>
@@ -298,24 +329,75 @@
     }
 
     /**
-     * Render a single chapter item
+     * Render a single chapter item, with rating-aware icon/color when completed.
+     * Rating (set after quiz) gives the user immediate visual feedback:
+     *   mastered  → ✅ green    (流利掌握)
+     *   learning  → 📖 blue     (基本理解)
+     *   struggling → ⚠️ red     (有待加强)
+     *   no rating → ✅ gray     (无测验记录)
      */
     _renderChapterItem(chapter, index) {
-      const icon = STATUS_ICONS[chapter.status] || '⚪';
-      const label = STATUS_LABELS[chapter.status] || '';
       const clickable = chapter.status === 'ready' || chapter.status === 'completed';
       const retryable = chapter.status === 'failed';
       const generating = chapter.status === 'generating';
 
+      // Compute icon: completed chapters get rating-aware icons
+      let icon;
+      if (chapter.status === 'completed' && chapter.rating) {
+        const RATING_ICONS = { mastered: '✅', learning: '📖', struggling: '⚠️' };
+        icon = RATING_ICONS[chapter.rating] || '✅';
+      } else {
+        icon = STATUS_ICONS[chapter.status] || '⚪';
+      }
+
+      const label = STATUS_LABELS[chapter.status] || '';
+      const ratingClass = chapter.rating ? `rating-${chapter.rating}` : '';
+      const ratingBadge = (chapter.status === 'completed' && chapter.rating)
+        ? `<span class="learning-chapter-rating rating-${chapter.rating}">${chapter.rating}</span>`
+        : '';
+
       return `
-        <div class="learning-chapter-item ${clickable ? 'clickable' : ''} ${retryable ? 'retryable' : ''} ${generating ? 'generating' : ''}"
-             data-index="${index}" data-status="${chapter.status}">
+        <div class="learning-chapter-item ${clickable ? 'clickable' : ''} ${retryable ? 'retryable' : ''} ${generating ? 'generating' : ''} ${ratingClass}"
+             data-index="${index}" data-status="${chapter.status}" data-rating="${chapter.rating || ''}">
           <span class="learning-chapter-icon">${icon}</span>
           <span class="learning-chapter-title">${this._escapeHtml(chapter.title)}</span>
+          ${ratingBadge}
           <span class="learning-chapter-label">${label}</span>
           ${retryable ? '<button class="learning-retry-btn" data-index="' + index + '">重试</button>' : ''}
         </div>
       `;
+    }
+
+    /**
+     * Render a thin rating-status bar between the progress bar and chapter list.
+     * Shows:
+     * - "struggling" chapter + pending next chapter → warning line
+     * - Otherwise → legend showing what the colored icons mean
+     */
+    _renderRatingStatusBar() {
+      if (!this.manager) return '';
+
+      // Check: is there a 'struggling' completed chapter that blocked sliding?
+      const strugglingChapter = this.manager.chapters.findIndex(ch =>
+        ch.status === 'completed' && ch.rating === 'struggling'
+      );
+      if (strugglingChapter >= 0) {
+        return `
+          <div class="learning-rating-status warning">
+            ⚠️ 第 ${strugglingChapter + 1} 章评分 struggling，后续章节未自动生成
+          </div>`;
+      }
+
+      // Any rating at all? Show legend
+      const hasRating = this.manager.chapters.some(ch => ch.rating);
+      if (hasRating) {
+        return `
+          <div class="learning-rating-status legend">
+            <span>✅ 掌握</span><span>📖 理解</span><span>⚠️ 薄弱</span>
+          </div>`;
+      }
+
+      return '';
     }
 
     /**
@@ -392,14 +474,57 @@
 
       const chapter = this.manager.chapters[index];
       const prevStatus = el.dataset.status;
-      const icon = STATUS_ICONS[chapter.status];
+
+      // Compute icon: completed chapters get rating-aware icons
+      let icon;
+      if (chapter.status === 'completed' && chapter.rating) {
+        const RATING_ICONS = { mastered: '✅', learning: '📖', struggling: '⚠️' };
+        icon = RATING_ICONS[chapter.rating] || '✅';
+      } else {
+        icon = STATUS_ICONS[chapter.status] || '⚪';
+      }
       const label = STATUS_LABELS[chapter.status];
 
       el.querySelector('.learning-chapter-icon').textContent = icon;
       el.querySelector('.learning-chapter-label').textContent = label;
       el.dataset.status = chapter.status;
+      el.dataset.rating = chapter.rating || '';
 
-      // Update clickability
+      // Update rating class
+      ['rating-mastered', 'rating-learning', 'rating-struggling'].forEach(cls =>
+        el.classList.toggle(cls, chapter.rating === cls.replace('rating-', ''))
+      );
+
+      // Update or create rating badge
+      let badge = el.querySelector('.learning-chapter-rating');
+      if (chapter.status === 'completed' && chapter.rating) {
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.className = 'learning-chapter-rating';
+          el.insertBefore(badge, el.querySelector('.learning-chapter-label'));
+        }
+        badge.textContent = chapter.rating;
+        badge.className = `learning-chapter-rating rating-${chapter.rating}`;
+      } else if (badge) {
+        badge.remove();
+      }
+
+      // Update the rating status bar
+      const oldBar = this.container.querySelector('.learning-rating-status');
+      if (oldBar) oldBar.remove();
+      const progressBar = this.container.querySelector('.learning-progress-bar');
+      const chapterList = this.container.querySelector('.learning-chapter-list');
+      if (progressBar && chapterList) {
+        const barHtml = this._renderRatingStatusBar();
+        if (barHtml) {
+          const temp = document.createElement('div');
+          temp.innerHTML = barHtml;
+          const newBar = temp.firstElementChild;
+          progressBar.parentNode.insertBefore(newBar, chapterList);
+        }
+      }
+
+      // Update chapter item clickability
       const clickable = chapter.status === 'ready' || chapter.status === 'completed';
       el.classList.toggle('clickable', clickable);
 
@@ -818,7 +943,7 @@
               // Already in a non-pending state, skip
               continue;
             }
-            manager.setChapterFile(i, expectedFile);
+            manager.setChapterFile(i, _joinProjectPath(projectPath, expectedFile));
             ui.updateChapter(i);
             anyChange = true;
 
@@ -854,6 +979,23 @@
    * Mirror agent-bridge.js generateFilename() to predict the on-disk name.
    * Format: NN-{sanitized-title}.md (zero-padded index)
    */
+  /**
+   * Build a full path from a project directory + bare filename.
+   * Returns the filename unchanged if it's already absolute or if projectPath
+   * is missing. Used by chapter_complete handler and FS polling to normalize
+   * chapter.file into a full path that _openChapterFile can resolve.
+   */
+  function _joinProjectPath(projectPath, fileName) {
+    if (!fileName) return fileName;
+    // Already absolute (Windows drive letter or Unix root)
+    if (/^([A-Za-z]:[\\/]|\/)/.test(fileName)) return fileName;
+    if (!projectPath) return fileName;
+    const sep = String(projectPath).includes('\\') ? '\\' : '/';
+    const cleanedBase = String(projectPath).replace(/[\\/]+$/, '');
+    const cleanedFile = String(fileName).replace(/^[\\/]+/, '');
+    return cleanedBase + sep + cleanedFile;
+  }
+
   function _guessChapterFileName(index, title) {
     const paddedIndex = String(index).padStart(2, '0');
     const safeTitle = (title || `chapter-${index}`)
@@ -1011,6 +1153,7 @@
     ChapterStatusManager,
     ProgressUI,
     AgentEventBridge,
+    GenerationOverlay,
     STATUS_ICONS,
     STATUS_LABELS,
 
