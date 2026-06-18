@@ -1961,7 +1961,34 @@ async fn persist_quiz_result(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| chapter_file.clone());
 
-    // 1. Update project.json
+    // Load *.concepts.json for this chapter to get id ↔ name mapping
+    // (chapter.concepts.json is the source of truth for concept identities)
+    let chapter_md_stem = chapter_basename.trim_end_matches(".md");
+    let concepts_json_path = std::path::PathBuf::from(&project_path)
+        .join(format!("{}.concepts.json", chapter_md_stem));
+    let id_by_name: std::collections::HashMap<String, String> = if concepts_json_path.exists() {
+        let content = std::fs::read_to_string(&concepts_json_path)
+            .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
+        parsed.get("concepts")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| {
+                        let id = c.get("id").and_then(|v| v.as_str())?;
+                        let name = c.get("name").and_then(|v| v.as_str())?;
+                        Some((name.to_string(), id.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    // 1. Update project.json — write chapter status to top-level chapters_status map
+    //    (chapter.concepts is {id, name} only, no status fields)
     let project_json_path = learning_dir.join("project.json");
     let mut project: serde_json::Value = if project_json_path.exists() {
         let content = std::fs::read_to_string(&project_json_path)
@@ -1974,60 +2001,78 @@ async fn persist_quiz_result(
             "created": std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())
-                .unwrap_or(0),
+                    .unwrap_or(0),
             "chapters": [],
-            "concepts": {}
+            "chapters_status": {}
         })
     };
 
-    // Mark chapter completed + record last quiz info
+    // Ensure top-level chapters_status map exists
+    if project.get("chapters_status").is_none() {
+        project["chapters_status"] = serde_json::json!({});
+    }
+
+    // Update chapter status to "completed" and strip legacy chapter.status / last_quiz_*
+    // (those move to chapters_status metadata later if needed; for now just record the
+    // completed state at the chapters_status map level)
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
-        let mut chapter_concepts: Vec<String> = Vec::new();
         for ch in chapters.iter_mut() {
             let ch_file = ch.get("file").and_then(|v| v.as_str()).unwrap_or("");
             if ch_file == chapter_basename || ch_file == chapter_file {
-                ch["status"] = serde_json::json!("completed");
-                ch["last_quiz_rating"] = serde_json::json!(&rating);
-                ch["last_quiz_at"] = serde_json::json!(&timestamp);
-                if let Some(concepts) = ch.get("concepts").and_then(|v| v.as_array()) {
-                    chapter_concepts = concepts.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect();
-                }
+                // Strip legacy fields (status, last_quiz_rating, last_quiz_at)
+                ch.as_object_mut().map(|o| {
+                    o.remove("status");
+                    o.remove("last_quiz_rating");
+                    o.remove("last_quiz_at");
+                });
                 break;
             }
         }
+    }
 
-        // Update concept mastery states
-        if project.get("concepts").is_none() {
-            project["concepts"] = serde_json::json!({});
-        }
-        let concepts_obj = project.get_mut("concepts")
-            .and_then(|v| v.as_object_mut())
-            .ok_or("project.json concepts 字段必须是对象")?;
+    // Write chapter_status entry
+    if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
+        status_map.insert(chapter_basename.clone(), serde_json::json!("completed"));
+    }
 
-        // Weak concepts get status based on rating (never mastered if explicitly weak)
-        for concept in &weak_concepts {
-            let status = match rating.as_str() {
-                "mastered" | "learning" => "learning",
-                "struggling" => "struggling",
-                _ => "learning",
-            };
-            concepts_obj.insert(concept.clone(), serde_json::json!({
-                "status": status,
-                "source_chapter": chapter_basename,
-                "updated_at": timestamp
-            }));
-        }
-
-        // Non-weak chapter concepts: mastered if overall mastered, otherwise learning
-        let non_weak_status = if rating == "mastered" { "mastered" } else { "learning" };
-        for concept in chapter_concepts {
-            if !weak_concepts.contains(&concept) {
-                concepts_obj.insert(concept.clone(), serde_json::json!({
-                    "status": non_weak_status,
-                    "source_chapter": chapter_basename,
-                    "updated_at": timestamp
-                }));
+    // Strip chapter.concepts down to {id, name} only (no status, no updated_at)
+    if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
+        for ch in chapters.iter_mut() {
+            if let Some(concepts_arr) = ch.get_mut("concepts").and_then(|v| v.as_array_mut()) {
+                let cleaned: Vec<serde_json::Value> = concepts_arr.iter().map(|item| {
+                    if let Some(s) = item.as_str() {
+                        // Legacy: string entry — convert to {id, name}
+                        let id = id_by_name.get(s).cloned().unwrap_or_else(|| s.to_string());
+                        serde_json::json!({"id": id, "name": s})
+                    } else if let Some(obj) = item.as_object() {
+                        // Object entry — keep only id and name
+                        let id = obj.get("id").and_then(|v| v.as_str())
+                            .map(|s| s.to_string())
+                            .or_else(|| {
+                                let name = obj.get("name").and_then(|v| v.as_str())?;
+                                id_by_name.get(name).cloned()
+                            })
+                            .unwrap_or_else(|| {
+                                obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                            });
+                        let name = obj.get("name").and_then(|v| v.as_str())
+                            .unwrap_or(&id)
+                            .to_string();
+                        serde_json::json!({"id": id, "name": name})
+                    } else {
+                        serde_json::json!({})
+                    }
+                }).collect();
+                *concepts_arr = cleaned;
             }
+        }
+    }
+
+    // Remove legacy top-level "concepts" map if present (one-time cleanup)
+    if let Some(obj) = project.as_object_mut() {
+        if obj.contains_key("concepts") {
+            log::info!("[persist_quiz_result] removing legacy top-level 'concepts' map");
+            obj.remove("concepts");
         }
     }
 
@@ -2035,6 +2080,62 @@ async fn persist_quiz_result(
         .map_err(|e| format!("序列化 project.json 失败: {}", e))?;
     std::fs::write(&project_json_path, project_str)
         .map_err(|e| format!("写入 project.json 失败: {}", e))?;
+
+    // 1b. Update knowledge-graph.json nodes' node_status
+    //     Build the same id ↔ name map we use above to know which nodes belong to this chapter.
+    //     Chapter file basename → node.chapter: *.concepts.json lists concepts with chapter field
+    //     matching the chapter file stem.
+    let _chapter_stem = chapter_basename.trim_end_matches(".md").to_string();
+    let chapter_node_ids: Vec<String> = if concepts_json_path.exists() {
+        let content = std::fs::read_to_string(&concepts_json_path)
+            .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
+        parsed.get("concepts")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|c| c.get("id").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let graph_path = learning_dir.join("knowledge-graph.json");
+    if graph_path.exists() && !chapter_node_ids.is_empty() {
+        let content = std::fs::read_to_string(&graph_path)
+            .map_err(|e| format!("读取 knowledge-graph.json 失败: {}", e))?;
+        let mut graph: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 knowledge-graph.json 失败: {}", e))?;
+
+        let non_weak_status = if rating == "mastered" { "mastered" } else { "learning" };
+        if let Some(nodes) = graph.get_mut("nodes").and_then(|v| v.as_array_mut()) {
+            for node in nodes.iter_mut() {
+                let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if !chapter_node_ids.contains(&id) {
+                    continue;
+                }
+                let status = if weak_concepts.contains(&id) {
+                    match rating.as_str() {
+                        "struggling" => "struggling",
+                        _ => "learning",
+                    }
+                } else {
+                    non_weak_status
+                };
+                if let Some(obj) = node.as_object_mut() {
+                    obj.insert("node_status".to_string(), serde_json::json!(status));
+                }
+            }
+        }
+
+        let graph_str = serde_json::to_string_pretty(&graph)
+            .map_err(|e| format!("序列化 knowledge-graph.json 失败: {}", e))?;
+        std::fs::write(&graph_path, graph_str)
+            .map_err(|e| format!("写入 knowledge-graph.json 失败: {}", e))?;
+    }
 
     // 2. Append to quiz-history.json
     let history_path = learning_dir.join("quiz-history.json");
@@ -2482,21 +2583,40 @@ fn generate_schedule_from_project(project_path: &str) -> Result<ReviewSchedule, 
         serde_json::json!({ "entries": [] })
     };
 
+    // Read knowledge-graph.json for node_status (current concept mastery)
+    let graph_path = std::path::PathBuf::from(project_path).join(".learning").join("knowledge-graph.json");
+    let mut status_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if graph_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&graph_path) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(arr) = parsed.get("nodes").and_then(|v| v.as_array()) {
+                    for n in arr {
+                        if let (Some(id), Some(status)) = (
+                            n.get("id").and_then(|v| v.as_str()),
+                            n.get("node_status").and_then(|v| v.as_str())
+                        ) {
+                            status_by_id.insert(id.to_string(), status.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let mut items = vec![];
-    if let Some(concepts) = project.get("concepts").and_then(|v| v.as_object()) {
-        for (concept_name, concept_data) in concepts {
-            let source_chapter = concept_data.get("source_chapter")
+    // Iterate chapters[].concepts[] (new schema: {id, name} only) to build review items
+    if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
+        for ch in chapters {
+            let source_chapter = ch.get("file")
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            let status = concept_data.get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("learning")
-                .to_string();
-            let updated_at = concept_data.get("updated_at")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            if source_chapter.is_empty() {
+                continue;
+            }
+            let Some(concepts_arr) = ch.get("concepts").and_then(|v| v.as_array()) else {
+                continue;
+            };
 
             // Count matching quiz entries
             let entries = quiz_history.get("entries")
@@ -2512,43 +2632,80 @@ fn generate_schedule_from_project(project_path: &str) -> Result<ReviewSchedule, 
             // Quiz entries are not review records — only use them for last_rating
             // review_count should start from 0 (new concept) or 1 (just quizzed)
             let review_count = if chapter_entries.is_empty() { 0u32 } else { 1u32 };
-            let last_rating = if let Some(last) = chapter_entries.last() {
-                last.get("rating").and_then(|v| v.as_str()).unwrap_or(&status).to_string()
-            } else {
-                status.clone()
-            };
+            let last_entry_ts = chapter_entries.last()
+                .and_then(|e| e.get("timestamp").and_then(|v| v.as_str()))
+                .map(|s| s.to_string());
 
-            let next_review_at = if let Some(last) = chapter_entries.last() {
-                let ts = last.get("timestamp").and_then(|v| v.as_str()).unwrap_or(&updated_at);
-                let interval = compute_next_interval(review_count, &last_rating);
-                add_days_to_string(ts, interval as i32)
-            } else {
-                add_days_to_string(&updated_at, 1)
-            };
+            for concept_item in concepts_arr {
+                // New schema: {id, name} only. Status comes from knowledge-graph.json.
+                let parsed: Option<(String, String)> = if let Some(s) = concept_item.as_str() {
+                    Some((s.to_string(), s.to_string()))
+                } else if let Some(obj) = concept_item.as_object() {
+                    let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
+                    if id.is_empty() { None } else { Some((id, name)) }
+                } else {
+                    None
+                };
+                let (concept_id, _concept_name) = match parsed {
+                    Some(t) => t,
+                    None => continue,
+                };
+                // Look up current mastery status from knowledge-graph.json
+                let status = status_by_id.get(&concept_id)
+                    .cloned()
+                    .unwrap_or_else(|| "learning".to_string());
 
-            let status_str = if is_due(&next_review_at) { "due".to_string() } else { "upcoming".to_string() };
-            items.push(ReviewItem {
-                concept: concept_name.clone(),
-                source_chapter,
-                review_count,
-                last_reviewed: if chapter_entries.is_empty() { updated_at } else { chapter_entries.last().unwrap().get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string() },
-                next_review_at,
-                last_rating,
-                status: status_str,
-            });
+                let last_rating = if let Some(last) = chapter_entries.last() {
+                    last.get("rating").and_then(|v| v.as_str()).unwrap_or(&status).to_string()
+                } else {
+                    status.clone()
+                };
+
+                let next_review_at = if let Some(ref ts) = last_entry_ts {
+                    let interval = compute_next_interval(review_count, &last_rating);
+                    add_days_to_string(ts, interval as i32)
+                } else {
+                    // No quiz yet — schedule first review for tomorrow
+                    add_days_to_string(&now_local_string(), 1)
+                };
+
+                let status_str = if is_due(&next_review_at) { "due".to_string() } else { "upcoming".to_string() };
+                items.push(ReviewItem {
+                    concept: concept_id,
+                    source_chapter: source_chapter.clone(),
+                    review_count,
+                    last_reviewed: last_entry_ts.clone().unwrap_or_else(|| now_local_string()),
+                    next_review_at,
+                    last_rating,
+                    status: status_str,
+                });
+            }
         }
     }
 
     // Generate review-cards.json with prompts for each concept
     let mut cards = vec![];
-    if let Some(concepts) = project.get("concepts").and_then(|v| v.as_object()) {
-        for (concept_name, _concept_data) in concepts {
-            cards.push(ReviewCard {
-                concept: concept_name.clone(),
-                prompt: format!("请回忆：{} 是什么？它的核心要点有哪些？", concept_name),
-                key_points: vec![],
-                hint: "".to_string(),
-            });
+    if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
+        for ch in chapters {
+            if let Some(concepts_arr) = ch.get("concepts").and_then(|v| v.as_array()) {
+                for concept_item in concepts_arr {
+                    let concept_name = if let Some(s) = concept_item.as_str() {
+                        s.to_string()
+                    } else if let Some(obj) = concept_item.as_object() {
+                        obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
+                    } else {
+                        continue;
+                    };
+                    if concept_name.is_empty() { continue; }
+                    cards.push(ReviewCard {
+                        concept: concept_name.clone(),
+                        prompt: format!("请回忆：{} 是什么？它的核心要点有哪些？", concept_name),
+                        key_points: vec![],
+                        hint: "".to_string(),
+                    });
+                }
+            }
         }
     }
     let review_cards = ReviewCards { version: "1.0".to_string(), items: cards };
@@ -2577,6 +2734,12 @@ struct KnowledgeNode {
     id: String,
     name: String,
     chapter: String,
+    #[serde(default = "default_node_status")]
+    node_status: String,
+}
+
+fn default_node_status() -> String {
+    "not_started".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2633,12 +2796,36 @@ async fn check_graph_freshness(project_path: String) -> Result<bool, String> {
 }
 
 /// Scan project for *.concepts.json files and merge into knowledge-graph.json
+/// Preserves existing node_status (keyed by node id) so rebuilding doesn't reset progress.
 #[tauri::command]
 async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
     let project_dir = std::path::PathBuf::from(&project_path);
     let mut nodes = vec![];
     let mut edges = vec![];
     let mut seen_ids = std::collections::HashSet::new();
+
+    // Read existing knowledge-graph.json to preserve node_status by id
+    let learning_dir = project_dir.join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+    let graph_path = learning_dir.join("knowledge-graph.json");
+    let mut existing_status: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    if graph_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&graph_path) {
+            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(arr) = parsed.get("nodes").and_then(|v| v.as_array()) {
+                    for n in arr {
+                        if let (Some(id), Some(status)) = (
+                            n.get("id").and_then(|v| v.as_str()),
+                            n.get("node_status").and_then(|v| v.as_str())
+                        ) {
+                            existing_status.insert(id.to_string(), status.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Scan for *.concepts.json files
     for entry in std::fs::read_dir(&project_dir)
@@ -2660,10 +2847,14 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
 
                 for concept in chapter_concepts.concepts {
                     if seen_ids.insert(concept.id.clone()) {
+                        let status = existing_status.get(&concept.id)
+                            .cloned()
+                            .unwrap_or_else(default_node_status);
                         nodes.push(KnowledgeNode {
                             id: concept.id.clone(),
                             name: concept.name,
                             chapter: chapter.clone(),
+                            node_status: status,
                         });
                     }
                     for dep in concept.depends_on {
@@ -2684,10 +2875,6 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
         edges,
     };
 
-    let learning_dir = project_dir.join(".learning");
-    std::fs::create_dir_all(&learning_dir)
-        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
-    let graph_path = learning_dir.join("knowledge-graph.json");
     let json = serde_json::to_string_pretty(&graph)
         .map_err(|e| format!("序列化 knowledge-graph.json 失败: {}", e))?;
     std::fs::write(&graph_path, json)

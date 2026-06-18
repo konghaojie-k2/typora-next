@@ -1579,7 +1579,7 @@
       // Build changes array
       const changes = answers.map(ans => ({
         concept: ans.concept,
-        fromStatus: beforeStatus[ans.concept] || 'due',
+        fromStatus: beforeStatus[ans.concept] || 'not_started',
         toStatus: ans.rating,
         chapter: items.find(i => i.concept === ans.concept)?.source_chapter || ''
       }));

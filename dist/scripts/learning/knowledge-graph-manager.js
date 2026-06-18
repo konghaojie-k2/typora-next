@@ -78,18 +78,15 @@
     }
 
     /**
-     * Compute stats from graph + review schedule
+     * Compute stats from graph nodes (each node has node_status baked in)
      * @param {Object} graph - { nodes, edges }
-     * @param {Object|null} reviewSchedule - { items: [{ concept, status }] }
      * @returns {Object} { total, mastered, learning, struggling, notStarted }
      */
-    computeStats(graph, reviewSchedule) {
+    computeStats(graph) {
       const nodes = (graph && graph.nodes) || [];
-      const lookup = this._buildLookup(reviewSchedule);
-
       const stats = { total: nodes.length, mastered: 0, learning: 0, struggling: 0, notStarted: 0 };
       for (const node of nodes) {
-        const status = lookup.status[node.name] || 'not_started';
+        const status = node.node_status || 'not_started';
         if (status === 'mastered') stats.mastered++;
         else if (status === 'learning') stats.learning++;
         else if (status === 'struggling') stats.struggling++;
@@ -108,21 +105,13 @@
     }
 
     /**
-     * Merge review status into graph nodes
+     * Pass-through: graph nodes already have node_status.
+     * Method kept for backward compatibility with callers.
      * @param {Object} graph - { nodes, edges }
-     * @param {Object} reviewSchedule - { items: [{ concept, status, review_count }] }
-     * @returns {Object} graph with status/reviewCount on each node
+     * @returns {Object} graph unchanged
      */
-    mergeReviewStatus(graph, reviewSchedule) {
-      const lookup = this._buildLookup(reviewSchedule);
-
-      const nodes = graph.nodes.map(node => ({
-        ...node,
-        status: lookup.status[node.name] || 'not_started',
-        reviewCount: lookup.count[node.name] || 0
-      }));
-
-      return { ...graph, nodes };
+    mergeReviewStatus(graph) {
+      return graph;
     }
 
     /**
@@ -150,21 +139,10 @@
 
     // --- Internal helpers ---
 
-    _buildLookup(reviewSchedule) {
-      const items = (reviewSchedule && reviewSchedule.items) || [];
-      const status = {};
-      const count = {};
-      for (const item of items) {
-        // Use last_rating as the mastery status (not schedule status like 'upcoming'/'due')
-        const masteryStatus = (item.last_rating === 'mastered' || item.last_rating === 'learning' || item.last_rating === 'struggling')
-          ? item.last_rating
-          : (item.status === 'mastered' || item.status === 'learning' || item.status === 'struggling')
-            ? item.status
-            : 'not_started';
-        status[item.concept] = masteryStatus;
-        count[item.concept] = item.review_count || 0;
-      }
-      return { status, count };
+    _buildLookup(_projectChapters) {
+      // No-op: status is now on each graph node (node_status).
+      // Kept for backward compatibility.
+      return { status: {}, count: {} };
     }
 
     _fs() {

@@ -91,18 +91,17 @@ function makeGraph(nodes, edges) {
   });
 }
 
-function makeReviewSchedule(items) {
-  return JSON.stringify({
-    items: items.map(([concept, status, review_count]) => ({
-      concept,
-      source_chapter: '01.md',
-      status,
-      review_count,
-      last_reviewed: null,
-      next_review_at: '2026-06-07 12:00:00',
-      last_rating: status === 'mastered' ? 'mastered' : 'learning'
-    }))
-  });
+function makeGraphWithStatus(items) {
+  // items: [[id, name, chapter, status], ...]
+  // Returns knowledge-graph.json object with nodes carrying node_status
+  return {
+    version: '1.0',
+    generated_at: '2026-06-06 12:00:00',
+    nodes: items.map(([id, name, chapter, status]) => ({
+      id, name, chapter, node_status: status || 'not_started'
+    })),
+    edges: []
+  };
 }
 
 // ============================================
@@ -204,31 +203,20 @@ TestRunner.test('loadGraph: returns null when graph.json does not exist', async 
 // Test: computeStats
 // ============================================
 
-TestRunner.test('computeStats: counts concepts by status', () => {
+TestRunner.test('computeStats: counts concepts by status from node.node_status', () => {
   setupEnv();
   const KGM = loadModule();
   if (!KGM) return;
 
-  const graph = {
-    nodes: [
-      { id: 'a', name: 'A', chapter: '01' },
-      { id: 'b', name: 'B', chapter: '01' },
-      { id: 'c', name: 'C', chapter: '02' },
-      { id: 'd', name: 'D', chapter: '02' }
-    ],
-    edges: []
-  };
-  const reviewSchedule = {
-    items: [
-      { concept: 'A', status: 'mastered' },
-      { concept: 'B', status: 'learning' },
-      { concept: 'C', status: 'struggling' }
-      // D: not in schedule → not_started
-    ]
-  };
+  const graph = makeGraphWithStatus([
+    ['a', 'A', '01', 'mastered'],
+    ['b', 'B', '01', 'learning'],
+    ['c', 'C', '02', 'struggling'],
+    ['d', 'D', '02', 'not_started']
+  ]);
 
   const mgr = new KGM('/project');
-  const stats = mgr.computeStats(graph, reviewSchedule);
+  const stats = mgr.computeStats(graph);
 
   TestRunner.assertEquals(stats.total, 4, 'total concepts');
   TestRunner.assertEquals(stats.mastered, 1, 'mastered count');
@@ -237,21 +225,24 @@ TestRunner.test('computeStats: counts concepts by status', () => {
   TestRunner.assertEquals(stats.notStarted, 1, 'not_started count');
 });
 
-TestRunner.test('computeStats: all not started when no review schedule', () => {
+TestRunner.test('computeStats: all not started when no node_status on nodes', () => {
   setupEnv();
   const KGM = loadModule();
   if (!KGM) return;
 
   const graph = {
-    nodes: [{ id: 'a', name: 'A', chapter: '01' }, { id: 'b', name: 'B', chapter: '01' }],
+    nodes: [
+      { id: 'a', name: 'A', chapter: '01' },  // no node_status
+      { id: 'b', name: 'B', chapter: '01' }   // no node_status
+    ],
     edges: []
   };
 
   const mgr = new KGM('/project');
-  const stats = mgr.computeStats(graph, null);
+  const stats = mgr.computeStats(graph);
 
   TestRunner.assertEquals(stats.total, 2, 'total');
-  TestRunner.assertEquals(stats.notStarted, 2, 'all not started');
+  TestRunner.assertEquals(stats.notStarted, 2, 'all not started (no node_status)');
 });
 
 // ============================================
@@ -276,50 +267,22 @@ TestRunner.test('getNodeColor: returns correct color for each status', () => {
 // Test: mergeReviewStatus
 // ============================================
 
-TestRunner.test('mergeReviewStatus: attaches status to each node', () => {
+TestRunner.test('mergeReviewStatus: returns graph unchanged (status already on nodes)', () => {
   setupEnv();
   const KGM = loadModule();
   if (!KGM) return;
 
-  const graph = {
-    nodes: [
-      { id: 'attn', name: '注意力机制', chapter: '01' },
-      { id: 'pos-enc', name: '位置编码', chapter: '02' }
-    ],
-    edges: []
-  };
-  const schedule = {
-    items: [
-      { concept: '注意力机制', status: 'mastered', review_count: 3 },
-      { concept: '位置编码', status: 'learning', review_count: 1 }
-    ]
-  };
+  const graph = makeGraphWithStatus([
+    ['attn', '注意力机制', '01', 'mastered'],
+    ['pos-enc', '位置编码', '02', 'learning']
+  ]);
 
   const mgr = new KGM('/project');
-  const merged = mgr.mergeReviewStatus(graph, schedule);
+  const merged = mgr.mergeReviewStatus(graph);
 
-  TestRunner.assertEquals(merged.nodes[0].status, 'mastered', 'first node mastered');
-  TestRunner.assertEquals(merged.nodes[0].reviewCount, 3, 'first node review_count');
-  TestRunner.assertEquals(merged.nodes[1].status, 'learning', 'second node learning');
-  TestRunner.assertEquals(merged.nodes[1].reviewCount, 1, 'second node review_count');
-});
-
-TestRunner.test('mergeReviewStatus: nodes without schedule entry get not_started', () => {
-  setupEnv();
-  const KGM = loadModule();
-  if (!KGM) return;
-
-  const graph = {
-    nodes: [{ id: 'new', name: '新概念', chapter: '05' }],
-    edges: []
-  };
-  const schedule = { items: [] };
-
-  const mgr = new KGM('/project');
-  const merged = mgr.mergeReviewStatus(graph, schedule);
-
-  TestRunner.assertEquals(merged.nodes[0].status, 'not_started', 'unreviewed → not_started');
-  TestRunner.assertEquals(merged.nodes[0].reviewCount, 0, 'unreviewed → 0 reviews');
+  // Pass-through: nodes already have node_status from the graph file
+  TestRunner.assertEquals(merged.nodes[0].node_status, 'mastered', 'first node mastered (preserved)');
+  TestRunner.assertEquals(merged.nodes[1].node_status, 'learning', 'second node learning (preserved)');
 });
 
 // ============================================

@@ -583,7 +583,9 @@
     div.dataset.index = index;
 
     const duration = chapter.duration_minutes;
-    const concepts = chapter.concepts ? chapter.concepts.join('、') : '';
+    const concepts = chapter.concepts
+      ? chapter.concepts.map(c => typeof c === 'string' ? c : (c.name || c.id || '')).join('、')
+      : '';
 
     div.innerHTML = `
       <div class="learning-outline-number">${index + 1}</div>

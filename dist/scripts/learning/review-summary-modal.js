@@ -33,7 +33,10 @@
      * @param {Object} data - { reviewResult: { changes, reviewedCount, totalCount }, miniGraph }
      */
     show(data) {
-      if (this.state === 'visible') return;
+      if (this.state === 'visible') {
+        console.warn('[ReviewSummaryModal] show() called while visible, ignoring');
+        return;
+      }
       this._createDOM(data);
       this.state = 'visible';
       this._bindESC();

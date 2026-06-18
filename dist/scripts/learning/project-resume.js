@@ -83,9 +83,11 @@
      */
     getChaptersToGenerate(project) {
       if (!project || !project.chapters) return [];
-      return project.chapters.filter(ch =>
-        ch.status === '未生成' || ch.status === '失败' || ch.status === 'failed' || ch.status === 'not_generated'
-      );
+      const cs = project.chapters_status || {};
+      return project.chapters.filter(ch => {
+        const s = getChapterStatus(ch, cs);
+        return s === '未生成' || s === '失败' || s === 'failed' || s === 'not_generated';
+      });
     }
 
     /**
@@ -95,6 +97,23 @@
     getPath() {
       return this.jsonPath;
     }
+  }
+
+  // ============================================
+  // Helpers
+  // ============================================
+  /**
+   * Read chapter status from project.chapters_status[file] map.
+   * v2 schema: chapter status is at top level, not on the chapter object.
+   * @param {Object} ch - { file, title, ... }
+   * @param {Object} chaptersStatus - project.chapters_status map
+   * @returns {string}
+   */
+  function getChapterStatus(ch, chaptersStatus) {
+    if (!ch || !chaptersStatus) return 'not_generated';
+    if (ch.file && chaptersStatus[ch.file]) return chaptersStatus[ch.file];
+    // Legacy: fall back to ch.status if still present
+    return ch.status || 'not_generated';
   }
 
   // ============================================
@@ -138,6 +157,7 @@
   /**
    * Sync project.json chapter statuses with actual files on disk.
    * If a .md file exists but status is 'not_generated', mark as 'ready'.
+   * v2: writes to project.chapters_status[file], not project.chapters[i].status.
    */
   async function syncProjectStatus(project, basePath) {
     if (!window.__TAURI__) return;
@@ -147,9 +167,13 @@
       let modified = false;
       const normalizedBase = basePath.replace(/\\/g, '/');
 
+      // Ensure chapters_status map exists
+      if (!project.chapters_status) project.chapters_status = {};
+
       for (let i = 0; i < project.chapters.length; i++) {
         const ch = project.chapters[i];
-        const isNotGenerated = ch.status === 'not_generated' || ch.status === '未生成';
+        const currentStatus = getChapterStatus(ch, project.chapters_status);
+        const isNotGenerated = currentStatus === 'not_generated' || currentStatus === '未生成';
         if (!isNotGenerated) continue;
 
         // Determine possible file path
@@ -168,9 +192,11 @@
 
         if (filePath && await exists(filePath)) {
           console.log('[ProjectResume] File exists, marking as ready:', filePath);
-          project.chapters[i].status = 'ready';
-          if (!project.chapters[i].file) {
-            project.chapters[i].file = filePath.split('/').pop();
+          const basename = filePath.split('/').pop();
+          // Write to top-level chapters_status (v2 schema)
+          project.chapters_status[basename] = 'ready';
+          if (!ch.file) {
+            ch.file = basename;
           }
           modified = true;
         }
@@ -230,33 +256,20 @@
       const graph = await kgm.loadGraph();
       console.log('[ProjectDashboard] Graph loaded:', graph ? graph.nodes.length + ' nodes' : 'null');
 
-      // Load review schedule
-      let reviewSchedule = null;
-      if (window.__TAURI__) {
-        try {
-          const { exists, readTextFile } = window.__TAURI__.fs;
-          const schedulePath = basePath + '/.learning/review-schedule.json';
-          if (await exists(schedulePath)) {
-            reviewSchedule = JSON.parse(await readTextFile(schedulePath));
-          }
-        } catch (e) {
-          // no schedule yet, that's fine
-        }
-      }
-
-      // Compute stats and merge status
+      // Knowledge graph nodes already carry node_status. No merge needed.
       let mergedGraph = graph;
       let stats = null;
       if (graph) {
-        stats = kgm.computeStats(graph, reviewSchedule);
-        mergedGraph = kgm.mergeReviewStatus(graph, reviewSchedule);
+        stats = kgm.computeStats(graph);
+        mergedGraph = kgm.mergeReviewStatus(graph);
       }
 
       // Build chapters list from project
+      const chaptersStatus = (project && project.chapters_status) || {};
       const chapters = ((project && project.chapters) || []).map((ch, i) => ({
         file: ch.file || '',
         title: ch.title || ('第' + (i + 1) + '章'),
-        status: ch.status || 'not_generated'
+        status: getChapterStatus(ch, chaptersStatus)
       }));
 
       // Show dashboard modal
@@ -298,20 +311,20 @@
 
       const manager = new ChapterStatusManager(project.chapters);
       // Restore actual statuses AND file paths from project.json.
-      // The ChapterStatusManager constructor hardcodes file: null, so without
-      // this restore, downstream code that matches by file (e.g. quiz → chapter
-      // index lookup in mode-integration.js) silently fails for resumed projects.
+      // v2 schema: chapter status is in project.chapters_status[file], not on chapter.
+      const cs = project.chapters_status || {};
+      // Map Chinese status names to English
+      const statusMap = {
+        '已完成': 'completed', '完成': 'completed',
+        '就绪': 'ready',
+        '生成中': 'generating',
+        '失败': 'failed',
+        '未生成': 'not_generated'
+      };
       project.chapters.forEach((ch, i) => {
-        if (ch.status && ch.status !== 'not_generated' && ch.status !== '未生成') {
-          // Map Chinese status names to English
-          const statusMap = {
-            '已完成': 'completed', '完成': 'completed',
-            '就绪': 'ready',
-            '生成中': 'generating',
-            '失败': 'failed',
-            '未生成': 'not_generated'
-          };
-          const engStatus = statusMap[ch.status] || ch.status;
+        const statusFromMap = getChapterStatus(ch, cs);
+        if (statusFromMap && statusFromMap !== 'not_generated' && statusFromMap !== '未生成') {
+          const engStatus = statusMap[statusFromMap] || statusFromMap;
           try {
             // Set directly (bypass transition validation for restore)
             manager.chapters[i].status = engStatus;
@@ -328,11 +341,8 @@
           const cleanedFile = ch.file.replace(/^[\\/]+/, '');
           manager.chapters[i].file = cleanedBase + sep + cleanedFile;
         }
-        // Restore quiz rating so the chapter list shows rating-aware icons
-        // (mastered=green, learning=blue, struggling=red).
-        if (ch.last_quiz_rating) {
-          manager.chapters[i].rating = ch.last_quiz_rating;
-        }
+        // Note: last_quiz_rating no longer stored on chapter (v2 schema).
+        // If needed, derive from quiz-history.json — left as null for now.
       });
 
       const container = document.getElementById('learningProgressPanel');
@@ -514,17 +524,19 @@
               await kgm.buildGraph();
               graph = await kgm.loadGraph();
             }
-            const stats = graph ? kgm.computeStats(graph, null) : null;
+            const stats = graph ? kgm.computeStats(graph) : null;
+            const mergedGraph = graph ? kgm.mergeReviewStatus(graph) : graph;
+            const chaptersStatus = (project && project.chapters_status) || {};
             const chapters = (project && project.chapters || []).map((ch, i) => ({
               file: ch.file || '',
               title: ch.title || '第' + (i + 1) + '章',
-              status: ch.status || 'not_generated'
+              status: (ch.file && chaptersStatus[ch.file]) || 'not_generated'
             }));
             const dashboard = new window.KnowledgeGraphDashboard({
               onClose: () => dashboard.close()
             });
             dashboard.show({
-              graph,
+              graph: mergedGraph,
               stats,
               chapters,
               projectName: (project && project.name) || '学习项目'

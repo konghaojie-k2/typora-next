@@ -52,6 +52,7 @@
       this._unbindESC();
       this._removeDOM();
       this.state = 'hidden';
+      this.onClose();
     }
 
     // --- DOM construction ---
@@ -237,8 +238,8 @@
       // Node circles
       nodeGroup.append('circle')
         .attr('r', 8)
-        .attr('fill', d => STATUS_BG[d.status] || STATUS_BG.not_started)
-        .attr('stroke', d => STATUS_COLORS[d.status] || STATUS_COLORS.not_started)
+        .attr('fill', d => STATUS_BG[d.node_status] || STATUS_BG.not_started)
+        .attr('stroke', d => STATUS_COLORS[d.node_status] || STATUS_COLORS.not_started)
         .attr('stroke-width', 2);
 
       // Node labels (color matches status)
@@ -248,7 +249,7 @@
         .attr('dy', 4)
         .attr('font-size', '12px')
         .attr('font-weight', 500)
-        .attr('fill', d => STATUS_COLORS[d.status] || STATUS_COLORS.not_started)
+        .attr('fill', d => STATUS_COLORS[d.node_status] || STATUS_COLORS.not_started)
         .attr('font-family', '-apple-system, BlinkMacSystemFont, sans-serif');
 
       // Hover highlight
@@ -356,16 +357,8 @@
       // Status
       const status = document.createElement('div');
       status.className = 'kg-detail-status';
-      status.textContent = STATUS_LABELS[node.status] || '未开始';
+      status.textContent = STATUS_LABELS[node.node_status] || '未开始';
       drawer.appendChild(status);
-
-      // Review count
-      if (node.reviewCount !== undefined) {
-        const count = document.createElement('div');
-        count.className = 'kg-detail-review-count';
-        count.textContent = '复习次数: ' + node.reviewCount;
-        drawer.appendChild(count);
-      }
 
       // Chapter
       const chapter = document.createElement('div');
