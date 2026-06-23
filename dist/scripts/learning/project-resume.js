@@ -112,8 +112,37 @@
   function getChapterStatus(ch, chaptersStatus) {
     if (!ch || !chaptersStatus) return 'not_generated';
     if (ch.file && chaptersStatus[ch.file]) return chaptersStatus[ch.file];
-    // Legacy: fall back to ch.status if still present
-    return ch.status || 'not_generated';
+    // v2 schema: status is in chapters_status map only. No fallback to ch.status.
+    return 'not_generated';
+  }
+
+  /**
+   * Read quiz-history.json and build a { chapterFile: rating } map,
+   * using the MOST RECENT entry per chapter (entries are appended in order).
+   * Used to restore chapter rating badges + gate sliding window on resume.
+   * @param {string} basePath - project root
+   * @returns {Promise<Object>} { "01-foo.md": "mastered", ... }
+   */
+  async function _loadChapterRatings(basePath) {
+    if (!window.__TAURI__ || !window.__TAURI__.fs) return {};
+    try {
+      const { exists, readTextFile } = window.__TAURI__.fs;
+      const histPath = basePath.replace(/[\\/]+$/, '') + '/.learning/quiz-history.json';
+      if (!await exists(histPath)) return {};
+      const data = JSON.parse(await readTextFile(histPath));
+      const entries = (data && data.entries) || [];
+      const ratings = {};
+      for (const e of entries) {
+        const f = e.chapter_file || '';
+        if (!f) continue;
+        // Last entry wins (most recent), matching append order
+        ratings[f] = e.rating || null;
+      }
+      return ratings;
+    } catch (e) {
+      console.warn('[ProjectResume] _loadChapterRatings failed:', e);
+      return {};
+    }
   }
 
   // ============================================
@@ -145,6 +174,11 @@
           console.warn('[ProjectDashboard] Error:', e)
         );
 
+        // Pre-fetch chapter ratings from quiz-history.json so loadProjectUI
+        // can restore struggling/learning/mastered badges + gate sliding window.
+        // v2 schema: rating is NOT on chapter, must derive from quiz-history.
+        project._ratingsByFile = await _loadChapterRatings(path);
+
         loadProjectUI(project, path);
         return project;
       }
@@ -174,31 +208,64 @@
         const ch = project.chapters[i];
         const currentStatus = getChapterStatus(ch, project.chapters_status);
         const isNotGenerated = currentStatus === 'not_generated' || currentStatus === '未生成';
-        if (!isNotGenerated) continue;
 
-        // Determine possible file path
-        let filePath = null;
-        if (ch.file) {
-          filePath = normalizedBase + '/' + ch.file;
-        } else {
-          // Guess filename using same logic as agent-bridge.js
+        // Case 1: not_generated chapter — file may exist on disk (generated externally)
+        // Case 2: generated chapter but file field is null (Rust never回写 chapters[i].file)
+        //         → try to match the file by guessed name and backfill ch.file
+        if (isNotGenerated) {
+          // Determine possible file path
+          let filePath = null;
+          if (ch.file) {
+            filePath = normalizedBase + '/' + ch.file;
+          } else {
+            // Guess filename using same logic as agent-bridge.js
+            const safeTitle = (ch.title || '')
+              .replace(/[^\w一-龥]/g, '-')
+              .replace(/--+/g, '-')
+              .replace(/^-|-$/g, '');
+            const guessedFile = `${String(i).padStart(2, '0')}-${safeTitle}.md`;
+            filePath = normalizedBase + '/' + guessedFile;
+          }
+
+          if (filePath && await exists(filePath)) {
+            console.log('[ProjectResume] File exists, marking as ready:', filePath);
+            const basename = filePath.split('/').pop();
+            // Write to top-level chapters_status (v2 schema)
+            project.chapters_status[basename] = 'ready';
+            if (!ch.file) {
+              ch.file = basename;
+            }
+            modified = true;
+          }
+        } else if (!ch.file) {
+          // Generated chapter with null file field — backfill from guessed name
           const safeTitle = (ch.title || '')
             .replace(/[^\w一-龥]/g, '-')
             .replace(/--+/g, '-')
             .replace(/^-|-$/g, '');
           const guessedFile = `${String(i).padStart(2, '0')}-${safeTitle}.md`;
-          filePath = normalizedBase + '/' + guessedFile;
-        }
-
-        if (filePath && await exists(filePath)) {
-          console.log('[ProjectResume] File exists, marking as ready:', filePath);
-          const basename = filePath.split('/').pop();
-          // Write to top-level chapters_status (v2 schema)
-          project.chapters_status[basename] = 'ready';
-          if (!ch.file) {
-            ch.file = basename;
+          const filePath = normalizedBase + '/' + guessedFile;
+          if (await exists(filePath)) {
+            console.log('[ProjectResume] Backfilling file for chapter', i, ':', guessedFile);
+            ch.file = guessedFile;
+            modified = true;
           }
-          modified = true;
+        }
+      }
+
+      // Clean up legacy dirty keys in chapters_status — early code wrote
+      // chapter titles (without .md) as keys. Keep only keys that end with .md
+      // (the canonical basename form) OR match a known chapter file.
+      if (project.chapters_status) {
+        const validFiles = new Set(
+          project.chapters.map(ch => ch.file).filter(f => f && f.endsWith('.md'))
+        );
+        for (const key of Object.keys(project.chapters_status)) {
+          if (!key.endsWith('.md') && !validFiles.has(key)) {
+            console.log('[ProjectResume] Removing dirty chapters_status key:', key);
+            delete project.chapters_status[key];
+            modified = true;
+          }
         }
       }
 
@@ -313,6 +380,7 @@
       // Restore actual statuses AND file paths from project.json.
       // v2 schema: chapter status is in project.chapters_status[file], not on chapter.
       const cs = project.chapters_status || {};
+      const ratingsByFile = project._ratingsByFile || {};
       // Map Chinese status names to English
       const statusMap = {
         '已完成': 'completed', '完成': 'completed',
@@ -341,9 +409,34 @@
           const cleanedFile = ch.file.replace(/^[\\/]+/, '');
           manager.chapters[i].file = cleanedBase + sep + cleanedFile;
         }
-        // Note: last_quiz_rating no longer stored on chapter (v2 schema).
-        // If needed, derive from quiz-history.json — left as null for now.
+        // Restore rating from quiz-history (v2 schema: rating not on chapter).
+        // Needed for struggling→block-sliding-window logic + rating badges.
+        if (ch.file && ratingsByFile[ch.file]) {
+          manager.chapters[i].rating = ratingsByFile[ch.file];
+        }
       });
+
+      // Post-restore: trigger sliding window to fill any gaps
+      // (restored statuses bypass onChapterStatusChange, so completed chapters
+      // from a previous session won't auto-trigger next-chapter generation)
+      //
+      // Per state matrix (decisions.md 课程模式状态机):
+      //   resume + 有 completed(struggling) 章节 → ❌ 不自动滑窗
+      //   resume + 全部 completed(mastered/learning) → ✅ 可生成
+      const _postTrigger = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+      const hasPending = manager.chapters.some(ch => ch.status === 'not_generated');
+      const hasStruggling = manager.chapters.some(ch =>
+        ch.status === 'completed' && ch.rating === 'struggling'
+      );
+      if (_postTrigger && hasPending && !hasStruggling) {
+        setTimeout(() => {
+          _postTrigger({ chapters: project.chapters }, basePath).catch(err =>
+            console.warn('[ProjectResume] post-restore triggerNextChapters:', err)
+          );
+        }, 500);
+      } else if (hasStruggling) {
+        console.log('[ProjectResume] struggling chapter found → skip auto sliding window');
+      }
 
       const container = document.getElementById('learningProgressPanel');
       const orb = document.getElementById('learningModeOrb');
@@ -437,6 +530,11 @@
         // so resume benefits from the same window logic.
         ui.onChapterStatusChange = (index, prevStatus, newStatus) => {
           if (newStatus === 'completed') {
+            // Per state matrix: struggling → ❌ 不触发滑窗
+            if (manager.chapters[index].rating === 'struggling') {
+              console.log('[ProjectResume] struggling → skip sliding window');
+              return;
+            }
             const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
             if (triggerNext) {
               triggerNext({ chapters: project.chapters }, basePath);

@@ -309,7 +309,7 @@
       console.error('[QuizDebug] onQuizStart error:', err);
       const msg = (err && err.message) || String(err);
       if (window.showToast) {
-        window.showToast('❌ ' + msg, 'error');
+        window.showToast('加载测验失败: ' + msg, 'error');
       }
       // Tauri WebView: alert()/confirm() don't work — rely on showToast above.
       // (Previously had `alert(...)` as a fallback, but that also fails to render.)
@@ -528,6 +528,20 @@
       await window.__TAURI__.core.invoke('persist_quiz_result', payload);
       console.log('[QuizSaveHistory] persisted quiz result');
 
+      // PB1: trigger review-cards generation (异步非阻塞)
+      window.__TAURI__.core.invoke('generate_review_content', {
+        projectPath: _projectPath,
+        chapterFile: historyPayload.chapter || '',
+        weakConcepts: historyPayload.result.weak_concepts || []
+      }).catch(err => console.warn('[PB1] generate_review_content failed:', err));
+
+      // PB2: init review schedule for this chapter's concepts
+      window.__TAURI__.core.invoke('init_review_schedule', {
+        projectPath: _projectPath,
+        chapterFile: historyPayload.chapter || '',
+        weakConcepts: historyPayload.result.weak_concepts || []
+      }).catch(err => console.warn('[PB2] init_review_schedule failed:', err));
+
       // Sync in-memory state: Rust already wrote ch["status"]="completed" to
       // project.json, but ChapterStatusManager in the WebView doesn't know.
       // Promote the matching chapter to 'completed' so the onChapterStatusChange
@@ -549,33 +563,47 @@
         if (idx >= 0) {
           // Always persist the rating — even if already completed, the user
           // might have retaken the quiz with a different result.
+          const prevRating = mgr.chapters[idx].rating;
           mgr.setRating(idx, payload.rating);
 
           if (mgr.chapters[idx].status === 'completed') {
             // Already completed — refresh rating badge in UI only.
             window.LearningProgress._ui?.updateChapter(idx);
-            console.log('[QuizSaveHistory] chapter', idx, 'already completed, rating updated');
+            console.log('[QuizSaveHistory] chapter', idx, 'already completed, rating updated', prevRating, '→', payload.rating);
+            // Retake scenario: previously struggling, now mastered/learning.
+            // Status didn't change (completed→completed, no onChapterStatusChange
+            // fired), so we must manually trigger the sliding window here.
+            if (prevRating === 'struggling' && payload.rating !== 'struggling') {
+              console.log('[QuizSaveHistory] retake struggling→' + payload.rating + ' → trigger sliding window');
+              const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
+              if (triggerNext) {
+                triggerNext({ chapters: mgr.chapters }, _projectPath).catch(err =>
+                  console.warn('[QuizSaveHistory] retake triggerNextChapters:', err)
+                );
+              }
+            }
           } else {
             const rating = payload.rating;
-            if (rating === 'struggling') {
-              // Update rating display but don't slide forward.
+            // Per state matrix (decisions.md 课程模式状态机):
+            //   ready + 提交答题 → completed (any rating, including struggling)
+            //   mastered/learning → 触发滑窗（下1章 n+2）
+            //   struggling        → ❌ 不触发滑窗，但状态仍升级为 completed
+            // Rust persist_quiz_result 已经无条件写了 completed，前端必须保持一致，
+            // 否则会出现"关闭重开后 struggling 章节莫名变 completed"的不一致。
+            try {
+              mgr.setStatus(idx, 'completed');
               window.LearningProgress._ui?.updateChapter(idx);
-              console.log('[QuizSaveHistory] chapter', idx, 'rating=struggling → skip sliding window, suggest retake');
-              if (window.showToast) {
-                window.showToast('📚 本章掌握薄弱，建议重学后再继续', 'info');
-              }
-            } else {
-              // mastered or learning → change status first, then update UI.
-              // updateChapter AFTER setStatus so onChapterStatusChange detects
-              // the ready→completed transition and fires triggerSlidingWindow.
-              try {
-                mgr.setStatus(idx, 'completed');
-                window.LearningProgress._ui?.updateChapter(idx);
+              if (rating === 'struggling') {
+                console.log('[QuizSaveHistory] chapter', idx, 'completed (rating=struggling) → skip sliding window, suggest retake');
+                if (window.showToast) {
+                  window.showToast('📚 本章掌握薄弱，建议重学后再继续', 'info');
+                }
+              } else {
                 console.log('[QuizSaveHistory] marked chapter', idx, 'completed (rating=' + rating + ') → sliding window triggered');
-              } catch (e) {
-                console.warn('[QuizSaveHistory] setStatus failed for chapter', idx, ':', e.message);
-                window.LearningProgress._ui?.updateChapter(idx);
               }
+            } catch (e) {
+              console.warn('[QuizSaveHistory] setStatus failed for chapter', idx, ':', e.message);
+              window.LearningProgress._ui?.updateChapter(idx);
             }
           }
         } else {
@@ -625,7 +653,7 @@
     const el = document.createElement('div');
     el.id = 'socraticTriggerToast';
     el.style.cssText = `
-      position: fixed; bottom: 24px; right: 24px; width: 320px; padding: 14px 18px;
+      position: fixed; top: 80px; right: 24px; width: 320px; padding: 14px 18px;
       background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
       border: 1px solid rgba(129,140,248,0.3); border-radius: 14px;
       box-shadow: 0 10px 40px rgba(0,0,0,0.4); z-index: 9999;
@@ -690,7 +718,7 @@
     toast.id = 'learningQuizToast';
     toast.style.cssText = `
       position: fixed;
-      bottom: 24px; right: 24px;
+      top: 24px; right: 24px;
       width: 320px;
       background: ${bg};
       border: 1px solid ${color}30;
@@ -1542,7 +1570,7 @@
           }
 
           for (const ans of answers) {
-            await scheduler.syncMarkReviewed(projectPath, ans.concept, ans.rating);
+            await scheduler.submitReviewResult(projectPath, ans.concept, ans.rating, ans.answers || []);
           }
           _reviewModal = null;
 
@@ -1565,6 +1593,31 @@
       _reviewModal.show();
     } catch (err) {
       console.error('[Sprint4] checkDailyReview error:', err);
+    }
+  }
+
+  // ============================================
+  // PB5: Missing Review Cards Recovery
+  // ============================================
+
+  async function checkMissingReviewCards(projectPath) {
+    if (!projectPath || !window.__TAURI__) return;
+    try {
+      const missing = await window.__TAURI__.core.invoke('check_missing_review_cards', { projectPath });
+      if (!missing || missing.length === 0) return;
+
+      console.log('[PB5] missing review cards found:', missing);
+      for (const chapter of missing) {
+        const chFile = chapter.chapter_file || '';
+        const weakConcepts = chapter.missing_concepts || [];
+        window.__TAURI__.core.invoke('generate_review_content', {
+          projectPath,
+          chapterFile: chFile,
+          weakConcepts
+        }).catch(err => console.warn('[PB5] auto-regenerate failed for', chFile, err));
+      }
+    } catch (err) {
+      console.warn('[PB5] checkMissingReviewCards error:', err);
     }
   }
 
@@ -1617,6 +1670,7 @@
     setupQuizPanel,
     setupSelectionExplainer,
     checkDailyReview,
+    checkMissingReviewCards,
     clearCues,
     createCue,
     teardown() {

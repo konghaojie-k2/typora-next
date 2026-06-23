@@ -81,6 +81,11 @@
      * @param {string} status
      * @param {string|null} file
      */
+    /**
+     * NOTE: v2 schema — this writes to legacy chapters[i].status which is no longer
+     * the canonical source of truth (use chapters_status map instead).
+     * Kept for test compatibility; production code should use chapters_status.
+     */
     updateChapterStatus(index, status, file) {
       const project = this.load();
       if (!project) throw new Error('No project found');

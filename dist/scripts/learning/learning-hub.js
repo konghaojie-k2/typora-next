@@ -112,6 +112,17 @@
     await currentList.initPath();
     await currentList.load();
 
+    // Refresh progress from project.json chapters_status (not cached chapters[i].status)
+    for (const p of currentList.projects) {
+      try {
+        const info = await detectProjectAt(p.path);
+        if (info) {
+          p.chapters = info.chapters;
+          p.completed = info.completed;
+        }
+      } catch (_) { /* keep cached value */ }
+    }
+
     // Create overlay
     let overlay = document.getElementById('learningHubOverlay');
     if (!overlay) {
@@ -286,8 +297,10 @@
         return null;
       }
 
-      const completed = data.chapters.filter(ch =>
-        ch.status === 'completed' || ch.status === '已完成'
+      // v2 schema: chapter status is in chapters_status map (not chapters[i].status)
+      const cs = data.chapters_status || {};
+      const completed = Object.values(cs).filter(v =>
+        v === 'completed' || v === '已完成'
       ).length;
 
       return {

@@ -1832,7 +1832,7 @@ fn create_learning_project(
                 "concepts": ch["concepts"].as_array().map(|arr| {
                     arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect::<Vec<_>>()
                 }).unwrap_or_default(),
-                "status": "not_generated",
+                // Note: v2 schema — status is stored in chapters_status map, NOT here
                 "file": null
             })
         }).collect::<Vec<_>>(),
@@ -2034,7 +2034,6 @@ async fn persist_quiz_result(
     if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
         status_map.insert(chapter_basename.clone(), serde_json::json!("completed"));
     }
-
     // Strip chapter.concepts down to {id, name} only (no status, no updated_at)
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
         for ch in chapters.iter_mut() {
@@ -2200,9 +2199,296 @@ async fn read_text_file(file_path: String) -> Result<String, String> {
     Ok(content)
 }
 
-// ============================================
-// Sprint 6 PB3: Per-chapter Explanation Persistence
-// ============================================
+/// Persist a generated chapter's file field back to project.json.
+/// Called on chapter_complete so the file path is durable across app restarts,
+/// instead of relying on resume-time sync to guess the filename.
+#[tauri::command]
+async fn persist_chapter_file(
+    project_path: String,
+    chapter_index: usize,
+    file_basename: String,
+    status: String,
+) -> Result<(), String> {
+    let project_json_path = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("project.json");
+    if !project_json_path.exists() {
+        return Err("project.json not found".to_string());
+    }
+    let content = std::fs::read_to_string(&project_json_path)
+        .map_err(|e| format!("读取 project.json 失败: {}", e))?;
+    let mut project: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
+
+    // Backfill chapters[index].file
+    if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
+        if chapter_index < chapters.len() {
+            chapters[chapter_index]["file"] = serde_json::json!(file_basename);
+        }
+    }
+
+    // Update chapters_status map
+    if project.get("chapters_status").is_none() {
+        project["chapters_status"] = serde_json::json!({});
+    }
+    if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
+        status_map.insert(file_basename, serde_json::json!(status));
+    }
+
+    let json_str = serde_json::to_string_pretty(&project)
+        .map_err(|e| format!("序列化 project.json 失败: {}", e))?;
+    std::fs::write(&project_json_path, json_str)
+        .map_err(|e| format!("写入 project.json 失败: {}", e))?;
+    Ok(())
+}
+
+/// PB1: Generate review cards (quiz questions + key points) for each concept in a chapter.
+/// Round 2: Calls agent-bridge "review-gen" stage with review-generation skill.
+/// Falls back to stub if agent fails.
+#[tauri::command]
+async fn generate_review_content(
+    project_path: String,
+    chapter_file: String,
+    weak_concepts: Vec<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    // Ensure all bundled skills (including review-generation) are available in project
+    let _ = ai_agent::copy_bundled_skills_to_project(&project_path);
+
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+
+    // Read chapter's concepts.json
+    let chapter_stem = chapter_file.trim_end_matches(".md");
+    let concepts_json_path = std::path::PathBuf::from(&project_path)
+        .join(format!("{}.concepts.json", chapter_stem));
+    let concepts: Vec<serde_json::Value> = if concepts_json_path.exists() {
+        let content = std::fs::read_to_string(&concepts_json_path)
+            .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
+        parsed.get("concepts")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    // Read existing review-cards.json (create if not exists)
+    let cards_path = learning_dir.join("review-cards.json");
+    let mut cards: serde_json::Value = if cards_path.exists() {
+        let content = std::fs::read_to_string(&cards_path)
+            .map_err(|e| format!("读取 review-cards.json 失败: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({ "version": "1.0", "cards": {} })
+        })
+    } else {
+        serde_json::json!({ "version": "1.0", "cards": {} })
+    };
+
+    // Ensure cards.cards is an object
+    if !cards.get("cards").and_then(|v| v.as_object()).is_some() {
+        cards["cards"] = serde_json::json!({});
+    }
+
+    // Filter to only concepts that don't already have a card (idempotent)
+    let existing_card_ids: std::collections::HashSet<String> = cards["cards"].as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let new_concepts: Vec<serde_json::Value> = concepts.into_iter()
+        .filter(|c| {
+            let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            !existing_card_ids.contains(cid)
+        })
+        .collect();
+
+    if new_concepts.is_empty() {
+        return Ok(serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }));
+    }
+
+    let now = now_local_string();
+    let chapter_basename = std::path::Path::new(&chapter_file)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| chapter_file.clone());
+
+    // Try agent-generated content first, fall back to stub
+    let agent_result = ai_agent::generate_review_content_agent(
+        project_path.clone(),
+        chapter_file.clone(),
+        new_concepts.clone(),
+        weak_concepts.clone(),
+        app_handle,
+        None,
+    ).await;
+
+    let weak_set: std::collections::HashSet<String> = weak_concepts.into_iter().collect();
+    let mut added_count = 0u32;
+
+    match agent_result {
+        Ok(agent_cards) => {
+            // Agent succeeded — merge returned cards into review-cards.json
+            if let Some(returned_cards) = agent_cards.get("cards").and_then(|v| v.as_object()) {
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                for (cid, card_value) in returned_cards {
+                    if !cards_obj.contains_key(cid) {
+                        let mut card = card_value.clone();
+                        // Ensure metadata fields are set
+                        if card.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                            card["source_chapter"] = serde_json::json!(chapter_basename);
+                        }
+                        if card.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                            card["generated_at"] = serde_json::json!(now);
+                        }
+                        if card.get("from_weak").is_none() {
+                            card["from_weak"] = serde_json::json!(weak_set.contains(cid));
+                        }
+                        cards_obj.insert(cid.clone(), card);
+                        added_count += 1;
+                    }
+                }
+            }
+
+            // Fill any concepts the agent skipped with stub content
+            for c in &new_concepts {
+                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if cid.is_empty() { continue; }
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) { continue; }
+                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let is_weak = weak_set.contains(&cid);
+                cards_obj.insert(cid.clone(), serde_json::json!({
+                    "concept_name": cname,
+                    "source_chapter": chapter_basename,
+                    "quiz_questions": [
+                        { "type": "choice", "question": format!("{} 的核心思想是什么？", cname), "options": ["待生成", "待补充", "待定", "未知"], "answer": 0 }
+                    ],
+                    "key_points": [ format!("{} 是本章的核心概念", cname) ],
+                    "generated_at": now,
+                    "from_weak": is_weak
+                }));
+                added_count += 1;
+            }
+        }
+        Err(e) => {
+            log::warn!("[PB1] Agent review generation failed, using stub: {}", e);
+            // Fall back to stub: write hardcoded content
+            for c in &new_concepts {
+                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if cid.is_empty() { continue; }
+                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let is_weak = weak_set.contains(&cid);
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) { continue; }
+                cards_obj.insert(cid.clone(), serde_json::json!({
+                    "concept_name": cname,
+                    "source_chapter": chapter_basename,
+                    "quiz_questions": [
+                        {
+                            "type": "choice",
+                            "question": format!("{} 的核心思想是什么？", cname),
+                            "options": ["尚未生成（Agent不可用）", "请重试生成", "待Agent补充", "待定"],
+                            "answer": 0
+                        }
+                    ],
+                    "key_points": [
+                        format!("{} 是本章的核心概念（Agent不可用，此为临时内容）", cname),
+                        format!("{} 的理解对掌握后续内容很重要", cname)
+                    ],
+                    "generated_at": now,
+                    "from_weak": is_weak
+                }));
+                added_count += 1;
+            }
+        }
+    }
+
+    let json_str = serde_json::to_string_pretty(&cards)
+        .map_err(|e| format!("序列化 review-cards.json 失败: {}", e))?;
+    std::fs::write(&cards_path, json_str)
+        .map_err(|e| format!("写入 review-cards.json 失败: {}", e))?;
+
+    Ok(serde_json::json!({ "success": true, "cards_count": added_count }))
+}
+
+/// PB5: Check for concepts that are missing from review-cards.json.
+/// Scans project.json for completed chapters, then checks review-cards.json
+/// for each concept. Returns the list of missing concepts grouped by chapter.
+#[tauri::command]
+async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_json::Value>, String> {
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    let project_json_path = learning_dir.join("project.json");
+    if !project_json_path.exists() {
+        return Ok(vec![]);
+    }
+
+    let content = std::fs::read_to_string(&project_json_path)
+        .map_err(|e| format!("读取 project.json 失败: {}", e))?;
+    let project: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
+
+    // Read existing review-cards.json
+    let cards_path = learning_dir.join("review-cards.json");
+    let existing_ids: std::collections::HashSet<String> = if cards_path.exists() {
+        if let Ok(c) = std::fs::read_to_string(&cards_path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&c) {
+                v.get("cards").and_then(|o| o.as_object())
+                    .map(|o| o.keys().cloned().collect())
+                    .unwrap_or_default()
+            } else { std::collections::HashSet::new() }
+        } else { std::collections::HashSet::new() }
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    // Check chapters_status for completed chapters
+    let status_map = project.get("chapters_status").and_then(|v| v.as_object());
+    if status_map.is_none() {
+        return Ok(vec![]);
+    }
+
+    let mut missing: Vec<serde_json::Value> = vec![];
+
+    if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
+        for ch in chapters {
+            let ch_file = ch.get("file").and_then(|v| v.as_str()).unwrap_or("");
+            if ch_file.is_empty() { continue; }
+
+            // Skip if chapter is not completed
+            let is_completed = status_map
+                .and_then(|m| m.get(ch_file))
+                .and_then(|v| v.as_str())
+                .map(|s| s == "completed")
+                .unwrap_or(false);
+            if !is_completed { continue; }
+
+            // Check each concept
+            let mut missing_concepts: Vec<String> = vec![];
+            if let Some(concepts) = ch.get("concepts").and_then(|v| v.as_array()) {
+                for c in concepts {
+                    let cid = c.get("id").and_then(|v| v.as_str())
+                        .or_else(|| c.as_str())
+                        .unwrap_or("");
+                    if !cid.is_empty() && !existing_ids.contains(cid) {
+                        missing_concepts.push(cid.to_string());
+                    }
+                }
+            }
+
+            if !missing_concepts.is_empty() {
+                missing.push(serde_json::json!({
+                    "chapter_file": ch_file,
+                    "missing_concepts": missing_concepts,
+                }));
+            }
+        }
+    }
+
+    Ok(missing)
+}
 
 mod explanation_persistence {
     use serde::{Deserialize, Serialize};
@@ -2504,17 +2790,12 @@ fn is_due(next_review_at: &str) -> bool {
 }
 
 /// Get review items that are due today
+/// PB2: No longer rebuilds from project.json — relies on init_review_schedule being
+/// called at quiz time. Returns empty if no schedule exists (legacy projects will
+/// have their schedule populated on next quiz submission).
 #[tauri::command]
 async fn get_review_items(project_path: String) -> Result<Vec<ReviewItem>, String> {
-    let mut schedule = read_review_schedule(&project_path)?;
-
-    // If no schedule exists, try to generate one from quiz history + project.json
-    if schedule.items.is_empty() {
-        schedule = generate_schedule_from_project(&project_path)?;
-        if !schedule.items.is_empty() {
-            write_review_schedule(&project_path, &schedule)?;
-        }
-    }
+    let schedule = read_review_schedule(&project_path)?;
 
     // Filter due items
     let due_items: Vec<ReviewItem> = schedule.items
@@ -2523,6 +2804,152 @@ async fn get_review_items(project_path: String) -> Result<Vec<ReviewItem>, Strin
         .collect();
 
     Ok(due_items)
+}
+
+/// PB2: Initialize review schedule for a chapter's concepts when quiz is submitted.
+/// Writes initial next_review_at for each concept (1 day from now, or shorter for weak concepts).
+/// Idempotent: skips concepts that already have a schedule entry.
+#[tauri::command]
+async fn init_review_schedule(
+    project_path: String,
+    chapter_file: String,
+    weak_concepts: Vec<String>,
+) -> Result<serde_json::Value, String> {
+    let chapter_stem = chapter_file.trim_end_matches(".md");
+    let concepts_json_path = std::path::PathBuf::from(&project_path)
+        .join(format!("{}.concepts.json", chapter_stem));
+    let concepts: Vec<(String, String)> = if concepts_json_path.exists() {
+        let content = std::fs::read_to_string(&concepts_json_path)
+            .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
+        let parsed: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
+        parsed.get("concepts")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter().filter_map(|c| {
+                    let id = c.get("id").and_then(|v| v.as_str())?;
+                    let name = c.get("name").and_then(|v| v.as_str())?;
+                    Some((id.to_string(), name.to_string()))
+                }).collect()
+            })
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
+
+    if concepts.is_empty() {
+        return Ok(serde_json::json!({ "success": true, "items_added": 0, "note": "no concepts found" }));
+    }
+
+    let mut schedule = read_review_schedule(&project_path)?;
+    let weak_set: std::collections::HashSet<String> = weak_concepts.into_iter().collect();
+    let now = now_local_string();
+    let mut added = 0u32;
+
+    for (cid, _cname) in &concepts {
+        if schedule.items.iter().any(|item| item.concept == *cid) {
+            continue; // Idempotent
+        }
+
+        let is_weak = weak_set.contains(cid);
+        let initial_interval = if is_weak { 1u32 } else { 1u32 };
+        // weak concepts get same initial 1-day interval; the review system will
+        // shorten subsequent intervals based on node_status=struggling
+
+        schedule.items.push(ReviewItem {
+            concept: cid.clone(),
+            source_chapter: chapter_file.clone(),
+            review_count: 0,
+            last_reviewed: String::new(),
+            next_review_at: add_days_to_string(&now, initial_interval as i32),
+            last_rating: "learning".to_string(),
+            status: "upcoming".to_string(),
+        });
+        added += 1;
+    }
+
+    write_review_schedule(&project_path, &schedule)?;
+    Ok(serde_json::json!({ "success": true, "items_added": added }))
+}
+
+/// PB3: Submit review result — one command updates three files atomically:
+/// 1. knowledge-graph.json → node_status (全局唯一概念状态)
+/// 2. review-schedule.json → review_count, last_rating, next_review_at
+/// 3. review-history.json → append entry
+#[tauri::command]
+async fn submit_review_result(
+    project_path: String,
+    concept_id: String,
+    rating: String,
+    answers: Vec<serde_json::Value>,
+) -> Result<serde_json::Value, String> {
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    let now = now_local_string();
+    let correct = rating == "mastered";
+
+    // 1. Update review-schedule.json
+    let mut schedule = read_review_schedule(&project_path)?;
+    let interval = compute_next_interval(
+        schedule.items.iter().find(|i| i.concept == concept_id).map(|i| i.review_count).unwrap_or(0) + 1,
+        &rating,
+    );
+    if let Some(item) = schedule.items.iter_mut().find(|i| i.concept == concept_id) {
+        item.review_count += 1;
+        item.last_rating = rating.clone();
+        item.last_reviewed = now.clone();
+        item.next_review_at = add_days_to_string(&now, interval as i32);
+        item.status = "upcoming".to_string();
+    }
+    write_review_schedule(&project_path, &schedule)?;
+
+    // 2. Append to review-history.json
+    let history_path = learning_dir.join("review-history.json");
+    let mut history: serde_json::Value = if history_path.exists() {
+        let content = std::fs::read_to_string(&history_path)
+            .map_err(|e| format!("读取 review-history.json 失败: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({ "version": "1.0", "entries": [] })
+        })
+    } else {
+        serde_json::json!({ "version": "1.0", "entries": [] })
+    };
+
+    let entries = history.get_mut("entries").and_then(|v| v.as_array_mut())
+        .ok_or("review-history.json entries 字段必须是数组")?;
+    entries.push(serde_json::json!({
+        "concept_id": concept_id,
+        "timestamp": now,
+        "correct": correct,
+        "rating": rating,
+        "answers": answers,
+    }));
+    let history_str = serde_json::to_string_pretty(&history)
+        .map_err(|e| format!("序列化 review-history.json 失败: {}", e))?;
+    std::fs::write(&history_path, history_str)
+        .map_err(|e| format!("写入 review-history.json 失败: {}", e))?;
+
+    // 3. Update knowledge-graph.json node_status
+    let graph_path = learning_dir.join("knowledge-graph.json");
+    if graph_path.exists() {
+        if let Ok(content) = std::fs::read_to_string(&graph_path) {
+            if let Ok(mut graph) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(nodes) = graph.get_mut("nodes").and_then(|v| v.as_array_mut()) {
+                    for node in nodes.iter_mut() {
+                        let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                        if id == concept_id {
+                            node["node_status"] = serde_json::json!(rating);
+                            break;
+                        }
+                    }
+                    if let Ok(json_str) = serde_json::to_string_pretty(&graph) {
+                        let _ = std::fs::write(&graph_path, json_str);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(serde_json::json!({ "success": true, "concept_id": concept_id, "rating": rating }))
 }
 
 /// Update a review item after reviewing
@@ -3199,9 +3626,10 @@ pub fn run() {
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::plan_course_llm, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
-            create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file,
+            create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file, persist_chapter_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
+            generate_review_content, init_review_schedule, submit_review_result, check_missing_review_cards,
             socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
             read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
             create_project_subdir

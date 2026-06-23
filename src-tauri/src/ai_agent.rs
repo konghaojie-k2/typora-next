@@ -1707,6 +1707,80 @@ pub async fn socratic_chat(
     Ok(result)
 }
 
+/// PB1 Round 2: Generate review cards via agent-bridge "review-gen" stage.
+/// Agent reads the chapter .md and generates per-concept quiz questions + key points.
+/// Rust parses the JSON response and returns it for writing to review-cards.json.
+pub async fn generate_review_content_agent(
+    project_path: String,
+    chapter_file: String,
+    concepts: Vec<serde_json::Value>,
+    weak_concepts: Vec<String>,
+    app_handle: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log::info!("[PB1] generate_review_content_agent START: project={}, chapter={}, concepts={}, weak={:?}",
+        project_path, chapter_file, concepts.len(), weak_concepts);
+
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "chapter_file": chapter_file,
+            "concepts": concepts,
+            "weak_concepts": weak_concepts,
+            "session_id": session_id,
+        }
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("review-gen")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[PB1] review-gen: spawning node process...");
+    let output = cmd.output()
+        .map_err(|e| {
+            log::error!("[PB1] review-gen: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[PB1] review-gen: agent failed: stderr={}", stderr);
+        return Err(format!("Agent review generation failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    log::info!("[PB1] review-gen: raw_stdout={}", &stdout[..std::cmp::min(500, stdout.len())]);
+
+    // Parse JSON response: { cards: { ... } }
+    let result: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|e| {
+            log::error!("[PB1] review-gen: parse failed: {} — raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())]);
+            format!("Failed to parse review-gen response: {}. Raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())])
+        })?;
+
+    log::info!("[PB1] review-gen SUCCESS: card_count={}", result.get("cards").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0));
+    Ok(result)
+}
+
 // ============================================
 // Sprint 9: Exploration Mode Chat via Agent SDK
 // ============================================

@@ -1,8 +1,9 @@
 /**
- * Review Modal
- * Focused modal UI for forgetting curve review (方案A)
+ * Review Modal (PB4: 客观题版)
+ * Shows objective quiz questions from review-cards.json, auto-grades,
+ * and shows key_points on wrong answers. Falls back to self-rating if no cards.
  *
- * Sprint 4: 遗忘曲线提醒系统
+ * Sprint 4 + PB4: 遗忘曲线复习 + 概念级客观测验
  */
 
 (function() {
@@ -16,11 +17,12 @@
       this.items = (options && options.items) || [];
       this.cards = (options && options.cards) || {}; // concept -> ReviewCard
       this.currentIndex = 0;
+      this._currentQuestionIdx = 0; // which question within current concept
       this.onComplete = (options && options.onComplete) || (() => {});
       this.onPostpone = (options && options.onPostpone) || (() => {});
       this._overlay = null;
       this._card = null;
-      this._answers = []; // Record of answers for each item
+      this._answers = []; // [{concept, rating, answers: [{question_id, is_correct}], correct_count, total_count}]
     }
 
     getState() { return this.state; }
@@ -35,24 +37,165 @@
       if (this.state !== 'due_found') return;
       this.state = 'reviewing';
       this.currentIndex = 0;
+      this._currentQuestionIdx = 0;
       this._answers = [];
       this._renderReviewingState();
     }
 
-    showNextItem() {
+    // ============================================
+    // Quiz-based answer submission
+    // ============================================
+
+    /**
+     * Handle an answer click for the current quiz question
+     * @param {number} selectedIdx - The option index the user chose
+     * @param {object} question - The quiz question object
+     */
+    handleQuizAnswer(selectedIdx, question) {
       if (this.state !== 'reviewing') return;
-      this._renderCurrentItem();
+
+      const isCorrect = selectedIdx === question.answer;
+      const conceptCard = this.cards[this.items[this.currentIndex].concept];
+      const totalQuestions = (conceptCard && conceptCard.quiz_questions) ? conceptCard.quiz_questions.length : 0;
+
+      // Track this answer
+      if (!this._answers[this.currentIndex]) {
+        this._answers[this.currentIndex] = {
+          concept: this.items[this.currentIndex].concept,
+          answers: [],
+          correct_count: 0,
+          total_count: totalQuestions
+        };
+      }
+      this._answers[this.currentIndex].answers.push({
+        question_id: question.id || ('q' + this._currentQuestionIdx),
+        is_correct: isCorrect
+      });
+      if (isCorrect) this._answers[this.currentIndex].correct_count++;
+
+      // Show result
+      this._showQuizResult(isCorrect, selectedIdx, question);
     }
 
-    submitAnswer(rating) {
-      if (this.state !== 'reviewing') return;
+    /**
+     * Show correct/wrong feedback for the answered question
+     */
+    _showQuizResult(isCorrect, selectedIdx, question) {
+      if (!this._card) return;
 
-      this._answers.push({
-        concept: this.items[this.currentIndex].concept,
-        rating: rating
+      const conceptCard = this.cards[this.items[this.currentIndex].concept];
+      const totalQuestions = (conceptCard && conceptCard.quiz_questions) ? conceptCard.quiz_questions.length : 0;
+      const isLastQuestion = this._currentQuestionIdx >= totalQuestions - 1;
+      const hasNextConcept = this.currentIndex < this.items.length - 1;
+
+      // Disable all option buttons
+      const optionBtns = this._card.querySelectorAll('.quiz-option-btn');
+      optionBtns.forEach((btn, idx) => {
+        btn.style.pointerEvents = 'none';
+        if (idx === question.answer) {
+          btn.style.borderColor = '#10b981';
+          btn.style.background = 'rgba(16,185,129,0.15)';
+        } else if (idx === selectedIdx && !isCorrect) {
+          btn.style.borderColor = '#ef4444';
+          btn.style.background = 'rgba(239,68,68,0.15)';
+        }
       });
 
+      // Show feedback area
+      const feedbackArea = this._card.querySelector('#reviewFeedbackArea');
+      if (feedbackArea) {
+        if (isCorrect) {
+          feedbackArea.innerHTML = `<div style="color:#10b981;font-weight:600;font-size:14px;">✅ 回答正确</div>`;
+        } else {
+          // Wrong: show key_points
+          const kps = (conceptCard && conceptCard.key_points) || [];
+          let kpHtml = '<div style="color:#ef4444;font-weight:600;font-size:14px;margin-bottom:8px;">❌ 回答错误，以下是你需要的重点：</div>';
+          if (kps.length > 0) {
+            kpHtml += kps.map(kp => `<div style="margin-bottom:4px;padding:6px 10px;background:rgba(239,68,68,0.08);border-radius:6px;color:#e2e8f0;font-size:13px;">• ${kp}</div>`).join('');
+          } else {
+            kpHtml += '<div style="color:#64748b;font-style:italic;font-size:13px;">（暂无重点提炼）</div>';
+          }
+          feedbackArea.innerHTML = kpHtml;
+        }
+        feedbackArea.style.display = 'block';
+      }
+
+      // Show next button
+      const nextBtn = this._card.querySelector('#reviewNextBtn');
+      if (nextBtn) {
+        if (isLastQuestion) {
+          nextBtn.textContent = hasNextConcept ? '下一概念 →' : '完成复习 ✓';
+        } else {
+          nextBtn.textContent = '下一题 →';
+        }
+        nextBtn.style.display = 'block';
+      }
+    }
+
+    /**
+     * Advance to the next question/concept
+     */
+    nextQuestion() {
+      if (this.state !== 'reviewing') return;
+
+      const conceptCard = this.cards[this.items[this.currentIndex].concept];
+      const totalQuestions = (conceptCard && conceptCard.quiz_questions) ? conceptCard.quiz_questions.length : 0;
+
+      if (this._currentQuestionIdx < totalQuestions - 1) {
+        // More questions for this concept
+        this._currentQuestionIdx++;
+        this._renderCurrentItem();
+      } else {
+        // All questions done for this concept → derive rating
+        this._finalizeConceptRating();
+        this.currentIndex++;
+        this._currentQuestionIdx = 0;
+
+        if (this.currentIndex >= this.items.length) {
+          this.complete();
+        } else {
+          this._renderCurrentItem();
+        }
+      }
+    }
+
+    /**
+     * Derive rating from quiz results for the current concept
+     */
+    _finalizeConceptRating() {
+      const record = this._answers[this.currentIndex];
+      if (!record) return;
+      const ratio = record.correct_count / Math.max(record.total_count, 1);
+      let rating;
+      if (ratio >= 0.8) {
+        rating = 'mastered';
+      } else if (ratio >= 0.5) {
+        rating = 'learning';
+      } else {
+        rating = 'struggling';
+      }
+      record.rating = rating;
+    }
+
+    // ============================================
+    // Self-rating fallback (when no review-cards.json)
+    // ============================================
+
+    submitSelfRating(rating) {
+      if (this.state !== 'reviewing') return;
+
+      if (!this._answers[this.currentIndex]) {
+        this._answers[this.currentIndex] = {
+          concept: this.items[this.currentIndex].concept,
+          answers: [],
+          correct_count: 0,
+          total_count: 0
+        };
+      }
+      this._answers[this.currentIndex].rating = rating;
+
       this.currentIndex++;
+      this._currentQuestionIdx = 0;
 
       if (this.currentIndex >= this.items.length) {
         this.complete();
@@ -61,10 +204,16 @@
       }
     }
 
+    // ============================================
+    // Complete / Postpone
+    // ============================================
+
     complete() {
       if (this.state === 'completed' || this.state === 'hidden') return;
       this.state = 'completed';
-      this.onComplete(this._answers);
+      // Ensure all entries have rating
+      const finalAnswers = this._answers.map(a => a || { concept: 'unknown', rating: 'learning', answers: [] });
+      this.onComplete(finalAnswers);
       this.teardown();
     }
 
@@ -202,9 +351,102 @@
       if (!this._card || this.state !== 'reviewing') return;
 
       const item = this.items[this.currentIndex];
-      const card = this.cards[item.concept] || {};
+      const conceptCard = this.cards[item.concept] || {};
+      const quizQuestions = conceptCard.quiz_questions || [];
+      const hasQuiz = quizQuestions.length > 0;
       const progress = `${this.currentIndex + 1} / ${this.items.length}`;
-      const prompt = card.prompt || `请回忆：${item.concept} 是什么？它的核心要点有哪些？`;
+
+      if (hasQuiz) {
+        this._renderQuizQuestion(item, conceptCard, quizQuestions, progress);
+      } else {
+        this._renderSelfRatingFallback(item, conceptCard, progress);
+      }
+    }
+
+    /**
+     * Render a quiz question for objective review
+     */
+    _renderQuizQuestion(item, conceptCard, quizQuestions, progress) {
+      const question = quizQuestions[this._currentQuestionIdx];
+      if (!question) {
+        // No more questions — move to next concept or complete
+        this.nextQuestion();
+        return;
+      }
+
+      const qIdx = this._currentQuestionIdx;
+      const totalQ = quizQuestions.length;
+
+      this._card.innerHTML = `
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+          <div style="font-size:16px;font-weight:700;color:#f8fafc;">🧠 复习测验</div>
+          <div style="font-size:13px;color:#64748b;">${progress}</div>
+        </div>
+
+        <div style="background:rgba(129,140,248,0.08);border:1px solid rgba(129,140,248,0.2);border-radius:14px;padding:20px;margin-bottom:20px;">
+          <div style="font-size:18px;font-weight:700;color:#f8fafc;margin-bottom:4px;">${item.concept}</div>
+          <div style="font-size:12px;color:#94a3b8;">测验 ${qIdx + 1}/${totalQ}</div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:16px;margin-bottom:16px;">
+          <div style="font-size:15px;color:#f1f5f9;line-height:1.6;font-weight:500;">${question.question}</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+          ${question.options.map((opt, oi) => `
+            <button class="quiz-option-btn" data-opt-index="${oi}" style="width:100%;padding:12px 16px;border-radius:10px;font-size:14px;cursor:pointer;text-align:left;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#e2e8f0;transition:all 0.2s;">
+              ${String.fromCharCode(65 + oi)}. ${opt}
+            </button>
+          `).join('')}
+        </div>
+
+        <div id="reviewFeedbackArea" style="display:none;margin-bottom:16px;"></div>
+
+        <button id="reviewNextBtn" style="display:none;width:100%;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#818cf8,#a78bfa);color:white;">下一题 →</button>
+
+        <button id="reviewSkipBtn" style="width:100%;margin-top:10px;padding:10px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#64748b;">跳过，稍后提醒</button>
+      `;
+
+      // Bind option buttons
+      const optBtns = this._card.querySelectorAll('.quiz-option-btn');
+      optBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+          const idx = parseInt(btn.dataset.optIndex, 10);
+          this.handleQuizAnswer(idx, question);
+        });
+        // Hover effect
+        btn.addEventListener('mouseenter', () => {
+          if (btn.style.pointerEvents !== 'none') {
+            btn.style.borderColor = 'rgba(129,140,248,0.5)';
+            btn.style.background = 'rgba(129,140,248,0.08)';
+          }
+        });
+        btn.addEventListener('mouseleave', () => {
+          if (btn.style.pointerEvents !== 'none') {
+            btn.style.borderColor = 'rgba(255,255,255,0.1)';
+            btn.style.background = 'rgba(255,255,255,0.04)';
+          }
+        });
+      });
+
+      // Bind next button
+      const nextBtn = this._card.querySelector('#reviewNextBtn');
+      if (nextBtn) {
+        nextBtn.addEventListener('click', () => this.nextQuestion());
+      }
+
+      // Bind skip button
+      const skipBtn = this._card.querySelector('#reviewSkipBtn');
+      if (skipBtn) {
+        skipBtn.addEventListener('click', () => this.postpone());
+      }
+    }
+
+    /**
+     * Render self-rating UI when no review cards available (fallback)
+     */
+    _renderSelfRatingFallback(item, conceptCard, progress) {
+      const prompt = conceptCard.prompt || `请回忆：${item.concept} 是什么？它的核心要点有哪些？`;
 
       this._card.innerHTML = `
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
@@ -254,19 +496,19 @@
         showAnswerBtn.addEventListener('click', () => {
           showAnswerBtn.style.display = 'none';
           answerArea.style.display = 'block';
-          const kps = (card.key_points || []);
+          const kps = (conceptCard.key_points || []);
           if (kps.length > 0) {
             keyPointsEl.innerHTML = kps.map(kp => `<div style="margin-bottom:4px;">• ${kp}</div>`).join('');
           } else {
-            keyPointsEl.innerHTML = '<div style="color:#64748b;font-style:italic;">（暂无详细要点，请根据 prompt 自行回忆）</div>';
+            keyPointsEl.innerHTML = '<div style="color:#64748b;font-style:italic;">（暂无详细要点）</div>';
           }
           ratingArea.style.display = 'block';
         });
       }
 
-      if (masteredBtn) masteredBtn.addEventListener('click', () => this.submitAnswer('mastered'));
-      if (fuzzyBtn) fuzzyBtn.addEventListener('click', () => this.submitAnswer('learning'));
-      if (strugglingBtn) strugglingBtn.addEventListener('click', () => this.submitAnswer('struggling'));
+      if (masteredBtn) masteredBtn.addEventListener('click', () => this.submitSelfRating('mastered'));
+      if (fuzzyBtn) fuzzyBtn.addEventListener('click', () => this.submitSelfRating('learning'));
+      if (strugglingBtn) strugglingBtn.addEventListener('click', () => this.submitSelfRating('struggling'));
       if (skipBtn) skipBtn.addEventListener('click', () => this.postpone());
     }
   }

@@ -40,6 +40,14 @@ const mockInvoke = async (cmd, args) => {
       return _socraticLoadState(args);
     case 'socratic_save_state':
       return _socraticSaveState(args);
+    case 'generate_review_content':
+      return _generateReviewContent(args);
+    case 'init_review_schedule':
+      return _initReviewSchedule(args);
+    case 'submit_review_result':
+      return _submitReviewResult(args);
+    case 'check_missing_review_cards':
+      return _checkMissingReviewCards(args);
     default:
       throw new Error(`Mock invoke not implemented: ${cmd}`);
   }
@@ -318,6 +326,217 @@ function _socraticSaveState({ projectPath, state }) {
   const statePath = path.join(learningDir, 'socratic-state.json');
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf-8');
   return true;
+}
+
+// ============================================
+// PB1: Generate Review Content (stub)
+// ============================================
+
+function _generateReviewContent({ projectPath, chapterFile, weakConcepts }) {
+  const learningDir = path.join(projectPath, '.learning');
+  fs.mkdirSync(learningDir, { recursive: true });
+
+  const chapterStem = path.basename(chapterFile || '').replace(/\.md$/, '');
+  const conceptsJsonPath = path.join(projectPath, `${chapterStem}.concepts.json`);
+  const concepts = [];
+  if (fs.existsSync(conceptsJsonPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(conceptsJsonPath, 'utf-8'));
+      if (parsed.concepts) concepts.push(...parsed.concepts);
+    } catch (e) { /* ignore parse errors */ }
+  }
+
+  if (concepts.length === 0) {
+    return { success: true, cards_count: 0, note: 'no concepts found' };
+  }
+
+  const cardsPath = path.join(learningDir, 'review-cards.json');
+  let cards = { version: '1.0', cards: {} };
+  if (fs.existsSync(cardsPath)) {
+    try { cards = JSON.parse(fs.readFileSync(cardsPath, 'utf-8')); } catch (e) { /* ignore */ }
+  }
+
+  const weakSet = new Set(weakConcepts || []);
+  const now = new Date().toISOString();
+  let added = 0;
+
+  for (const c of concepts) {
+    const cid = c.id || c.name || c;
+    if (cards.cards[cid]) continue;
+
+    cards.cards[cid] = {
+      concept_name: c.name || cid,
+      source_chapter: path.basename(chapterFile || ''),
+      quiz_questions: [
+        { type: 'choice', question: `${c.name || cid} 的核心思想是什么？`, options: ['描述A', '描述B', '描述C', '描述D'], answer: 0 }
+      ],
+      key_points: [
+        `${c.name || cid} 是本章的核心概念（待Agent生成详细内容）`,
+        `${c.name || cid} 的理解对掌握后续内容很重要`
+      ],
+      generated_at: now,
+      from_weak: weakSet.has(cid)
+    };
+    added++;
+  }
+
+  fs.writeFileSync(cardsPath, JSON.stringify(cards, null, 2), 'utf-8');
+  return { success: true, cards_count: added };
+}
+
+// ============================================
+// PB2: Init Review Schedule (stub)
+// ============================================
+
+function _initReviewSchedule({ projectPath, chapterFile, weakConcepts }) {
+  const learningDir = path.join(projectPath, '.learning');
+  fs.mkdirSync(learningDir, { recursive: true });
+
+  const chapterStem = path.basename(chapterFile || '').replace(/\.md$/, '');
+  const conceptsJsonPath = path.join(projectPath, `${chapterStem}.concepts.json`);
+  const concepts = [];
+  if (fs.existsSync(conceptsJsonPath)) {
+    try {
+      const parsed = JSON.parse(fs.readFileSync(conceptsJsonPath, 'utf-8'));
+      if (parsed.concepts) concepts.push(...parsed.concepts);
+    } catch (e) { /* ignore */ }
+  }
+
+  if (concepts.length === 0) return { success: true, items_added: 0 };
+
+  const schedulePath = path.join(learningDir, 'review-schedule.json');
+  let schedule = { version: '1.0', items: [] };
+  if (fs.existsSync(schedulePath)) {
+    try { schedule = JSON.parse(fs.readFileSync(schedulePath, 'utf-8')); } catch (e) { /* ignore */ }
+  }
+
+  const weakSet = new Set(weakConcepts || []);
+  const now = new Date();
+  now.setDate(now.getDate() + 1);
+  const nextReview = now.toISOString().slice(0, 10) + ' 12:00:00';
+  let added = 0;
+
+  for (const c of concepts) {
+    const cid = c.id || c.name || c;
+    if (schedule.items.some(item => item.concept === cid)) continue;
+    schedule.items.push({
+      concept: cid,
+      source_chapter: path.basename(chapterFile || ''),
+      review_count: 0,
+      last_reviewed: '',
+      next_review_at: nextReview,
+      last_rating: 'learning',
+      status: 'upcoming'
+    });
+    added++;
+  }
+
+  fs.writeFileSync(schedulePath, JSON.stringify(schedule, null, 2), 'utf-8');
+  return { success: true, items_added: added };
+}
+
+// ============================================
+// PB3: Submit Review Result (review-history + schedule + graph)
+// ============================================
+
+function _submitReviewResult({ projectPath, conceptId, rating, answers }) {
+  const learningDir = path.join(projectPath, '.learning');
+  fs.mkdirSync(learningDir, { recursive: true });
+  const now = new Date().toISOString();
+
+  // 1. Update review-schedule.json
+  const schedulePath = path.join(learningDir, 'review-schedule.json');
+  if (fs.existsSync(schedulePath)) {
+    try {
+      const schedule = JSON.parse(fs.readFileSync(schedulePath, 'utf-8'));
+      const item = schedule.items.find(i => i.concept === conceptId);
+      if (item) {
+        item.review_count = (item.review_count || 0) + 1;
+        item.last_rating = rating;
+        item.last_reviewed = now;
+        const nextDate = new Date();
+        nextDate.setDate(nextDate.getDate() + (rating === 'mastered' ? 4 : rating === 'learning' ? 2 : 1));
+        item.next_review_at = nextDate.toISOString().slice(0, 10) + ' 12:00:00';
+        item.status = 'upcoming';
+      }
+      fs.writeFileSync(schedulePath, JSON.stringify(schedule, null, 2), 'utf-8');
+    } catch (e) { /* ignore */ }
+  }
+
+  // 2. Append to review-history.json
+  const historyPath = path.join(learningDir, 'review-history.json');
+  let history = { version: '1.0', entries: [] };
+  if (fs.existsSync(historyPath)) {
+    try { history = JSON.parse(fs.readFileSync(historyPath, 'utf-8')); } catch (e) { /* ignore */ }
+  }
+  history.entries.push({
+    concept_id: conceptId,
+    timestamp: now,
+    correct: rating === 'mastered',
+    rating,
+    answers: answers || []
+  });
+  fs.writeFileSync(historyPath, JSON.stringify(history, null, 2), 'utf-8');
+
+  // 3. Update knowledge-graph.json node_status
+  const graphPath = path.join(learningDir, 'knowledge-graph.json');
+  if (fs.existsSync(graphPath)) {
+    try {
+      const graph = JSON.parse(fs.readFileSync(graphPath, 'utf-8'));
+      const node = (graph.nodes || []).find(n => n.id === conceptId);
+      if (node) {
+        node.node_status = rating;
+        fs.writeFileSync(graphPath, JSON.stringify(graph, null, 2), 'utf-8');
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  return { success: true, concept_id: conceptId, rating };
+}
+
+// ============================================
+// PB5: Check Missing Review Cards
+// ============================================
+
+function _checkMissingReviewCards({ projectPath }) {
+  const learningDir = path.join(projectPath, '.learning');
+  const projectJsonPath = path.join(learningDir, 'project.json');
+  if (!fs.existsSync(projectJsonPath)) return [];
+
+  try {
+    const project = JSON.parse(fs.readFileSync(projectJsonPath, 'utf-8'));
+
+    // Read existing review-cards.json
+    const cardsPath = path.join(learningDir, 'review-cards.json');
+    const existingIds = new Set();
+    if (fs.existsSync(cardsPath)) {
+      try {
+        const cards = JSON.parse(fs.readFileSync(cardsPath, 'utf-8'));
+        Object.keys(cards.cards || {}).forEach(id => existingIds.add(id));
+      } catch (e) { /* ignore */ }
+    }
+
+    const statusMap = project.chapters_status || {};
+    const chapters = project.chapters || [];
+    const missing = [];
+
+    for (const ch of chapters) {
+      const chFile = ch.file || '';
+      if (!chFile || statusMap[chFile] !== 'completed') continue;
+
+      const missingConcepts = (ch.concepts || [])
+        .map(c => c.id || c.name || c)
+        .filter(id => id && !existingIds.has(id));
+
+      if (missingConcepts.length > 0) {
+        missing.push({ chapter_file: chFile, missing_concepts: missingConcepts });
+      }
+    }
+
+    return missing;
+  } catch (e) {
+    return [];
+  }
 }
 
 // ============================================

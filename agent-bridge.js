@@ -623,6 +623,80 @@ async function socraticChat(queryFn, config, args) {
 }
 
 /**
+ * Generate review cards (quiz questions + key points) for a completed chapter.
+ * PB1 Round 2: Agent reads the chapter .md file and generates per-concept
+ * review content. Outputs structured JSON for Rust to write to review-cards.json.
+ *
+ * @param {Function} queryFn - Agent SDK query function or mock
+ * @param {object} config - API config
+ * @param {object} args - { project_path, chapter_file, concepts, weak_concepts }
+ * @returns {Promise<object>} { cards: { [concept_id]: { quiz_questions, key_points } } }
+ */
+async function generateReviewContent(queryFn, config, args) {
+  const { project_path, chapter_file, concepts, weak_concepts } = args;
+  if (!project_path || !chapter_file) {
+    throw new Error('project_path and chapter_file are required for review-gen');
+  }
+
+  log('info', 'Starting review-gen', { project_path, chapter_file, conceptCount: concepts?.length });
+
+  // Read the chapter .md file to provide context for question generation
+  const chapterPath = path.join(project_path, chapter_file);
+  let chapterContent = '';
+  if (fs.existsSync(chapterPath)) {
+    chapterContent = fs.readFileSync(chapterPath, 'utf-8').slice(0, 8000); // first 8k chars
+  }
+
+  const weakSet = new Set(weak_concepts || []);
+  const conceptList = (concepts || []).map(c =>
+    `${c.id || c.name}: ${c.name || c.id}${weakSet.has(c.id || c.name) ? ' (掌握较弱)' : ''}`
+  ).join('\n');
+
+  const prompt = `请使用 review-generation skill 为以下章节内容生成复习卡片。
+- chapter_file: ${JSON.stringify(chapter_file)}
+- concepts: ${JSON.stringify((concepts || []).map(c => c.name || c.id || c))}
+- weak_concepts: ${JSON.stringify(weak_concepts || [])}
+
+章节内容（摘要）：
+${chapterContent.slice(0, 4000)}`;
+
+  log('info', 'review-gen: invoking skill', { promptLength: prompt.length });
+
+  const raw = await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt,
+      options: {
+        cwd: project_path,
+        allowedTools: ['Read', 'Grep'],
+        skills: ['review-generation'],
+        includePartialMessages: true,
+      }
+    },
+    args.session_id
+  );
+
+  if (!raw || raw.trim().length < 10) {
+    throw new Error('Agent returned empty review content');
+  }
+
+  // Extract JSON from response (handle code blocks)
+  let jsonStr = raw.trim();
+  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+
+  const result = JSON.parse(jsonStr);
+  if (!result.cards || typeof result.cards !== 'object') {
+    throw new Error('Agent response missing "cards" field');
+  }
+
+  log('info', 'review-gen complete', { cardCount: Object.keys(result.cards).length });
+  return result;
+}
+
+/**
  * Initialize an agent session in the given project workspace.
  * Used by `create_project_with_session` (Rust) when a project is first created.
  * The agent is spawned with `cwd: project_path` and `allowedTools: []` (no
@@ -891,6 +965,14 @@ async function main() {
         // Output JSON for Rust to parse
         console.log(JSON.stringify(socraticResult));
         log('info', 'Socratic stage completed', { done: socraticResult.done, content_length: socraticResult.content.length });
+        process.exit(0);
+        break;
+      case 'review-gen':
+        log('info', 'Starting review-gen stage', { project_path: taskArgs.project_path, chapter_file: taskArgs.chapter_file, conceptCount: taskArgs.concepts?.length, session_id: taskArgs.session_id || null });
+        const reviewCards = await generateReviewContent(queryFn, config, taskArgs);
+        // Output JSON for Rust to parse and write to review-cards.json
+        console.log(JSON.stringify(reviewCards));
+        log('info', 'Review-gen stage completed', { cardCount: Object.keys(reviewCards.cards || {}).length });
         process.exit(0);
         break;
       case 'init':

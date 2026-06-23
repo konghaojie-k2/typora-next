@@ -201,12 +201,15 @@
         .attr('d', 'M0,-4L10,0L0,4')
         .attr('fill', '#94a3b8');
 
-      // Force simulation
+      // Force simulation — tuned for readable spacing
       const simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(edges).id(d => d.id).distance(80))
-        .force('charge', d3.forceManyBody().strength(-200))
+        .force('link', d3.forceLink(edges).id(d => d.id).distance(140).strength(0.3))
+        .force('charge', d3.forceManyBody().strength(-500))
         .force('center', d3.forceCenter(width / 2, height / 2))
-        .force('collision', d3.forceCollide().radius(30));
+        .force('x', d3.forceX(width / 2).strength(0.04))
+        .force('y', d3.forceY(height / 2).strength(0.04))
+        .force('collision', d3.forceCollide().radius(50))
+        .alphaDecay(0.03);
 
       // Edge lines
       const link = zoomGroup.append('g')

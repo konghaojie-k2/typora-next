@@ -76,7 +76,7 @@ TestRunner.test('startReview transitions state to reviewing', () => {
   TestRunner.assertEquals(modal.getState(), 'reviewing', 'state should be reviewing after startReview');
 });
 
-TestRunner.test('submitAnswer advances currentIndex', () => {
+TestRunner.test('submitSelfRating advances currentIndex (self-rating)', () => {
   setupEnv();
   const ReviewModal = loadModal();
   const modal = new ReviewModal({ items: [{ concept: 'A' }, { concept: 'B' }] });
@@ -84,11 +84,11 @@ TestRunner.test('submitAnswer advances currentIndex', () => {
   modal.startReview();
   TestRunner.assertEquals(modal.currentIndex, 0, 'should start at index 0');
 
-  modal.submitAnswer('mastered');
+  modal.submitSelfRating('mastered');
   TestRunner.assertEquals(modal.currentIndex, 1, 'should advance to index 1');
 });
 
-TestRunner.test('submitAnswer on last item triggers complete', () => {
+TestRunner.test('submitSelfRating on last item triggers (self-rating) complete', () => {
   setupEnv();
   let completed = false;
   const ReviewModal = loadModal();
@@ -98,7 +98,7 @@ TestRunner.test('submitAnswer on last item triggers complete', () => {
   });
   modal.show();
   modal.startReview();
-  modal.submitAnswer('mastered');
+  modal.submitSelfRating('mastered');
 
   TestRunner.assert(completed, 'onComplete should be called after last item');
   TestRunner.assertEquals(modal.getState(), 'completed', 'state should be completed');

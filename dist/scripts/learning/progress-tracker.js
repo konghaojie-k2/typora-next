@@ -155,6 +155,21 @@
               const projPath = this.ui && this.ui.projectPath;
               const fullPath = _joinProjectPath(projPath, event.data.file);
               this.setChapterFile(event.data.index, fullPath);
+
+              // Persist file + status to project.json so it survives app restart.
+              // Previously file was only in memory → resume relied on guess-the-filename
+              // sync, which was fragile and caused "cannot open chapter" bugs.
+              if (window.__TAURI__ && projPath) {
+                const basename = (event.data.file || '').split(/[/\\]/).pop();
+                if (basename) {
+                  window.__TAURI__.core.invoke('persist_chapter_file', {
+                    projectPath: projPath,
+                    chapterIndex: event.data.index,
+                    fileBasename: basename,
+                    status: 'ready'
+                  }).catch(err => console.warn('[ProgressTracker] persist_chapter_file failed:', err));
+                }
+              }
             }
           }
           // Refresh file tree so new files appear in sidebar immediately
@@ -377,14 +392,18 @@
     _renderRatingStatusBar() {
       if (!this.manager) return '';
 
-      // Check: is there a 'struggling' completed chapter that blocked sliding?
-      const strugglingChapter = this.manager.chapters.findIndex(ch =>
-        ch.status === 'completed' && ch.rating === 'struggling'
-      );
-      if (strugglingChapter >= 0) {
+      // Collect ALL struggling completed chapters (any of them blocks sliding)
+      const strugglingChapters = this.manager.chapters
+        .map((ch, i) => ({ ch, i }))
+        .filter(({ ch }) => ch.status === 'completed' && ch.rating === 'struggling');
+
+      if (strugglingChapters.length > 0) {
+        const nums = strugglingChapters.map(({ i }) => `第 ${i + 1} 章`).join('、');
+        const hasPending = this.manager.chapters.some(ch => ch.status === 'not_generated');
+        const actionHint = hasPending ? '，重学掌握后解锁后续章节生成' : '';
         return `
           <div class="learning-rating-status warning">
-            ⚠️ 第 ${strugglingChapter + 1} 章评分 struggling，后续章节未自动生成
+            ⚠️ ${nums} 评分 struggling${actionHint}
           </div>`;
       }
 
@@ -1180,7 +1199,10 @@
       if (outline && outline.chapters && !windowState.totalChapters) {
         windowState.totalChapters = outline.chapters.length;
       }
-      return triggerSlidingWindow(null, outline, projectPath);
+      // Use the stashed _manager (set by startGeneration or resume) so
+      // triggerSlidingWindow can call manager.setStatus() without NPE.
+      const mgr = (window.LearningProgress && window.LearningProgress._manager) || null;
+      return triggerSlidingWindow(mgr, outline, projectPath);
     },
 
     /**
@@ -1311,8 +1333,13 @@
         // unstarted chapter for generation. This is the core of "按需生成" —
         // we never pre-generate more than the next N chapters.
         ui.onChapterStatusChange = (index, prevStatus, newStatus) => {
-          console.log(`[ProgressTracker] Chapter ${index}: ${prevStatus} → ${newStatus}`);
+          console.log(`[ProgressTracker] Chapter ${index}: ${prevStatus} → ${newStatus} rating=${manager.chapters[index].rating}`);
           if (newStatus === 'completed') {
+            // Per state matrix: struggling → ❌ 不触发滑窗
+            if (manager.chapters[index].rating === 'struggling') {
+              console.log('[ProgressTracker] struggling → skip sliding window');
+              return;
+            }
             // The user just finished a chapter. Slide the window forward.
             triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath);
           }

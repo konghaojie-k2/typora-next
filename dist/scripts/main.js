@@ -816,6 +816,8 @@ window.agentBridge = {
           window.LearningModeIntegration.setupSelectionExplainer();
           // Sprint 4: Auto-trigger daily review check
           window.LearningModeIntegration.checkDailyReview(projectPath);
+          // PB5: Check for missing review cards (app was closed during generation)
+          window.LearningModeIntegration.checkMissingReviewCards(projectPath);
         } catch (e) {
           console.warn('[Sprint3] mode integration setup failed:', e);
         }
@@ -2753,7 +2755,7 @@ window.agentBridge = {
     if (!toast) {
       toast = document.createElement('div');
       toast.id = 'app-toast';
-      toast.style.cssText = 'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--color-bg-secondary);color:var(--color-text-primary);padding:10px 20px;border-radius:var(--radius-md);border:1px solid var(--color-border);box-shadow:var(--shadow-lg);font-size:var(--font-size-sm);z-index:9999;opacity:0;transition:opacity 300ms;pointer-events:none;white-space:nowrap;';
+      toast.style.cssText = 'position:fixed;top:24px;left:50%;transform:translateX(-50%);background:var(--color-bg-secondary);color:var(--color-text-primary);padding:10px 20px;border-radius:var(--radius-md);border:1px solid var(--color-border);box-shadow:var(--shadow-lg);font-size:var(--font-size-sm);z-index:9999;opacity:0;transition:opacity 300ms;pointer-events:none;white-space:nowrap;';
       document.body.appendChild(toast);
     }
     toast.textContent = message;

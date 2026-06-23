@@ -180,16 +180,17 @@
      * @param {string} concept
      * @param {string} rating
      */
-    async syncMarkReviewed(projectPath, concept, rating) {
+    async submitReviewResult(projectPath, conceptId, rating, answers) {
       if (!window.__TAURI__ || !window.__TAURI__.core) return;
       try {
-        await window.__TAURI__.core.invoke('update_review_schedule', {
+        await window.__TAURI__.core.invoke('submit_review_result', {
           projectPath,
-          concept,
-          rating
+          conceptId,
+          rating,
+          answers: answers || []
         });
       } catch (err) {
-        console.warn('[ReviewScheduler] syncMarkReviewed failed:', err);
+        console.warn('[ReviewScheduler] submitReviewResult failed:', err);
       }
     }
 
