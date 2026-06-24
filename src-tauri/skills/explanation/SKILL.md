@@ -1,64 +1,60 @@
 ---
 name: explanation
-description: Explain a user-selected concept in plain language, optionally with chapter context. Use when the host prompts "请使用 explanation skill 解释...". Returns a short markdown text (≤ 300 chars) — no JSON wrapper, host appends directly to a modal.
+description: Explain selected text from a learning chapter using analogies and plain language, then suggest follow-up questions for deeper understanding. Use when the host invokes "请用 explanation skill 解释" with a term, context, and optional previous Q&A history. Writes the result to disk using the Write tool.
 ---
 
-# Concept Explanation
+# Explanation Skill
 
-Explain one concept that the user highlighted while reading. Short, direct, with an analogy.
+Use plain-language analogies and Socratic-style questioning to explain a concept from a learning chapter. The goal is **understanding, not completeness** — the user should walk away able to explain the concept in their own words.
 
-## When invoked
+## When the host invokes this skill
 
-Host prompt shape:
+The host's prompt will look like:
 
 ```
-请使用 explanation skill 解释用户选中的概念。
-- text: {the highlighted text, ≤ 200 chars}
-- context: {chapter title or surrounding paragraph, optional}
-- max_length: 300
+请用 explanation skill 解释以下内容。
+- text: "马尔可夫链"
+- context: '{"chapterTitle":"前向扩散过程的数学建模","chapterGoal":"掌握前向过程的数学推导...","surroundingText":"...这叫做马尔可夫链..."}'
+- previousQa: [...]
 ```
 
-The `max_length` defaults to 300 chars. Strict cap.
+Parse these into variables:
 
-## Workflow
+- **`text`** — the selected term to explain.
+- **`context`** — JSON string (optional) with:
+  - `chapterTitle`: current chapter name
+  - `chapterGoal`: chapter learning objective from the opening `> 本章目标：...`
+  - `surroundingText`: paragraphs around the selected term in the chapter
+- **`previousQa`** — prior Q&A history for follow-ups (optional).
 
-1. **Analyze** the concept: what is it, what does it do, why is it in this chapter
-2. **Optional context lookup** (only if you need it): Glob `*.md` in the project root, read the chapter file that matches `context`
-3. **Draft** the explanation in the output format below
-4. **Self-check** length: count characters (Chinese: 1 char each, ASCII: 1 char each). If over `max_length`, trim the "Why it matters" line first
+## Explanation Rules
 
-## Output format
+1. **Use an analogy first** (1-2 sentences).
+2. **Always connect to chapter context** — 最重要规则。不要名词解释名词。必须把解释关联到:
+   - 本章目标（`chapterGoal`）——这个词为什么在这一章里重要
+   - 上下文（`surroundingText`）——这个词在周围文字里是什么意思
+   - 课程关系——这个词跟前后概念有什么联系
+3. **If `surroundingText` is empty, still use `chapterGoal`** to anchor the explanation.
+4. **Stay concrete** — avoid abstract language. Inline technical terms.
+5. **Handle `previousQa`** — build on existing conversation.
 
-Single markdown text, no JSON wrapper:
+## 文件格式（写入 output_file）
 
-```markdown
-**{concept}**: {one-sentence definition}.
+用 `Write` 工具将以下 JSON 写入 prompt 中指定的 `output_file` 路径：
 
-{2-3 sentence elaboration with a real-life analogy the user already knows}.
-
-**Why it matters**: {1 sentence linking to the chapter context if available, else to the broader topic}.
+```json
+{
+  "explanation": "解释文本",
+  "suggested_questions": [
+    "追问1: 帮助用户进一步理解的相关问题",
+    "追问2",
+    "追问3"
+  ]
+}
 ```
 
-Optional follow-up questions (omit if no good ones come to mind):
+## Format Rules
 
-```markdown
-
-**可能想追问**:
-- {question 1}
-- {question 2}
-- {question 3}
-```
-
-## Style rules
-
-- **No opening fluff** — don't start with "想象一下..." or "这是一个有趣的问题". Go straight to the concept.
-- **Analogy first** — open with something the user already understands (a familiar everyday thing)
-- **No academic jargon** unless it's the term being explained
-- **No lecture** — 3 sentences max per paragraph
-- **No JSON** — pure markdown text
-
-## Failure modes
-
-- Concept is too vague to explain (e.g. just "this") → ask the user to select more specific text instead
-- No project context and concept is unfamiliar → give a general explanation, note that chapter context would help
-- Exceeds `max_length` → trim, never violate the cap
+- `explanation`: plain Chinese text, no markdown formatting. 300-500 characters.
+- `suggested_questions`: 2-4 questions. Each should check understanding or explore a related angle.
+- 写入文件后输出一句话确认即可。

@@ -35,6 +35,8 @@
   let _currentChapterFile = '';      // current chapter file path (for persistence)
   let _lastChapterFileForSidebar = ''; // detect chapter switch
   let _pendingSelectedText = '';     // selected text waiting for user to trigger cue
+  // Note: extra questions are now persisted to disk (.learning/extras/*.json)
+  // and loaded on demand — no in-memory cache needed.
 
   function formatLocalTime(date) {
     const d = date || new Date();
@@ -169,15 +171,22 @@
         🎯 掌握了吗？
       </div>
       <div class="quiz-area-body" id="learningQuizAreaBody">
-        <button class="quiz-area-start-btn" id="learningQuizStartBtn" style="
-          padding: 10px 20px;
-          background: #4f46e5;
-          color: white;
-          border: none;
-          border-radius: 6px;
-          font-size: 14px;
-          cursor: pointer;
-        ">开始测验</button>
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="quiz-area-start-btn" id="learningQuizStartBtn" style="
+            padding: 10px 20px;
+            background: #4f46e5;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+          ">开始测验</button>
+          <button id="extraReviewBtn" style="
+            padding: 10px 20px; background: #f5f3ff; color: #7c3aed;
+            border: 1px solid #c4b5fd; border-radius: 6px;
+            font-size: 14px; cursor: pointer; display: none;
+          ">📝 附加题回顾</button>
+        </div>
       </div>
     `;
     md.appendChild(_quizAreaEl);
@@ -186,6 +195,40 @@
     const startBtn = document.getElementById('learningQuizStartBtn');
     if (startBtn) {
       startBtn.addEventListener('click', () => onQuizStart());
+    }
+
+    // Bind extra review button — generates missing per-cue quizzes on demand, then displays
+    const extraBtn = document.getElementById('extraReviewBtn');
+    if (extraBtn) {
+      const originalLabel = extraBtn.textContent;
+      extraBtn.addEventListener('click', async () => {
+        // Loading state: disable button + show spinner during generation
+        extraBtn.disabled = true;
+        extraBtn.textContent = '⏳ 生成中...';
+        try {
+          // Ensure: generate per-cue quizzes for any cue that doesn't have one yet.
+          // This is the only place that triggers generation (avoiding blocking on every persist).
+          await window.__TAURI__.core.invoke('ensure_extra_questions', {
+            chapterFile: _currentChapterFile,
+            projectPath: _projectPath
+          });
+          const extras = await window.__TAURI__.core.invoke('load_extra_questions', {
+            chapterFile: _currentChapterFile,
+            projectPath: _projectPath
+          });
+          if (extras && extras.length) {
+            showExtraReviewModal(extras);
+          } else {
+            if (window.showToast) window.showToast('暂无附加题', 'info');
+          }
+        } catch (err) {
+          console.warn('[ExtraReview] load failed:', err);
+          if (window.showToast) window.showToast('加载附加题失败', 'error');
+        } finally {
+          extraBtn.disabled = false;
+          extraBtn.textContent = originalLabel;
+        }
+      });
     }
   }
 
@@ -227,6 +270,16 @@
     _quizAreaEl.style.display = 'block';
     if (_quizPanel) _quizPanel.notifyScrollProgress(1.0);
     restoreQuizResultCard();
+    // Show "附加题回顾" button whenever there are cues with content (generation happens on click)
+    updateExtraReviewButton();
+  }
+
+  // Synchronous button visibility: shown iff there are cues that could have extras.
+  // No Tauri call — avoids blocking on agent spawns during persistCue/deleteCue.
+  function updateExtraReviewButton() {
+    const btn = document.getElementById('extraReviewBtn');
+    if (!btn) return;
+    btn.style.display = _cornellCues.length > 0 ? '' : 'none';
   }
 
   async function loadQuizHistory() {
@@ -298,13 +351,15 @@
     try {
       const chapterFile = _quizPanel.getChapterFile();
       console.log('[QuizDebug] chapterFile=', chapterFile, 'projectPath=', _projectPath);
-      const questions = await window.__TAURI__.core.invoke('generate_chapter_quiz', { chapterFile, projectPath: _projectPath });
-      console.log('[QuizDebug] loaded questions:', questions.length);
-      _currentQuizQuestions = questions;
-      if (_quizPanel) _quizPanel.setQuestions(questions);
+      const result = await window.__TAURI__.core.invoke('generate_chapter_quiz', { chapterFile, projectPath: _projectPath });
+      const standard = result.standard || [];
+      console.log('[QuizDebug] loaded questions:', standard.length, 'standard');
+      // Only standard questions go into the quiz modal; extras have a separate entry point.
+      _currentQuizQuestions = standard;
+      if (_quizPanel) _quizPanel.setQuestions(standard);
       _quizPanel.startAnswering();
       console.log('[QuizDebug] showing modal...');
-      showQuizModal(questions);
+      showQuizModal(standard);
     } catch (err) {
       console.error('[QuizDebug] onQuizStart error:', err);
       const msg = (err && err.message) || String(err);
@@ -328,6 +383,8 @@
   function showQuizModal(questions) {
     console.log('[QuizDebugShow] showing modal for', questions.length, 'questions');
     removeModalDom(); // Only remove DOM, do NOT reset panel state
+
+    const allCount = questions.length;
 
     const modal = document.createElement('div');
     modal.id = 'learningQuizModal';
@@ -393,59 +450,7 @@
     body.style.cssText = 'padding: 24px; flex: 1; background: #fafafa;';
 
     questions.forEach((q, idx) => {
-      const qEl = document.createElement('div');
-      qEl.style.cssText = `
-        margin-bottom: 20px;
-        padding: 18px 20px;
-        background: white;
-        border-radius: 12px;
-        border: 1px solid #e5e7eb;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        transition: border-color 0.15s;
-      `;
-      qEl.dataset.qid = q.id;
-      qEl.dataset.qtype = q.qtype;
-
-      let optionsHtml = '';
-      if (q.options && q.options.length) {
-        const inputType = q.qtype === 'multiple' ? 'checkbox' : 'radio';
-        const name = `q_${q.id}`;
-        optionsHtml = `<div style="display: flex; flex-direction: column; gap: 8px;">` + q.options.map((opt) => `
-          <label class="quiz-modal-option" style="
-            display: flex; align-items: flex-start; gap: 10px;
-            padding: 10px 12px;
-            border: 1px solid #e5e7eb; border-radius: 8px;
-            cursor: pointer; transition: all 0.15s; background: white;
-          " onmouseover="this.style.borderColor='#4f46e5';this.style.background='#f5f3ff'"
-             onmouseout="this.style.borderColor='#e5e7eb';this.style.background='white'"
-             onclick="const cb=this.querySelector('input');cb.checked=!cb.checked;event.preventDefault();"
-          >
-            <input type="${inputType}" name="${name}" value="${opt.label}"
-              style="margin-top: 3px; accent-color: #4f46e5; flex-shrink: 0;" onclick="event.stopPropagation();">
-            <span style="font-size: 14px; color: #374151; line-height: 1.5;">
-              <strong style="color: #111827;">${opt.label}.</strong> ${opt.text}
-            </span>
-          </label>
-        `).join('') + `</div>`;
-      } else if (q.qtype === 'short') {
-        optionsHtml = `
-          <textarea class="quiz-short-answer" data-qid="${q.id}" placeholder="请在此输入你的回答..." style="
-            width: 100%; min-height: 90px; padding: 12px;
-            border: 1px solid #d1d5db; border-radius: 8px;
-            font-size: 14px; line-height: 1.6; resize: vertical;
-            font-family: inherit; background: white;
-          "></textarea>
-        `;
-      }
-
-      qEl.innerHTML = `
-        <div style="font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 12px; line-height: 1.5;">
-          <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #f3f4f6; border-radius: 6px; color: #4f46e5; font-size: 13px; margin-right: 8px;">${idx + 1}</span>
-          ${q.question}
-          ${q.qtype === 'multiple' ? '<span style="font-size: 12px; color: #9ca3af; font-weight: 500; margin-left: 6px;">多选</span>' : ''}
-        </div>
-        <div class="quiz-options">${optionsHtml}</div>
-      `;
+      const qEl = renderQuestionBlock(q, idx);
       body.appendChild(qEl);
     });
 
@@ -486,6 +491,208 @@
     modal.addEventListener('click', (e) => {
       if (e.target === modal) closeQuizModal();
     });
+  }
+
+  /**
+   * Render a single question block element for the quiz modal.
+   * @param {object} q - QuizQuestion object
+   * @param {number} displayIdx - display number (0-based)
+   * @returns {HTMLElement}
+   */
+  function renderQuestionBlock(q, displayIdx) {
+    const qEl = document.createElement('div');
+    qEl.style.cssText = `
+      margin-bottom: 20px;
+      padding: 18px 20px;
+      background: white;
+      border-radius: 12px;
+      border: 1px solid #e5e7eb;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      transition: border-color 0.15s;
+    `;
+    qEl.dataset.qid = q.id;
+    qEl.dataset.qtype = q.qtype;
+
+    let optionsHtml = '';
+    if (q.options && q.options.length) {
+      const inputType = q.qtype === 'multiple' ? 'checkbox' : 'radio';
+      const name = `q_${q.id}`;
+      optionsHtml = `<div style="display: flex; flex-direction: column; gap: 8px;">` + q.options.map((opt) => `
+        <label class="quiz-modal-option" style="
+          display: flex; align-items: flex-start; gap: 10px;
+          padding: 10px 12px;
+          border: 1px solid #e5e7eb; border-radius: 8px;
+          cursor: pointer; transition: all 0.15s; background: white;
+        " onmouseover="this.style.borderColor='#4f46e5';this.style.background='#f5f3ff'"
+           onmouseout="this.style.borderColor='#e5e7eb';this.style.background='white'"
+           onclick="const cb=this.querySelector('input');cb.checked=!cb.checked;event.preventDefault();"
+        >
+          <input type="${inputType}" name="${name}" value="${opt.label}"
+            style="margin-top: 3px; accent-color: #4f46e5; flex-shrink: 0;" onclick="event.stopPropagation();">
+          <span style="font-size: 14px; color: #374151; line-height: 1.5;">
+            <strong style="color: #111827;">${opt.label}.</strong> ${opt.text}
+          </span>
+        </label>
+      `).join('') + `</div>`;
+    } else if (q.qtype === 'short') {
+      optionsHtml = `
+        <textarea class="quiz-short-answer" data-qid="${q.id}" placeholder="请在此输入你的回答..." style="
+          width: 100%; min-height: 90px; padding: 12px;
+          border: 1px solid #d1d5db; border-radius: 8px;
+          font-size: 14px; line-height: 1.6; resize: vertical;
+          font-family: inherit; background: white;
+        "></textarea>
+      `;
+    }
+
+    qEl.innerHTML = `
+      <div style="font-size: 15px; font-weight: 600; color: #1f2937; margin-bottom: 12px; line-height: 1.5;">
+        <span style="display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; background: #f3f4f6; border-radius: 6px; color: #4f46e5; font-size: 13px; margin-right: 8px;">${displayIdx + 1}</span>
+        ${q.question}
+        ${q.qtype === 'multiple' ? '<span style="font-size: 12px; color: #9ca3af; font-weight: 500; margin-left: 6px;">多选</span>' : ''}
+      </div>
+      <div class="quiz-options">${optionsHtml}</div>
+    `;
+    return qEl;
+  }
+
+  /**
+   * Show a lightweight self-check modal for extra questions.
+   * Clicking an option immediately shows correct/incorrect — no submission, no rating.
+   */
+  function showExtraReviewModal(extraQuestions) {
+    if (!extraQuestions || !extraQuestions.length) return;
+
+    const existing = document.getElementById('extraReviewModal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'extraReviewModal';
+    overlay.style.cssText = `
+      position: fixed; inset: 0;
+      background: rgba(15,23,42,0.35);
+      backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 10004; padding: 24px;
+    `;
+
+    const panel = document.createElement('div');
+    panel.style.cssText = `
+      background: #fff; border-radius: 16px;
+      max-width: 600px; width: 100%;
+      max-height: calc(100vh - 48px); overflow-y: auto;
+      box-shadow: 0 25px 80px rgba(0,0,0,0.2);
+    `;
+
+    // Header
+    const header = document.createElement('div');
+    header.style.cssText = `padding: 16px 20px; border-bottom: 1px solid #f3f4f6;
+      display: flex; justify-content: space-between; align-items: center;
+      position: sticky; top: 0; background: rgba(255,255,255,0.95);
+      border-radius: 16px 16px 0 0;
+    `;
+    header.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;">
+        <span style="font-size:18px;">📝</span>
+        <div>
+          <div style="font-size:15px;font-weight:700;color:#7c3aed;">附加题回顾</div>
+          <div style="font-size:12px;color:#8b5cf6;">${extraQuestions.length} 题 · 点击选项即时查看正误</div>
+        </div>
+      </div>
+      <button id="extraReviewClose" style="width:28px;height:28px;background:#f3f4f6;border:none;border-radius:6px;font-size:14px;cursor:pointer;color:#6b7280;">✕</button>
+    `;
+
+    // Body with questions
+    const body = document.createElement('div');
+    body.style.cssText = 'padding: 20px; background: #fafafa;';
+
+    extraQuestions.forEach((q, idx) => {
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = `
+        margin-bottom: 16px; padding: 16px;
+        background: white; border-radius: 12px;
+        border: 1px solid #ddd6fe; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+      `;
+
+      const questionHtml = `
+        <div style="font-size:14px;font-weight:600;color:#1f2937;margin-bottom:12px;line-height:1.5;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#ede9fe;border-radius:5px;color:#7c3aed;font-size:12px;margin-right:8px;">${idx + 1}</span>
+          ${q.question}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px;">
+      `;
+
+      let optionsHtml = '';
+      q.options.forEach((opt) => {
+        const isCorrect = q.correct === opt.label;
+        optionsHtml += `
+          <div class="extra-option" data-correct="${isCorrect}" style="
+            display:flex;align-items:flex-start;gap:8px;
+            padding:8px 12px; border:1px solid #e5e7eb; border-radius:8px;
+            cursor:pointer; transition:all 0.15s; background:white;
+            font-size:13px; color:#374151;
+          " onmouseover="this.style.borderColor='#c4b5fd';this.style.background='#f5f3ff'"
+             onmouseout="this.style.borderColor='#e5e7eb';this.style.background='white'">
+            <span style="
+              display:inline-flex;align-items:center;justify-content:center;
+              width:20px;height:20px;border-radius:999px;
+              background:#f3f4f6;color:#6b7280;font-size:11px;font-weight:600;flex-shrink:0;
+            ">${opt.label}</span>
+            <span>${opt.text}</span>
+          </div>
+        `;
+      });
+
+      optionsHtml += `</div>`;
+      wrapper.innerHTML = questionHtml + optionsHtml;
+      body.appendChild(wrapper);
+
+      // Bind click handlers for self-check
+      wrapper.querySelectorAll('.extra-option').forEach(el => {
+        el.addEventListener('click', () => {
+          const wasCorrect = el.dataset.correct === 'true';
+          // Disable further clicks on this question
+          wrapper.querySelectorAll('.extra-option').forEach(sibling => {
+            sibling.style.cursor = 'default';
+            sibling.onmouseover = null;
+            sibling.onmouseout = null;
+          });
+          // Highlight selection
+          el.style.borderColor = wasCorrect ? '#10b981' : '#ef4444';
+          el.style.background = wasCorrect ? '#ecfdf5' : '#fef2f2';
+          // Show check/cross icon
+          const badge = el.querySelector('span:first-child');
+          if (badge) {
+            badge.textContent = wasCorrect ? '✓' : '✗';
+            badge.style.background = wasCorrect ? '#10b981' : '#ef4444';
+            badge.style.color = 'white';
+          }
+          // Reveal correct answer if wrong
+          if (!wasCorrect) {
+            wrapper.querySelectorAll('.extra-option').forEach(sibling => {
+              if (sibling.dataset.correct === 'true') {
+                sibling.style.borderColor = '#10b981';
+                sibling.style.background = '#ecfdf5';
+                const sb = sibling.querySelector('span:first-child');
+                if (sb) {
+                  sb.textContent = '✓';
+                  sb.style.background = '#10b981';
+                  sb.style.color = 'white';
+                }
+              }
+            });
+          }
+        });
+      });
+    });
+
+    panel.appendChild(header);
+    panel.appendChild(body);
+    overlay.appendChild(panel);
+    document.body.appendChild(overlay);
+
+    document.getElementById('extraReviewClose').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   }
 
   async function onQuizSaveHistory(historyPayload) {
@@ -878,8 +1085,9 @@
           <div style="display: flex; flex-wrap: wrap; gap: 6px;">${weakTags}</div>
         </div>
         <div style="margin-top: 12px; font-size: 13px; color: #4b5563; line-height: 1.5;">${nextHint}</div>
-        <div style="margin-top: 14px;">
+        <div style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap;">
           <button id="quizRetakeBtn" style="padding: 8px 16px; background: white; color: #4f46e5; border: 1px solid #4f46e5; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">再测一次</button>
+          <button id="extraReviewBtn" style="padding: 8px 16px; background: #f5f3ff; color: #7c3aed; border: 1px solid #c4b5fd; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: none;">📝 附加题回顾</button>
         </div>
       </div>
     `;
@@ -914,6 +1122,9 @@
         onQuizStart();
       });
     }
+
+    // Note: "附加题回顾" button is in the quiz area (injectQuizArea), not in the result card.
+    // The quiz-area button visibility is managed by updateExtraReviewButton().
   }
 
   async function onQuizModalSubmit() {
@@ -1192,13 +1403,43 @@
     renderCue(cueData);
     updateSidebarHeader();
 
-    // Fetch explanation via explain_selection_v2 (Rust ureq direct LLM call)
+    // Fetch explanation via explain_selection (Agent SDK with ureq fallback)
     try {
-      const context = _currentChapterTitle;
+      // Build rich context: chapter title + chapter goal + surrounding text + course goal
+      const chapterTitle = _currentChapterTitle;
+
+      // Extract chapter goal from the first callout block in the rendered content
+      const md = document.getElementById('markdownBody');
+      let chapterGoal = '';
+      if (md) {
+        const callout = md.querySelector('blockquote[data-sprint3-enhanced]');
+        if (callout) {
+          chapterGoal = callout.textContent.trim().substring(0, 200);
+        }
+      }
+
+      // Extract surrounding paragraph from DOM selection
+      let surroundingText = '';
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        let node = sel.getRangeAt(0).startContainer;
+        // Walk up to find the enclosing paragraph or block element
+        while (node && node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+        // Try to find a paragraph, heading, or list item
+        const blockEl = node?.closest?.('p, h1, h2, h3, h4, li, td, blockquote') || node;
+        if (blockEl) surroundingText = blockEl.textContent.trim().substring(0, 400);
+      }
+
+      const context = {
+        chapterTitle: chapterTitle,
+        chapterGoal: chapterGoal,
+        surroundingText: surroundingText
+      };
       const result = await window.__TAURI__.core.invoke('explain_selection', {
+        projectPath: _projectPath,
         text: term,
-        context: context || null,
-        previousQa: []
+        context: JSON.stringify(context),
+        previousQa: [],
       });
 
       // result = {explanation: string, suggestedQuestions: string[]}
@@ -1259,6 +1500,7 @@
       <div class="cornell-cue-header">
         <span class="cornell-cue-term">${escapeHtml(cue.term)}</span>
         <span class="cornell-cue-tag ${tagClass}">${tagText}</span>
+        <span class="cornell-cue-delete" data-cue-id="${cue.id}" title="删除这条笔记">×</span>
         <span class="cornell-cue-toggle">${isCollapsed ? '▶' : '▼'}</span>
       </div>
     `;
@@ -1281,10 +1523,11 @@
         html += `</div>`;
       }
 
-      // Suggested question chips
+      // Suggested question chips — show short label, full text on hover
       html += `<div class="cornell-cue-chips">`;
-      cue.suggestedQuestions.slice(0, 3).forEach(q => {
-        html += `<span class="cornell-cue-chip" data-q="${escapeHtml(q)}">${escapeHtml(q)}</span>`;
+      cue.suggestedQuestions.slice(0, 3).forEach((q, qi) => {
+        const shortLabel = '追问' + (qi + 1);
+        html += `<span class="cornell-cue-chip" data-q="${escapeHtml(q)}" title="${escapeHtml(q)}">${shortLabel}</span>`;
       });
       html += `</div>`;
 
@@ -1318,6 +1561,15 @@
       });
 
       // Bind input
+      // Delete button
+      const delBtn = el.querySelector('.cornell-cue-delete');
+      if (delBtn) {
+        delBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          deleteCue(cue.id);
+        });
+      }
+
       const input = el.querySelector('.cornell-cue-input-bar input');
       const btn = el.querySelector('.cornell-cue-input-bar button');
       if (input && btn) {
@@ -1380,6 +1632,7 @@
       const empty = document.getElementById('cornellEmptyState');
       if (empty) empty.style.display = 'none';
       updateSidebarHeader();
+      updateExtraReviewButton();
     } catch (err) {
       console.warn('[Sprint6] loadChapterExplanations failed:', err);
     }
@@ -1404,6 +1657,7 @@
         }
       };
       await window.__TAURI__.core.invoke('persist_explanation', payload);
+      updateExtraReviewButton();
     } catch (err) {
       console.warn('[Sprint6] persistCue failed:', err);
     }
@@ -1411,6 +1665,37 @@
 
   async function onChipClick(cueId, question) {
     await askFollowUp(cueId, question);
+  }
+
+  async function deleteCue(cueId) {
+    const idx = _cornellCues.findIndex(c => c.id === cueId);
+    if (idx < 0) return;
+    _cornellCues.splice(idx, 1);
+
+    // Remove from DOM
+    const el = document.querySelector(`.cornell-cue[data-cue-id="${cueId}"]`);
+    if (el) el.remove();
+
+    // Re-persist the file without this cue
+    try {
+      await window.__TAURI__.core.invoke('delete_explanation', {
+        projectPath: _projectPath,
+        chapter: getChapterBasename(_currentChapterFile),
+        conversationId: cueId
+      });
+    } catch (err) {
+      console.warn('[Cornell] deleteCue persist failed:', err);
+    }
+
+    // Show empty state if no cues left
+    if (_cornellCues.length === 0) {
+      const body = document.getElementById('cornellSidebarBody');
+      if (body) {
+        body.innerHTML = `<div class="cornell-cue-empty" id="cornellEmptyState"><div class="icon">📌</div>选中正文中的文字<br>点击下方按钮生成 cue<br><br><span style="font-size:10px;color:#6b7280;">例：选中"晶格"<br>→ 点底部按钮解释</span></div>`;
+      }
+    }
+    updateSidebarHeader();
+    updateExtraReviewButton();
   }
 
   async function onFreeInputSubmit(cueId, question) {
@@ -1433,9 +1718,10 @@
       const previousQa = cue.qaHistory.map(h => ({ q: h.q, a: h.a }));
 
       const result = await window.__TAURI__.core.invoke('explain_selection', {
+        projectPath: _projectPath,
         text: question,
-        context: context || null,
-        previousQa: previousQa
+        context: JSON.stringify({ chapterTitle: context || '' }),
+        previousQa: previousQa,
       });
 
       // result = {explanation: string, suggestedQuestions: string[]}

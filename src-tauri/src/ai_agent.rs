@@ -200,6 +200,27 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
     ))
 }
 
+/// Quick check if the Agent SDK is available.
+/// Runs `node -e "require('@anthropic-ai/claude-agent-sdk')"` and checks exit code.
+/// Fast (~100ms) — just a module resolution check, no network.
+fn check_sdk_quick() -> Result<bool, String> {
+    let mut cmd = std::process::Command::new("node");
+    cmd.args(&["-e", "require('@anthropic-ai/claude-agent-sdk')"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let result = cmd.status()
+        .map_err(|e| format!("Failed to run node: {}", e))?;
+    Ok(result.success())
+}
+
 /// Copy bundled skills into a project's `.claude/skills/` so the agent SDK
 /// discovers them. Called at project-setup time (alongside
 /// `setup_project_with_session`). Each skill is a subdirectory containing
@@ -251,6 +272,17 @@ pub fn copy_bundled_skills_to_project(project_path: &str) -> Result<(), String> 
         dst_dir.display()
     );
     Ok(())
+}
+
+/// Read the agent session_id from a project's .learning/agent-session.json.
+/// Returns None if the file doesn't exist or is unreadable.
+fn read_session_id(project_path: &str) -> Option<String> {
+    let session_path = std::path::PathBuf::from(project_path)
+        .join(".learning")
+        .join("agent-session.json");
+    let content = std::fs::read_to_string(&session_path).ok()?;
+    let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
+    parsed.get("session_id")?.as_str().map(String::from)
 }
 
 /// Initialize an agent session in the given project workspace.
@@ -969,6 +1001,7 @@ More text"#;
         assert!(parse_plan_response("not json at all").is_err());
         assert!(parse_plan_response("```json\n{invalid}\n```").is_err());
     }
+
 }
 
 /// Abort the running agent process
@@ -1061,6 +1094,15 @@ pub struct QuizQuestion {
     pub weak_concepts: Vec<String>,
 }
 
+/// Return type for generate_chapter_quiz — separates standard quiz questions
+/// from extra questions generated from Cornell explanations.
+/// Sprint 7: extras are no longer appended to standard, making them independent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QuizWithExtras {
+    pub standard: Vec<QuizQuestion>,
+    pub extras: Vec<QuizQuestion>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuizOption {
     pub label: String,
@@ -1133,13 +1175,14 @@ fn repair_json_quotes(raw: &str) -> String {
 }
 
 /// Read quiz questions from pre-generated .quiz.json (Sprint 3 refactored: no real-time AI)
-/// Sprint 6 PB4: append 1-2 extra questions based on explanations/<chapter>.json
+/// Sprint 6 PB4: generate extra questions based on explanations/<chapter>.json
+/// Sprint 7: extras returned separately from standard quiz questions.
 #[tauri::command]
 pub async fn generate_chapter_quiz(
     chapter_file: String,
     project_path: Option<String>,
     _agent_process: State<'_, AgentProcess>,
-) -> Result<Vec<QuizQuestion>, String> {
+) -> Result<QuizWithExtras, String> {
     log::info!("[Sprint3] generate_chapter_quiz for: {}", chapter_file);
 
     // Infer quiz.json path: replace .md with .quiz.json
@@ -1224,7 +1267,7 @@ pub async fn generate_chapter_quiz(
         ));
     }
 
-    let mut questions: Vec<QuizQuestion> = questions_arr
+    let standard_questions: Vec<QuizQuestion> = questions_arr
         .iter()
         .enumerate()
         .map(|(idx, q)| serde_json::from_value(q.clone()).map_err(|e| {
@@ -1240,7 +1283,9 @@ pub async fn generate_chapter_quiz(
         }))
         .collect::<Result<Vec<_>, _>>()?;
 
-    // Sprint 6 PB4: append extra questions from explanations
+    // Sprint 6 PB4: read explanation cues and build separate extra questions
+    // Sprint 7: extras are returned alongside (not appended to) standard questions.
+    let mut extra_questions: Vec<QuizQuestion> = Vec::new();
     if let Some(proj) = project_path.as_ref().filter(|p| !p.is_empty()) {
         if let Some(basename) = std::path::Path::new(&chapter_file).file_name() {
             let basename_str = basename.to_string_lossy().to_string();
@@ -1258,16 +1303,16 @@ pub async fn generate_chapter_quiz(
                     Ok(exp_content) => {
                         match serde_json::from_str::<crate::explanation_persistence::ChapterExplanations>(&exp_content) {
                             Ok(exp_data) => {
-                                let max_extra = std::cmp::min(2, 9usize.saturating_sub(questions.len()));
+                                let max_extra = std::cmp::min(3, exp_data.conversations.len());
                                 log::info!("[Sprint6] found {} conversations, max_extra={}", exp_data.conversations.len(), max_extra);
                                 let extras: Vec<(String, String)> = exp_data.conversations
                                     .iter()
                                     .filter_map(|c| {
                                         let concept = c.selected_text.trim();
                                         if concept.is_empty() { return None; }
-                                        // Skip if existing quiz already mentions this concept
+                                        // Skip if standard quiz already mentions this concept
                                         let concept_lower = concept.to_lowercase();
-                                        let already_covered = questions.iter().any(|q| {
+                                        let already_covered = standard_questions.iter().any(|q| {
                                             q.question.to_lowercase().contains(&concept_lower)
                                         });
                                         if already_covered {
@@ -1286,8 +1331,8 @@ pub async fn generate_chapter_quiz(
                                 log::info!("[Sprint6] selected {} extras from conversations", extras.len());
                                 for (idx, (concept, explanation)) in extras.iter().enumerate() {
                                     let q = build_extra_question(idx, concept, explanation);
-                                    questions.push(q);
-                                    log::info!("[Sprint6] appended extra quiz question for concept: {}", concept);
+                                    extra_questions.push(q);
+                                    log::info!("[Sprint7] built extra question for concept: {}", concept);
                                 }
                             }
                             Err(e) => log::warn!("[Sprint6] failed to parse explanations json: {}", e),
@@ -1303,12 +1348,19 @@ pub async fn generate_chapter_quiz(
         log::info!("[Sprint6] project_path is empty or None, skipping extra questions");
     }
 
-    if questions.is_empty() || questions.len() > 9 {
-        return Err(format!("Invalid question count: {} (expected 3-9)", questions.len()));
+    if standard_questions.is_empty() {
+        return Err("quiz.json 中没有标准题目".to_string());
     }
 
-    log::info!("[Sprint3] loaded {} questions (including extras)", questions.len());
-    Ok(questions)
+    log::info!(
+        "[Sprint3] loaded {} standard questions + {} extra questions",
+        standard_questions.len(),
+        extra_questions.len()
+    );
+    Ok(QuizWithExtras {
+        standard: standard_questions,
+        extras: extra_questions,
+    })
 }
 
 /// Evaluate user answers using Agent SDK
@@ -1408,7 +1460,7 @@ pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Opti
     parts.push("同时给出3-4个用户可能想追问的问题（作为JSON数组）。".to_string());
     parts.push(String::new());
     parts.push("返回格式（合法JSON）：".to_string());
-    parts.push("{\"explanation\": \"...\", \"suggestedQuestions\": [\"...\", \"...\"]}".to_string());
+    parts.push("{\"explanation\": \"...\", \"suggested_questions\": [\"...\", \"...\"]}".to_string());
     parts.push(String::new());
 
     let truncated = if text.chars().count() > 197 {
@@ -1425,15 +1477,37 @@ pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Opti
 /// Pure function — extracted for testability
 pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
     // Strip markdown code block wrappers if present (LLM sometimes wraps JSON in ```json ... ```)
-    let cleaned = raw.trim();
-    let cleaned = if cleaned.starts_with("```") {
-        cleaned.lines()
-            .skip(1) // skip ```json or ```
-            .take_while(|l| !l.trim_start().starts_with("```"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        cleaned.to_string()
+    // Handles both multi-line and single-line formats:
+    //   ```json
+    //   {"explanation":"...", ...}
+    //   ```
+    //   or single-line: ```json {"explanation":"...", ...} ```
+    let cleaned = {
+        let mut s = raw.trim();
+        if s.starts_with("```") {
+            // Remove the opening ``` line (```json or just ```)
+            if let Some(content_start) = s.find('\n') {
+                // Multi-line: skip the ```json line
+                s = s[content_start..].trim_start();
+                // Remove closing ``` and everything after
+                if let Some(end) = s.find("```") {
+                    s = s[..end].trim();
+                }
+            } else {
+                // Single-line: strip ```...``` and  optional `json` prefix
+                s = &s[3..]; // skip opening ```
+                if let Some(end) = s.rfind("```") {
+                    s = s[..end].trim();
+                } else {
+                    s = s.trim();
+                }
+                // Strip leading `json` if present (from ```json)
+                if let Some(stripped) = s.strip_prefix("json").or_else(|| s.strip_prefix("JSON")) {
+                    s = stripped.trim();
+                }
+            }
+        }
+        s.to_string()
     };
 
     // Try to parse as JSON
@@ -1443,12 +1517,12 @@ pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        // Hard truncate to 200 chars as safety net (prompt asks for 150)
-        if explanation.chars().count() > 200 {
-            explanation = explanation.chars().take(197).collect::<String>() + "...";
+        // Safety truncate to 1000 chars (very rare, only if LLM goes wild)
+        if explanation.chars().count() > 1000 {
+            explanation = explanation.chars().take(997).collect::<String>() + "...";
         }
         let suggested_questions = parsed
-            .get("suggestedQuestions")
+            .get("suggested_questions")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -1462,21 +1536,53 @@ pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
         };
     }
 
-    // Fallback: treat raw as explanation, use hardcoded questions
-    let fallback = vec![
-        "这是什么意思？".to_string(),
-        "举个例子".to_string(),
-        "有什么应用场景？".to_string(),
-        "需要注意什么陷阱？".to_string(),
-    ];
+    // Fallback: try lenient extract — lightly parse explanation field from partial JSON
+    // Usually JSON fails because LLM truncated the output mid-array (suggested_questions).
+    // The explanation field was written before questions, so it's usually complete.
+    let fallback_explanation = if let Some(start) = cleaned.find("\"explanation\"") {
+        // Find the value after "explanation":
+        let after_key = &cleaned[start + 13..]; // skip "explanation":
+        let after_colon = after_key.trim_start().trim_start_matches(':').trim_start();
+        // JSON string value starts with ", find closing "
+        if after_colon.starts_with('"') {
+            let content = &after_colon[1..]; // skip opening "
+            let mut extracted = String::new();
+            let mut chars = content.chars();
+            loop {
+                match chars.next() {
+                    None => break,
+                    Some('"') => {
+                        // Check if escaped
+                        if extracted.ends_with('\\') {
+                            extracted.push('"');
+                        } else {
+                            break; // found closing "
+                        }
+                    }
+                    Some(c) => extracted.push(c),
+                }
+            }
+            if !extracted.is_empty() {
+                extracted
+            } else {
+                raw.to_string()
+            }
+        } else {
+            raw.to_string()
+        }
+    } else {
+        raw.to_string()
+    };
+
     ExplainV2Response {
-        explanation: raw.to_string(),
-        suggested_questions: fallback,
+        explanation: fallback_explanation,
+        suggested_questions: vec![],
     }
 }
 
 #[tauri::command]
 pub async fn explain_selection(
+    project_path: Option<String>,
     text: String,
     context: Option<String>,
     previous_qa: Option<Vec<QAItem>>,
@@ -1484,7 +1590,44 @@ pub async fn explain_selection(
 ) -> Result<ExplainV2Response, String> {
     log::info!("[Sprint6] explain_selection START: text_len={}", text.len());
 
-    // Get config
+    // Ensure bundled skills (explanation) are available in the project
+    if let Some(ref pp) = project_path {
+        let _ = copy_bundled_skills_to_project(pp);
+    }
+
+    // Read session_id from .learning/agent-session.json so the agent shares
+    // the project's session (memory of prior turns).  Fall back to None if
+    // the file doesn't exist or is unreadable.
+    let session_id = project_path
+        .as_ref()
+        .and_then(|pp| read_session_id(pp));
+
+    // Quick check: is Agent SDK available? If not, skip agent-bridge entirely
+    // to avoid the ~500ms node cold start + hang risk.
+    let sdk_available = check_sdk_quick().unwrap_or(false);
+    if sdk_available {
+        // Try Agent SDK first (agent-bridge "explain" stage with full context)
+        match explain_selection_agent(
+            project_path.clone().unwrap_or_default(),
+            text.clone(),
+            context.clone(),
+            previous_qa.clone(),
+            app_handle.clone(),
+            session_id.clone(),
+        ).await {
+            Ok(result) => {
+                log::info!("[Sprint6] explain_selection via Agent SDK: ok");
+                return Ok(result);
+            }
+            Err(e) => {
+                log::info!("[Sprint6] explain_selection Agent failed, falling back to ureq: {}", e);
+            }
+        }
+    } else {
+        log::info!("[Sprint6] Agent SDK not available, using ureq directly");
+    }
+
+    // Fallback: ureq direct call (same as before)
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
     let api_key = config.api_key
         .filter(|k| !k.is_empty())
@@ -1514,7 +1657,7 @@ pub async fn explain_selection(
             let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
                 "model": model,
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "messages": [{"role": "user", "content": prompt}]
             });
             let resp = ureq::post(&url)
@@ -1529,7 +1672,7 @@ pub async fn explain_selection(
             let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
                 "model": model,
-                "max_tokens": 1024,
+                "max_tokens": 2048,
                 "messages": [{"role": "user", "content": prompt}]
             });
             let resp = ureq::post(&url)
@@ -1550,10 +1693,114 @@ pub async fn explain_selection(
         json["choices"][0]["message"]["content"].as_str()
     }.ok_or("响应中没有内容")?;
 
-    // Parse structured response
     let result = parse_explain_response(raw_content);
 
     log::info!("[Sprint6] explain_selection SUCCESS: explanation_len={}, questions={}",
+        result.explanation.len(), result.suggested_questions.len());
+    Ok(result)
+}
+
+/// Cornell Notes: explain selected text via Agent SDK (agent-bridge "explain" stage).
+/// Returns { explanation, suggested_questions } — same schema as ureq explain_selection.
+/// Cold-starts node (like all agent-bridge stages), so ~500ms slower than ureq,
+/// but gets full Agent SDK context (project memory, skills, session awareness).
+pub async fn explain_selection_agent(
+    project_path: String,
+    text: String,
+    context: Option<String>,
+    previous_qa: Option<Vec<QAItem>>,
+    app_handle: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<ExplainV2Response, String> {
+    log::info!("[Cornell] explain_selection_agent START: text_len={}, session_id={}",
+        text.len(), session_id.as_deref().unwrap_or("(none)"));
+
+    let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+
+    let prev_qa_json: Vec<serde_json::Value> = previous_qa.unwrap_or_default().into_iter()
+        .map(|qa| serde_json::json!({ "q": qa.q, "a": qa.a }))
+        .collect();
+
+    // Scratch file: agent writes the result here via the Write tool,
+    // Rust reads it after the process exits (avoids the stdout pipe hang).
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+    let output_file = learning_dir.join(".explain-result.json");
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "text": text,
+            "context": context,
+            "previousQa": prev_qa_json,
+            "session_id": session_id,
+            "output_file": output_file.to_string_lossy().to_string(),
+        }
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("explain")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[Cornell] explain-agent: spawning node process...");
+    let mut child = cmd.spawn()
+        .map_err(|e| {
+            log::error!("[Cornell] explain-agent: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    let status = child.wait()
+        .map_err(|e| format!("Failed to wait for agent-bridge: {}", e))?;
+
+    let stderr = child.stderr.take()
+        .map(|mut s| {
+            use std::io::Read;
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        })
+        .unwrap_or_default();
+
+    // Agent wrote the result to disk — verify and read back
+    if !output_file.exists() {
+        let msg = if status.success() {
+            format!("Agent exited OK but did not write expected file: {:?}", output_file)
+        } else {
+            format!("Agent explain failed (exit {:?}): {}", status.code().unwrap_or(-1), stderr.trim())
+        };
+        log::error!("[Cornell] explain-agent: {}", msg);
+        return Err(msg);
+    }
+
+    let content = std::fs::read_to_string(&output_file).unwrap_or_default();
+    // Clean up the scratch file
+    let _ = std::fs::remove_file(&output_file);
+
+    let result = parse_explain_response(&content);
+    if result.explanation.is_empty() {
+        log::error!("[Cornell] explain-agent: parsed empty explanation. content: {}", &content[..std::cmp::min(200, content.len())]);
+        return Err(format!("Agent explain returned empty explanation. Raw: {}", &content[..std::cmp::min(200, content.len())]));
+    }
+
+    log::info!("[Cornell] explain-agent SUCCESS: expl_len={}, questions={}",
         result.explanation.len(), result.suggested_questions.len());
     Ok(result)
 }
@@ -1619,7 +1866,20 @@ pub async fn persist_explanation(
     chapter: String,
     conversation: crate::explanation_persistence::ExplanationConversation,
 ) -> Result<(), String> {
+    // explanation_persistence::save also invalidates the per-cue extras file
+    // (the cue's quiz is now stale; will be regenerated on demand).
     crate::explanation_persistence::save(&project_path, &chapter, conversation)
+}
+
+#[tauri::command]
+pub async fn delete_explanation(
+    project_path: String,
+    chapter: String,
+    conversation_id: String,
+) -> Result<(), String> {
+    // explanation_persistence::remove also deletes the per-cue extras file
+    // (surgical: the deleted cue's quiz is removed, other cues' quizzes are untouched).
+    crate::explanation_persistence::remove(&project_path, &chapter, &conversation_id)
 }
 
 #[tauri::command]
@@ -1628,6 +1888,216 @@ pub async fn load_chapter_explanations(
     chapter: String,
 ) -> Result<crate::explanation_persistence::ChapterExplanations, String> {
     crate::explanation_persistence::load(&project_path, &chapter)
+}
+
+// ============================================
+// Sprint 7: Extra Questions Persistence
+// Per-cue model: each Cornell cue gets its own extras file at
+// .learning/extras/{chapter_stem}/{cue_id}.json
+// ============================================
+
+/// Spawn agent-bridge to generate ONE cue's extra-quiz and verify the per-cue file was written.
+async fn spawn_generate_extra_quiz(
+    bridge_path: &std::path::Path,
+    project_path: &str,
+    config: &crate::AppConfig,
+    concept: &str,
+    qa_history: &[crate::explanation_persistence::ExplanationQAEntry],
+    output_file: &std::path::Path,
+) -> Result<(), String> {
+    let qa: Vec<serde_json::Value> = qa_history.iter()
+        .map(|qa| serde_json::json!({ "q": qa.q, "a": qa.a }))
+        .collect();
+    let concepts_array = vec![serde_json::json!({
+        "concept": concept,
+        "qa_history": qa,
+    })];
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "concepts": concepts_array,
+            "output_file": output_file.to_string_lossy().to_string(),
+        }
+    });
+
+    if let Some(parent) = output_file.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("创建 extras 目录失败: {}", e))?;
+    }
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(bridge_path)
+        .arg("generate-extra-quiz")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
+    let status = child.wait()
+        .map_err(|e| format!("Failed to wait for agent-bridge: {}", e))?;
+    let stderr = child.stderr.take()
+        .map(|mut s| {
+            use std::io::Read;
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        })
+        .unwrap_or_default();
+
+    if !output_file.exists() {
+        return Err(if status.success() {
+            format!("Agent exited OK but did not write expected file: {:?}", output_file)
+        } else {
+            format!("Agent 生成附加题失败 (exit {:?}): {}", status.code().unwrap_or(-1), stderr.trim())
+        });
+    }
+    Ok(())
+}
+
+/// Generate extra questions per-cue for cues that don't have one yet.
+/// Returns the total count of extras files for the chapter.
+#[tauri::command]
+pub async fn ensure_extra_questions(
+    chapter_file: String,
+    project_path: Option<String>,
+    app_handle: tauri::AppHandle,
+) -> Result<i32, String> {
+    let proj = match project_path.as_ref().filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None => return Ok(0),
+    };
+
+    // One-time cleanup: remove the legacy single-file extras from the old model
+    let legacy_extras = crate::explanation_persistence::get_legacy_extras_file_path(proj, &chapter_file);
+    if legacy_extras.exists() {
+        let _ = std::fs::remove_file(&legacy_extras);
+        log::info!("[Sprint7] removed legacy extras file {:?}", legacy_extras);
+    }
+
+    // Load explanations (handles lazy migration from old single-file format)
+    let mut exp_data = crate::explanation_persistence::load(proj, &chapter_file)
+        .map_err(|e| format!("加载 explanations 失败: {}", e))?;
+    if exp_data.conversations.is_empty() {
+        // Fallback: try the parent dir's .learning
+        let start = std::path::PathBuf::from(proj);
+        if let Some(parent) = start.parent() {
+            if let Ok(data) = crate::explanation_persistence::load(
+                &parent.to_string_lossy(), &chapter_file
+            ) {
+                if !data.conversations.is_empty() {
+                    exp_data = data;
+                }
+            }
+        }
+    }
+    if exp_data.conversations.is_empty() {
+        return Ok(0);
+    }
+
+    // Scan extras chapter dir to find existing cue_ids
+    let extras_dir = crate::explanation_persistence::get_extras_chapter_dir(proj, &chapter_file);
+    std::fs::create_dir_all(&extras_dir)
+        .map_err(|e| format!("创建 extras 目录失败: {}", e))?;
+
+    let existing_cue_ids: std::collections::HashSet<String> = std::fs::read_dir(&extras_dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let p = e.path();
+                    if p.extension().and_then(|s| s.to_str()) == Some("json") {
+                        p.file_stem().map(|s| s.to_string_lossy().to_string())
+                    } else { None }
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Generate missing extras per-cue (one agent spawn per missing cue)
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+
+    for conv in &exp_data.conversations {
+        if existing_cue_ids.contains(&conv.id) {
+            continue;
+        }
+        if conv.selected_text.trim().is_empty() {
+            continue;
+        }
+        let output_file = crate::explanation_persistence::get_extra_cue_path(
+            proj, &chapter_file, &conv.id
+        );
+        match spawn_generate_extra_quiz(
+            &bridge_path, proj, &config,
+            conv.selected_text.trim(), &conv.qa_history, &output_file,
+        ).await {
+            Ok(()) => log::info!("[Sprint7] generated extras for cue {}", conv.id),
+            Err(e) => log::warn!("[Sprint7] failed to generate extras for cue {}: {}", conv.id, e),
+        }
+    }
+
+    // Return total count of extras files for the chapter
+    let total = std::fs::read_dir(&extras_dir)
+        .map(|rd| {
+            rd.filter_map(|e| e.ok())
+                .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+                .count()
+        })
+        .unwrap_or(0);
+    Ok(total as i32)
+}
+
+/// Load persisted extra questions for a chapter, aggregating from all per-cue files.
+#[tauri::command]
+pub async fn load_extra_questions(
+    chapter_file: String,
+    project_path: Option<String>,
+) -> Result<Vec<QuizQuestion>, String> {
+    let proj = match project_path.as_ref().filter(|p| !p.is_empty()) {
+        Some(p) => p,
+        None => return Ok(vec![]),
+    };
+
+    // One-time cleanup of legacy file (harmless if absent)
+    let legacy = crate::explanation_persistence::get_legacy_extras_file_path(proj, &chapter_file);
+    if legacy.exists() {
+        let _ = std::fs::remove_file(&legacy);
+    }
+
+    let extras_dir = crate::explanation_persistence::get_extras_chapter_dir(proj, &chapter_file);
+    if !extras_dir.exists() {
+        return Ok(vec![]);
+    }
+
+    let mut all: Vec<QuizQuestion> = Vec::new();
+    let entries = std::fs::read_dir(&extras_dir)
+        .map_err(|e| format!("读取 extras 目录失败: {}", e))?;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path)
+            .map_err(|e| format!("读取 extras 文件失败: {}", e))?;
+        if let Ok(questions) = serde_json::from_str::<Vec<QuizQuestion>>(&content) {
+            all.extend(questions);
+        }
+    }
+    Ok(all)
 }
 
 // ============================================

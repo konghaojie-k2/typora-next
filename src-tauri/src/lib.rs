@@ -2492,6 +2492,7 @@ async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_js
 
 mod explanation_persistence {
     use serde::{Deserialize, Serialize};
+    use std::path::{Path, PathBuf};
 
     pub const MAX_CUES_PER_CHAPTER: usize = 20;
 
@@ -2522,68 +2523,204 @@ mod explanation_persistence {
         pub conversations: Vec<ExplanationConversation>,
     }
 
-    pub fn get_explanations_dir(project_path: &str) -> std::path::PathBuf {
-        std::path::PathBuf::from(project_path).join(".learning").join("explanations")
+    pub fn get_explanations_dir(project_path: &str) -> PathBuf {
+        PathBuf::from(project_path).join(".learning").join("explanations")
     }
 
-    pub fn get_explanation_file_path(project_path: &str, chapter: &str) -> std::path::PathBuf {
-        get_explanations_dir(project_path).join(format!("{}.json", chapter))
+    /// Strip the .md (or any) extension to get the chapter stem used as the per-chapter directory name.
+    fn chapter_stem(chapter: &str) -> String {
+        Path::new(chapter)
+            .file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| chapter.to_string())
     }
 
-    /// Save a conversation to the chapter's explanation file.
-    pub fn save(project_path: &str, chapter: &str, conversation: ExplanationConversation) -> Result<(), String> {
-        let dir = get_explanations_dir(project_path);
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("创建 explanations 目录失败: {}", e))?;
+    pub fn get_explanations_chapter_dir(project_path: &str, chapter: &str) -> PathBuf {
+        get_explanations_dir(project_path).join(chapter_stem(chapter))
+    }
 
-        let path = get_explanation_file_path(project_path, chapter);
+    pub fn get_explanation_cue_path(project_path: &str, chapter: &str, cue_id: &str) -> PathBuf {
+        get_explanations_chapter_dir(project_path, chapter).join(format!("{}.json", cue_id))
+    }
 
-        let mut data: ChapterExplanations = if path.exists() {
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("读取 explanations 文件失败: {}", e))?;
-            serde_json::from_str(&content)
-                .map_err(|e| format!("解析 explanations 文件失败: {}", e))?
-        } else {
-            ChapterExplanations {
-                chapter: chapter.to_string(),
-                conversations: vec![],
+    /// Per-chapter extras directory: .learning/extras/{chapter_stem}/
+    pub fn get_extras_chapter_dir(project_path: &str, chapter: &str) -> PathBuf {
+        PathBuf::from(project_path)
+            .join(".learning")
+            .join("extras")
+            .join(chapter_stem(chapter))
+    }
+
+    pub fn get_extra_cue_path(project_path: &str, chapter: &str, cue_id: &str) -> PathBuf {
+        get_extras_chapter_dir(project_path, chapter).join(format!("{}.json", cue_id))
+    }
+
+    /// Legacy single-file extras path from the old model: .learning/extras/{chapter_stem}.json
+    /// Used only for one-time cleanup; new model writes per-cue files in get_extras_chapter_dir.
+    pub fn get_legacy_extras_file_path(project_path: &str, chapter: &str) -> PathBuf {
+        PathBuf::from(project_path)
+            .join(".learning")
+            .join("extras")
+            .join(format!("{}.json", chapter_stem(chapter)))
+    }
+
+    /// One-time lazy migration from the old single-file explanations format.
+    /// If `.learning/explanations/{chapter}.json` exists and the new per-cue dir is missing or empty,
+    /// split it into per-cue files and delete the old file. Idempotent.
+    fn maybe_migrate_old_file(project_path: &str, chapter: &str) -> Result<(), String> {
+        let old_path = get_explanations_dir(project_path).join(format!("{}.json", chapter));
+        if !old_path.exists() {
+            return Ok(());
+        }
+        let new_dir = get_explanations_chapter_dir(project_path, chapter);
+        // If new dir already has any json file, skip migration (assume already migrated) and remove old
+        if new_dir.exists() {
+            let has_any = std::fs::read_dir(&new_dir)
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok()).any(|e| {
+                        e.path().extension().and_then(|s| s.to_str()) == Some("json")
+                    })
+                })
+                .unwrap_or(false);
+            if has_any {
+                let _ = std::fs::remove_file(&old_path);
+                return Ok(());
             }
-        };
-
-        if let Some(idx) = data.conversations.iter().position(|c| c.id == conversation.id) {
-            data.conversations[idx] = conversation;
-        } else {
-            data.conversations.push(conversation);
         }
 
-        if data.conversations.len() > MAX_CUES_PER_CHAPTER {
-            data.conversations.sort_by(|a, b| a.created_at.cmp(&b.created_at));
-            let excess = data.conversations.len() - MAX_CUES_PER_CHAPTER;
-            data.conversations.drain(0..excess);
+        let content = std::fs::read_to_string(&old_path)
+            .map_err(|e| format!("读取旧 explanations 文件失败: {}", e))?;
+        let data: ChapterExplanations = serde_json::from_str(&content)
+            .map_err(|e| format!("解析旧 explanations 文件失败: {}", e))?;
+
+        std::fs::create_dir_all(&new_dir)
+            .map_err(|e| format!("创建 explanations 章节目录失败: {}", e))?;
+
+        for conv in &data.conversations {
+            let cue_path = get_explanation_cue_path(project_path, chapter, &conv.id);
+            let json = serde_json::to_string_pretty(conv)
+                .map_err(|e| format!("序列化 cue 失败: {}", e))?;
+            std::fs::write(&cue_path, json)
+                .map_err(|e| format!("写入 cue 文件失败: {}", e))?;
         }
 
-        let json = serde_json::to_string_pretty(&data)
-            .map_err(|e| format!("序列化 explanations 失败: {}", e))?;
-        std::fs::write(&path, json)
-            .map_err(|e| format!("写入 explanations 文件失败: {}", e))?;
+        let _ = std::fs::remove_file(&old_path);
+        Ok(())
+    }
+
+    /// Save a single cue. Writes to `{chapter_stem}/{cue_id}.json`. Evicts oldest cues if over MAX.
+    /// Also invalidates the per-cue extras file (the cue's quiz is now stale).
+    pub fn save(project_path: &str, chapter: &str, conversation: ExplanationConversation) -> Result<(), String> {
+        let chapter_dir = get_explanations_chapter_dir(project_path, chapter);
+        std::fs::create_dir_all(&chapter_dir)
+            .map_err(|e| format!("创建 explanations 章节目录失败: {}", e))?;
+
+        let cue_path = get_explanation_cue_path(project_path, chapter, &conversation.id);
+        let json = serde_json::to_string_pretty(&conversation)
+            .map_err(|e| format!("序列化 cue 失败: {}", e))?;
+        std::fs::write(&cue_path, json)
+            .map_err(|e| format!("写入 cue 文件失败: {}", e))?;
+
+        evict_oldest_if_over_limit(project_path, chapter)?;
+
+        // Per-cue extras invalidation: cue content changed -> its quiz is stale
+        let extras_path = get_extra_cue_path(project_path, chapter, &conversation.id);
+        if extras_path.exists() {
+            let _ = std::fs::remove_file(&extras_path);
+        }
 
         Ok(())
     }
 
-    /// Read all conversations for a chapter.
+    fn evict_oldest_if_over_limit(project_path: &str, chapter: &str) -> Result<(), String> {
+        let chapter_dir = get_explanations_chapter_dir(project_path, chapter);
+        let entries = match std::fs::read_dir(&chapter_dir) {
+            Ok(rd) => rd.filter_map(|e| e.ok()).map(|e| e.path()).collect::<Vec<_>>(),
+            Err(_) => return Ok(()),
+        };
+        let cue_files: Vec<PathBuf> = entries
+            .into_iter()
+            .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("json"))
+            .collect();
+
+        if cue_files.len() <= MAX_CUES_PER_CHAPTER {
+            return Ok(());
+        }
+
+        // Read each cue's created_at for sorting
+        let mut cues: Vec<(PathBuf, String)> = Vec::new();
+        for path in &cue_files {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(conv) = serde_json::from_str::<ExplanationConversation>(&content) {
+                    cues.push((path.clone(), conv.created_at));
+                }
+            }
+        }
+        cues.sort_by(|a, b| a.1.cmp(&b.1));
+
+        let excess = cues.len() - MAX_CUES_PER_CHAPTER;
+        for (path, _) in cues.iter().take(excess) {
+            // Delete the evicted cue's extras file too
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(conv) = serde_json::from_str::<ExplanationConversation>(&content) {
+                    let extras_path = get_extra_cue_path(project_path, chapter, &conv.id);
+                    if extras_path.exists() {
+                        let _ = std::fs::remove_file(&extras_path);
+                    }
+                }
+            }
+            let _ = std::fs::remove_file(path);
+        }
+        Ok(())
+    }
+
+    /// Read all conversations for a chapter, aggregating from per-cue files.
+    /// Lazy-migrates from the old single-file format on first call.
     pub fn load(project_path: &str, chapter: &str) -> Result<ChapterExplanations, String> {
-        let path = get_explanation_file_path(project_path, chapter);
-        if !path.exists() {
+        maybe_migrate_old_file(project_path, chapter)?;
+
+        let chapter_dir = get_explanations_chapter_dir(project_path, chapter);
+        if !chapter_dir.exists() {
             return Ok(ChapterExplanations {
                 chapter: chapter.to_string(),
                 conversations: vec![],
             });
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读取 explanations 文件失败: {}", e))?;
-        let data: ChapterExplanations = serde_json::from_str(&content)
-            .map_err(|e| format!("解析 explanations 文件失败: {}", e))?;
-        Ok(data)
+
+        let mut conversations: Vec<ExplanationConversation> = Vec::new();
+        let entries = std::fs::read_dir(&chapter_dir)
+            .map_err(|e| format!("读取 explanations 章节目录失败: {}", e))?;
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let content = std::fs::read_to_string(&path)
+                .map_err(|e| format!("读取 cue 文件失败: {}", e))?;
+            if let Ok(conv) = serde_json::from_str::<ExplanationConversation>(&content) {
+                conversations.push(conv);
+            }
+        }
+        conversations.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+
+        Ok(ChapterExplanations {
+            chapter: chapter.to_string(),
+            conversations,
+        })
+    }
+
+    /// Remove a cue by id. Deletes both the explanations per-cue file and the extras per-cue file.
+    pub fn remove(project_path: &str, chapter: &str, conversation_id: &str) -> Result<(), String> {
+        let cue_path = get_explanation_cue_path(project_path, chapter, conversation_id);
+        if cue_path.exists() {
+            std::fs::remove_file(&cue_path)
+                .map_err(|e| format!("删除 cue 文件失败: {}", e))?;
+        }
+        let extras_path = get_extra_cue_path(project_path, chapter, conversation_id);
+        if extras_path.exists() {
+            let _ = std::fs::remove_file(&extras_path);
+        }
+        Ok(())
     }
 }
 
@@ -3626,8 +3763,9 @@ pub fn run() {
             get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
             ai_agent::plan_course, ai_agent::plan_course_llm, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
+            ai_agent::ensure_extra_questions, ai_agent::load_extra_questions,
             create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file, persist_chapter_file,
-            ai_agent::persist_explanation, ai_agent::load_chapter_explanations,
+            ai_agent::persist_explanation, ai_agent::load_chapter_explanations, ai_agent::delete_explanation,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
             generate_review_content, init_review_schedule, submit_review_result, check_missing_review_cards,
             socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
