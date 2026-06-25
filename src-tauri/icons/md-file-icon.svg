@@ -1,0 +1,33 @@
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="doc-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#f8f9fa"/>
+      <stop offset="100%" stop-color="#e9ecef"/>
+    </linearGradient>
+    <linearGradient id="m-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="line-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d1d5db"/>
+      <stop offset="100%" stop-color="#e5e7eb"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 文档形状 - 圆角矩形，右上折角 -->
+  <path d="M80 40 L332 40 L432 140 L432 472 Q432 488 416 488 L96 488 Q80 488 80 472 Z"
+        fill="url(#doc-grad)" stroke="#d1d5db" stroke-width="6"/>
+  <!-- 折角三角形 -->
+  <path d="M332 40 L332 140 L432 140 Z" fill="#f1f3f5" stroke="#d1d5db" stroke-width="6"/>
+  <line x1="332" y1="40" x2="332" y2="140" stroke="#d1d5db" stroke-width="6"/>
+
+  <!-- 代码行（水平线，模拟 Markdown 内容） -->
+  <line x1="140" y1="220" x2="370" y2="220" stroke="url(#line-grad)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="140" y1="270" x2="330" y2="270" stroke="url(#line-grad)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="140" y1="320" x2="350" y2="320" stroke="url(#line-grad)" stroke-width="12" stroke-linecap="round"/>
+  <line x1="140" y1="370" x2="300" y2="370" stroke="url(#line-grad)" stroke-width="12" stroke-linecap="round"/>
+
+  <!-- MD 标记 -->
+  <rect x="140" y="168" width="56" height="28" rx="6" fill="url(#m-grad)" opacity="0.9"/>
+  <text x="168" y="188" font-family="Arial, sans-serif" font-size="16" font-weight="700" fill="white" text-anchor="middle">M</text>
+</svg>

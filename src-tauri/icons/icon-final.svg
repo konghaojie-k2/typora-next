@@ -1,0 +1,43 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7c3aed"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <linearGradient id="m-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#e0e7ff"/>
+    </linearGradient>
+    <linearGradient id="bracket-grad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#93c5fd"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle 背景 -->
+  <rect width="1024" height="1024" rx="228" fill="url(#bg-grad)"/>
+
+  <!-- 代码括号 < -->
+  <g opacity="0.85">
+    <path d="M160 460 L100 512 L160 564"
+          fill="none" stroke="url(#bracket-grad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- 代码括号 > -->
+  <g opacity="0.85">
+    <path d="M864 460 L924 512 L864 564"
+          fill="none" stroke="url(#bracket-grad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- M 主体 -->
+  <path d="M240 720 L320 340 L512 560 L704 340 L784 720"
+        fill="none" stroke="url(#m-grad)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- M 高光（左侧斜面） -->
+  <path d="M280 660 L340 420"
+        fill="none" stroke="white" stroke-width="8" stroke-linecap="round" opacity="0.25"/>
+
+  <!-- 括号发光点 -->
+  <circle cx="100" cy="512" r="6" fill="white" opacity="0.4"/>
+  <circle cx="924" cy="512" r="6" fill="white" opacity="0.4"/>
+</svg>

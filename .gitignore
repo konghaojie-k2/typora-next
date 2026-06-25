@@ -46,3 +46,6 @@ agent-bridge.log
 
 # Design docs (design discussions, prototypes, ADRs)
 /docs/
+
+# Icon design workspace files (last seen: icon-designs-v2.html, icon-preview.html)
+icon-*.html
