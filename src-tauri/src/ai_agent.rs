@@ -109,12 +109,21 @@ fn _agent_log_dir(app_handle: &AppHandle) -> std::path::PathBuf {
 
 /// Build the path to agent-bridge.js
 fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
+    // Helper: build a candidate path relative to exe directory
+    let exe_parent = |sub: &str| {
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|p| p.join(sub)))
+    };
+
     // Try multiple possible locations
     let possible_paths = [
         // exe 同目录
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|p| p.join("agent-bridge.js"))),
+        exe_parent("agent-bridge.js"),
+        // MSI install: `../` in bundle.resources maps to _up_/ subdirectory
+        exe_parent("_up_/agent-bridge.js"),
+        // MSI install: resources/ subdirectory (standard Tauri resource path)
+        exe_parent("resources/agent-bridge.js"),
         // exe 父目录的父目录 (target/release/ -> target/)
         std::env::current_exe()
             .ok()
@@ -396,6 +405,11 @@ async fn run_agent_bridge(
         // Tell agent-bridge.js where to write logs (MSI install → app_log_dir,
         // dev → script dir). Falls back to __dirname if unset.
         .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir(&app_handle).to_string_lossy().to_string());
+
+    // MSI install / global SDK: set NODE_PATH so node_modules resolves
+    if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
+        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
+    }
 
     // Redirect stderr to a debug file
     let stderr_log = std::path::PathBuf::from(&bridge_path).parent().unwrap_or(std::path::Path::new(".")).join("agent-stderr.log");
@@ -1022,7 +1036,21 @@ pub async fn is_agent_running(agent_process: State<'_, AgentProcess>) -> Result<
 pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
     log::info!("[ai_agent] check_agent_sdk called");
 
-    let bridge_path = get_agent_bridge_path()?;
+    let bridge_path = match get_agent_bridge_path() {
+        Ok(p) => p,
+        Err(e) => {
+            // MSI install: agent-bridge.js might be a resource next to exe
+            // which our path resolution might miss — try AppData setup
+            log::warn!("[ai_agent] bridge_path error: {}", e);
+            return Ok(serde_json::json!({
+                "available": false,
+                "error": format!("agent-bridge.js not found: {}. 请安装 Node.js 并确保路径正确", e)
+            }));
+        }
+    };
+
+    // Auto-setup node_modules if missing (MSI install / global SDK scenario)
+    let _node_path = resolve_agent_node_path(&bridge_path);
     let payload = serde_json::json!({
         "config": {},
         "args": {}
@@ -1036,6 +1064,11 @@ pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .env("NODE_NO_WARNINGS", "1");
+
+    // MSI install / global SDK: set NODE_PATH so node_modules resolves
+    if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
+        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
+    }
 
     #[cfg(windows)]
     {
@@ -1072,6 +1105,108 @@ pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
             "available": false,
             "error": format!("Failed to parse check result: {}. Raw: {}", e, stdout.trim())
         })),
+    }
+}
+
+/// Resolve the NODE_PATH that makes `@anthropic-ai/claude-agent-sdk` available.
+///
+/// Strategy:
+/// 1. Dev: node_modules next to agent-bridge.js
+/// 2. Global: `node -e "require('module').globalPaths"` (covers both npm global and nvm)
+/// 3. Auto-install: `npm install` to `%APPDATA%/TyporaNext/agent/`
+///
+/// Returns the directory to set as NODE_PATH, or None.
+fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Helper: check if SDK exists in a given directory (which should contain node_modules/)
+    let has_sdk = |dir: &std::path::Path| -> bool {
+        let checks = [
+            dir.join("node_modules").join("@anthropic-ai").join("claude-agent-sdk"),
+            dir.join("@anthropic-ai").join("claude-agent-sdk"),  // dir is already node_modules
+        ];
+        checks.iter().any(|p| p.exists())
+    };
+
+    // 1. Check next to bridge (dev scenario)
+    if let Some(parent) = bridge_path.parent() {
+        if has_sdk(parent) {
+            let nm = parent.join("node_modules");
+            let node_path = if nm.join("@anthropic-ai").join("claude-agent-sdk").exists() { nm } else { parent.to_path_buf() };
+            log::info!("[agent_path] found local SDK at {:?}", node_path);
+            return Some(node_path);
+        }
+    }
+
+    // 2. Find global Node.js module paths
+    //    `module.globalPaths` lists all directories Node.js considers "global"
+    //    (covers both npm global and nvm-windows)
+    if let Ok(output) = std::process::Command::new("node")
+        .args(["-e", "console.log(require('module').globalPaths.join('\\n'))"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output()
+    {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let path = std::path::PathBuf::from(line.trim());
+            if path.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+                log::info!("[agent_path] found global SDK via module.globalPaths at {:?}", path);
+                return Some(path);
+            }
+        }
+    }
+
+    // 3. Auto-install to AppData
+    log::info!("[agent_path] SDK not found, installing to AppData...");
+    let appdata = std::env::var("APPDATA").ok()?;
+    let target_dir = std::path::PathBuf::from(&appdata).join("TyporaNext").join("agent");
+    std::fs::create_dir_all(&target_dir).ok()?;
+
+    // Copy agent-bridge.js
+    let bridge_name = bridge_path.file_name().unwrap_or(std::ffi::OsStr::new("agent-bridge.js"));
+    let dest_bridge = target_dir.join(bridge_name);
+    if !dest_bridge.exists() {
+        if let Err(e) = std::fs::copy(bridge_path, &dest_bridge) {
+            log::warn!("[agent_path] copy agent-bridge.js failed: {}", e);
+        }
+    }
+
+    // Copy package.json
+    if let Some(src_dir) = bridge_path.parent() {
+        let pkg_src = src_dir.join("package.json");
+        let pkg_dst = target_dir.join("package.json");
+        if pkg_src.exists() && !pkg_dst.exists() {
+            if let Err(e) = std::fs::copy(&pkg_src, &pkg_dst) {
+                log::warn!("[agent_path] copy package.json failed: {}", e);
+            }
+        }
+    }
+
+    // Run npm install if SDK still missing
+    let target_nm = target_dir.join("node_modules");
+    if !target_nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+        log::info!("[agent_path] running npm install in {:?}", target_dir);
+        let install = || -> Option<()> {
+            let status = std::process::Command::new("npm")
+                .args(["install", "--only=production", "--no-audit", "--no-fund"])
+                .current_dir(&target_dir)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status().ok()?;
+            if !status.success() {
+                log::warn!("[agent_path] npm install exit {:?}", status.code());
+                return None;
+            }
+            Some(())
+        };
+        install();
+    }
+
+    if target_nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+        log::info!("[agent_path] installed SDK to {:?}", target_nm);
+        Some(target_nm)
+    } else {
+        log::warn!("[agent_path] SDK setup failed after all attempts");
+        None
     }
 }
 
