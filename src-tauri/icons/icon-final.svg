@@ -1,43 +1,32 @@
 <svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#7c3aed"/>
-      <stop offset="100%" stop-color="#3b82f6"/>
-    </linearGradient>
-    <linearGradient id="m-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#e0e7ff"/>
-    </linearGradient>
-    <linearGradient id="bracket-grad" x1="0%" y1="0%" x2="0%" y2="100%">
-      <stop offset="0%" stop-color="#c4b5fd"/>
-      <stop offset="100%" stop-color="#93c5fd"/>
+      <stop offset="0%" stop-color="#f8fafc"/>
+      <stop offset="100%" stop-color="#e2e8f0"/>
     </linearGradient>
   </defs>
 
-  <!-- Squircle 背景 -->
+  <!-- 暖白圆角背景 -->
   <rect width="1024" height="1024" rx="228" fill="url(#bg-grad)"/>
 
-  <!-- 代码括号 < -->
-  <g opacity="0.85">
-    <path d="M160 460 L100 512 L160 564"
-          fill="none" stroke="url(#bracket-grad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 打开的书本：黑色，弧度更大 -->
+  <g fill="#0f172a" opacity="0.95">
+    <!-- 左页 -->
+    <path d="M180 800 Q320 720 512 760 L512 832 Q340 792 180 832 Z"/>
+    <!-- 右页 -->
+    <path d="M512 760 Q704 720 844 800 L844 832 Q684 792 512 832 Z"/>
+    <!-- 书脊 -->
+    <path d="M504 760 L520 760 L520 836 L504 836 Z" fill="#0f172a" opacity="0.6"/>
   </g>
 
-  <!-- 代码括号 > -->
-  <g opacity="0.85">
-    <path d="M864 460 L924 512 L864 564"
-          fill="none" stroke="url(#bracket-grad)" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
+  <!-- 书本页边曲线 -->
+  <path d="M180 800 Q320 720 512 760" fill="none" stroke="#0f172a" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
+  <path d="M512 760 Q704 720 844 800" fill="none" stroke="#0f172a" stroke-width="8" stroke-linecap="round" opacity="0.8"/>
 
-  <!-- M 主体 -->
-  <path d="M240 720 L320 340 L512 560 L704 340 L784 720"
-        fill="none" stroke="url(#m-grad)" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- 黑色 M 字母 -->
+  <path d="M320 620 L380 320 L512 500 L644 320 L704 620"
+        fill="none" stroke="#0f172a" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
 
-  <!-- M 高光（左侧斜面） -->
-  <path d="M280 660 L340 420"
-        fill="none" stroke="white" stroke-width="8" stroke-linecap="round" opacity="0.25"/>
-
-  <!-- 括号发光点 -->
-  <circle cx="100" cy="512" r="6" fill="white" opacity="0.4"/>
-  <circle cx="924" cy="512" r="6" fill="white" opacity="0.4"/>
+  <!-- M 高光 -->
+  <path d="M360 560 L380 440" fill="none" stroke="#ffffff" stroke-width="8" stroke-linecap="round" opacity="0.2"/>
 </svg>
