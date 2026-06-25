@@ -630,6 +630,11 @@ main {
   user-select: none;
 }
 
+.agent-status-chip.status-idle {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
+}
+
 .agent-status-chip.status-checking {
   background: var(--color-warning-light);
   color: var(--color-warning);

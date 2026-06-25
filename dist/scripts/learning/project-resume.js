@@ -566,6 +566,10 @@
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
           window.TyporaNext.setLearningMode(true, basePath);
         }
+        // Trigger Agent SDK check now that we're in learning mode
+        if (window.TyporaNext && window.TyporaNext.checkAgentSdk) {
+          window.TyporaNext.checkAgentSdk();
+        }
 
         const bridge = new AgentEventBridge(manager, ui, overlay);
         bridge.bind();

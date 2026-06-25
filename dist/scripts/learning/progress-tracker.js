@@ -1349,6 +1349,10 @@
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
           window.TyporaNext.setLearningMode(true, projectPath);
         }
+        // Trigger Agent SDK check now that we're in learning mode
+        if (window.TyporaNext && window.TyporaNext.checkAgentSdk) {
+          window.TyporaNext.checkAgentSdk();
+        }
 
         // Create centered generation overlay (like init status panel)
         const overlay = new GenerationOverlay(outline.chapters, projectPath);

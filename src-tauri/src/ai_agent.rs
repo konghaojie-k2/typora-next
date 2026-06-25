@@ -192,6 +192,8 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
 
     let candidates = [
         exe_dir.join("skills"),
+        exe_dir.join("_up_").join("skills"),       // Tauri resources (Windows MSI)
+        exe_dir.join("resources").join("skills"),  // Tauri resources alt layout
         exe_dir.join("..").join("skills"),       // target/release/../skills = target/skills
         exe_dir.join("..").join("..").join("skills"),  // target/release/../../skills = src-tauri/skills
         exe_dir.join("..").join("..").join("..").join("skills"),  // project root/skills (fallback)
@@ -1033,7 +1035,7 @@ pub async fn is_agent_running(agent_process: State<'_, AgentProcess>) -> Result<
 
 /// Check whether the Claude Agent SDK is available
 #[tauri::command]
-pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
+pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     log::info!("[ai_agent] check_agent_sdk called");
 
     let bridge_path = match get_agent_bridge_path() {
@@ -1063,7 +1065,10 @@ pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
         .arg(payload.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
-        .env("NODE_NO_WARNINGS", "1");
+        .env("NODE_NO_WARNINGS", "1")
+        // Keep logs in app_log_dir so they don't leak into the user's cwd
+        // (e.g. when the app is launched by double-clicking a .md file).
+        .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir(&app_handle).to_string_lossy().to_string());
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
     if let Some(node_path) = resolve_agent_node_path(&bridge_path) {

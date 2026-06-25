@@ -1265,6 +1265,9 @@ window.agentBridge = {
     }
     document.body.classList.toggle('learning-mode', enabled);
 
+    // Sprint 8a: update Socratic quick-trigger button visibility
+    _updateSocraticButtonState();
+
     // Insert/remove badge in toolbar
     let badge = document.getElementById('learningModeBadge');
     if (enabled) {
@@ -1291,14 +1294,18 @@ window.agentBridge = {
     _updateSocraticButtonState();
   }
 
-  function _updateSocraticButtonState() {
+  function _updateSocraticButtonState(forceVisible = false) {
     const socraticBtn = document.getElementById('openSocraticBtn');
     if (!socraticBtn) return;
     const devOn = window.SocraticTrigger?.isDevQuickTriggerEnabled?.();
+    const inLearning = document.body.classList.contains('learning-mode');
+    const visible = devOn || (inLearning && forceVisible);
+
+    socraticBtn.style.display = visible ? '' : 'none';
     socraticBtn.title = devOn
       ? '立即 Socratic 复习 (Ctrl+Shift+S) — DEV 已启用'
-      : 'Socratic 快捷入口（已禁用）。DevTools 执行: localStorage.setItem("socratic-dev-trigger","true")';
-    socraticBtn.style.opacity = devOn ? '1' : '0.4';
+      : 'Socratic 快捷入口';
+    socraticBtn.style.opacity = devOn ? '1' : '0.7';
   }
 
   function renderFileTree(entries, container = null, depth = 0) {
@@ -2768,6 +2775,7 @@ window.agentBridge = {
   // Agent SDK Status Indicator
   // ============================================
   const AGENT_STATUS_LABELS = {
+    idle: 'Agent 未检测',
     checking: '检测中…',
     ready: 'Agent 就绪',
     missing: 'Agent 未安装'
@@ -2787,6 +2795,8 @@ window.agentBridge = {
       chip.title = errorMessage || '未检测到 Claude Code Agent SDK';
     } else if (status === 'ready') {
       chip.title = 'Claude Code Agent SDK 已就绪';
+    } else if (status === 'idle') {
+      chip.title = '进入课程模式后自动检测 Agent SDK';
     } else {
       chip.title = '正在检测 Claude Code Agent SDK…';
     }
@@ -2869,8 +2879,10 @@ window.agentBridge = {
       }
     });
 
-    // Initial check after a short delay so the UI has time to paint
-    setTimeout(checkAgentSdk, 500);
+    // Initial check is now gated behind entering learning mode; we only set up
+    // the click-to-refresh handler here so ordinary md-file opens don't spawn
+    // agent-bridge and write logs into the document directory.
+    updateAgentStatusChip('idle');
   }
 
   // ============================================
@@ -4503,6 +4515,8 @@ window.agentBridge = {
     loadFolderPath,
     unloadFolder,
     setLearningMode,
+    _updateSocraticButtonState,
+    checkAgentSdk,
     addTab,
     switchTab,
     closeTab,

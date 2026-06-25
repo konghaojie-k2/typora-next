@@ -43,9 +43,10 @@ function log(level, message, data = null) {
   try {
     fs.appendFileSync(LOG_FILE, line + '\n', 'utf-8');
   } catch (e) {
-    // Final fallback: try CWD if the resolved dir is not writable
+    // Final fallback: write next to the script instead of the user's cwd,
+    // so opening a document by double-click doesn't litter the document dir.
     try {
-      const fallback = path.join(process.cwd(), 'agent-bridge.log');
+      const fallback = path.join(__dirname, 'agent-bridge.log');
       fs.appendFileSync(fallback, line + '\n', 'utf-8');
     } catch (_) {
       // Ignore log write errors

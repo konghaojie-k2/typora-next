@@ -89,11 +89,11 @@
             </svg>
           </button>
           <!-- Sprint 8a: 立即 Socratic 复习（绕过阈值，方便验收） -->
-          <!-- Default visible (so user can see + click to learn how to enable) -->
-          <button class="btn-icon" id="openSocraticBtn" title="Socratic 复习（需 dev flag）">
+          <!-- Hidden by default; shown only in learning mode when triggered or dev flag on -->
+          <button class="btn-icon" id="openSocraticBtn" title="Socratic 复习（需 dev flag）" style="display:none;">
             <span style="font-size:18px;">🏛️</span>
           </button>
-          <div class="agent-status-chip status-checking" id="agentStatusChip" title="Claude Code Agent 状态">
+          <div class="agent-status-chip status-idle" id="agentStatusChip" title="Claude Code Agent 状态">
             <span class="agent-status-dot"></span>
             <span class="agent-status-text">检测中…</span>
           </div>

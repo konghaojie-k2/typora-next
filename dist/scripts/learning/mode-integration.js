@@ -847,6 +847,9 @@
 
       if (result.shouldTrigger && result.toast) {
         _showSocraticToast(result.toast);
+        if (window.TyporaNext && window.TyporaNext._updateSocraticButtonState) {
+          window.TyporaNext._updateSocraticButtonState(true);
+        }
       }
     } catch (e) {
       console.warn('[SocraticTrigger] check failed:', e);
@@ -884,8 +887,14 @@
           await modal.open();
         } else if (action === 'postpone') {
           state.markDismissed();
+          if (window.TyporaNext && window.TyporaNext._updateSocraticButtonState) {
+            window.TyporaNext._updateSocraticButtonState(false);
+          }
         } else if (action === 'optout') {
           state.markOptOut();
+          if (window.TyporaNext && window.TyporaNext._updateSocraticButtonState) {
+            window.TyporaNext._updateSocraticButtonState(false);
+          }
         }
         await state.save(_projectPath);
         el.remove();
