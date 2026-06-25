@@ -1112,7 +1112,7 @@ pub async fn check_agent_sdk() -> Result<serde_json::Value, String> {
 ///
 /// Strategy:
 /// 1. Dev: node_modules next to agent-bridge.js
-/// 2. Global: `node -e "require('module').globalPaths"` (covers both npm global and nvm)
+/// 2. Global: `npm root -g` (npm 5+ prefix; node's `module.globalPaths` no longer used)
 /// 3. Auto-install: `npm install` to `%APPDATA%/TyporaNext/agent/`
 ///
 /// Returns the directory to set as NODE_PATH, or None.
@@ -1136,22 +1136,29 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
         }
     }
 
-    // 2. Find global Node.js module paths
-    //    `module.globalPaths` lists all directories Node.js considers "global"
-    //    (covers both npm global and nvm-windows)
-    if let Ok(output) = std::process::Command::new("node")
-        .args(["-e", "console.log(require('module').globalPaths.join('\\n'))"])
+    // 2. Find npm's global node_modules (npm 5+ prefix, not node's compiled-in globalPaths).
+    //    `node -e "module.globalPaths"` returns Node's own hard-coded dirs
+    //    (C:\Users\<u>\.node_modules etc.), which npm 5+ no longer uses.
+    //    Use `npm root -g` instead — it follows npm's own prefix resolution
+    //    (env / npmrc), which is where `npm install -g` actually places packages.
+    //    Rust's `Command::new("npm")` won't resolve npm's wrapper scripts on Windows;
+    //    spawn through cmd so the shell can find npm.cmd / npm.ps1.
+    let mut npm_cmd = std::process::Command::new("cmd");
+    npm_cmd.args(["/C", "npm root -g"])
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output()
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
     {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        for line in stdout.lines() {
-            let path = std::path::PathBuf::from(line.trim());
-            if path.join("@anthropic-ai").join("claude-agent-sdk").exists() {
-                log::info!("[agent_path] found global SDK via module.globalPaths at {:?}", path);
-                return Some(path);
-            }
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        npm_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    if let Ok(output) = npm_cmd.output()
+    {
+        let path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+        if path.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+            log::info!("[agent_path] found global SDK via npm root -g at {:?}", path);
+            return Some(path);
         }
     }
 
@@ -1186,12 +1193,18 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
     if !target_nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
         log::info!("[agent_path] running npm install in {:?}", target_dir);
         let install = || -> Option<()> {
-            let status = std::process::Command::new("npm")
-                .args(["install", "--only=production", "--no-audit", "--no-fund"])
+            let mut install_cmd = std::process::Command::new("cmd");
+            install_cmd.args(["/C", "npm install --only=production --no-audit --no-fund"])
                 .current_dir(&target_dir)
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status().ok()?;
+                .stderr(std::process::Stdio::null());
+            #[cfg(windows)]
+            {
+                use std::os::windows::process::CommandExt;
+                const CREATE_NO_WINDOW: u32 = 0x08000000;
+                install_cmd.creation_flags(CREATE_NO_WINDOW);
+            }
+            let status = install_cmd.status().ok()?;
             if !status.success() {
                 log::warn!("[agent_path] npm install exit {:?}", status.code());
                 return None;
