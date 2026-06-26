@@ -1968,6 +1968,7 @@
     checkMissingReviewCards,
     clearCues,
     createCue,
+    getProjectPath() { return _projectPath; },
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }
       closeQuizModal();

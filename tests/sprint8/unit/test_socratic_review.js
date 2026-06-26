@@ -193,23 +193,41 @@ TestRunner.test('socraticChat: returns content and done from stream', async () =
   TestRunner.assert(result.content.length > 0, 'content should not be empty');
 });
 
-TestRunner.test('socraticChat: [SESSION_END] sets done to true', async () => {
+TestRunner.test('socraticChat: subsequent-turn prompt is the raw user answer (no history instruction)', async () => {
+
+TestRunner.test('socraticChat: subsequent-turn [SESSION_END] sets done to true', async () => {
   const { socraticChat } = require('../../../agent-bridge.js');
 
   const mockQueryFn = () => (async function* () {
-    yield { type: 'assistant', content: 'Great discussion. [SESSION_END]' };
+    yield { type: 'result', subtype: 'success', result: 'Great discussion. [SESSION_END]' };
   })();
 
   const result = await socraticChat(mockQueryFn, {}, {
     project_path: '/tmp/test',
-    concept_titles: ['A']
+    concept_titles: ['A'],
+    user_answer: '我的回答',     // subsequent turn
+    session_id: 'sess-1'
   });
 
-  TestRunner.assertEquals(result.done, true, 'SESSION_END marker should set done=true');
+  TestRunner.assertEquals(result.done, true, 'SESSION_END on a subsequent turn should set done=true');
   TestRunner.assert(!result.content.includes('[SESSION_END]'), 'marker should be stripped from content');
 });
 
-TestRunner.test('socraticChat: empty response throws', async () => {
+TestRunner.test('socraticChat: opening-turn [SESSION_END] is ignored (never end on first turn)', async () => {
+  const { socraticChat } = require('../../../agent-bridge.js');
+
+  const mockQueryFn = () => (async function* () {
+    yield { type: 'result', subtype: 'success', result: '开场问题？ [SESSION_END]' };
+  })();
+
+  const result = await socraticChat(mockQueryFn, {}, {
+    project_path: '/tmp/test',
+    concept_titles: ['A']           // first turn: no user_answer
+  });
+
+  TestRunner.assertEquals(result.done, false, 'opening turn must not end even if the model emits [SESSION_END]');
+  TestRunner.assert(!result.content.includes('[SESSION_END]'), 'marker should still be stripped from content');
+});
   const { socraticChat } = require('../../../agent-bridge.js');
 
   const mockQueryFn = () => (async function* () {
@@ -445,19 +463,148 @@ TestRunner.test('SocraticModal endSession prevents double-save', async () => {
   TestRunner.assertEquals(modal._sessionSaved, true, '_sessionSaved flag should be set');
 });
 
-TestRunner.test('SocraticModal confirmEnd cancels auto-end timer', () => {
+TestRunner.test('SocraticModal _sendTutorTurn sends userAnswer + edges + sessionId to backend', async () => {
   setupDOM();
   const SocraticModal = loadModal();
   if (!SocraticModal) return;
 
+  let captured = null;
+  global.window.__TAURI__.core.invoke = async (cmd, args) => {
+    if (cmd === 'socratic_chat') { captured = args; return { content: 'Q', done: false, session_id: 'sess-1' }; }
+    return null;
+  };
+
   const modal = new SocraticModal({ projectPath: '/tmp/test' });
-  // Simulate auto-end timer was set by _handleLLMDone
-  modal._autoEndTimer = setTimeout(() => {}, 99999);
+  modal._chatEl = global.document.createElement('div');
+  modal.concept_titles = ['A', 'B'];
+  modal.concept_edges = [['A', 'B']];
 
-  modal.confirmEnd(); // confirmEnd is async but timer check is sync
+  await modal._sendTutorTurn('我的回答');
 
-  TestRunner.assertEquals(modal._autoEndTimer, null, 'auto-end timer should be cleared');
-  TestRunner.assertEquals(modal.confirmDialog, null, 'confirmDialog should be cleared');
+  TestRunner.assertExists(captured, 'socratic_chat should be invoked');
+  TestRunner.assertEquals(captured.userAnswer, '我的回答', 'should forward the user answer to the LLM');
+  TestRunner.assertEquals(captured.sessionId, null, 'first call sends null sessionId');
+  TestRunner.assert(Array.isArray(captured.conceptEdges), 'should pass conceptEdges');
+  TestRunner.assertEquals(modal.sessionId, 'sess-1', 'should capture returned session_id');
+});
+
+TestRunner.test('SocraticModal reuses captured sessionId on subsequent turns', async () => {
+  setupDOM();
+  const SocraticModal = loadModal();
+  if (!SocraticModal) return;
+
+  const sessionsSeen = [];
+  global.window.__TAURI__.core.invoke = async (cmd, args) => {
+    if (cmd === 'socratic_chat') { sessionsSeen.push(args.sessionId); return { content: 'Q', done: false, session_id: 'sess-X' }; }
+    return null;
+  };
+  const modal = new SocraticModal({ projectPath: '/tmp/test' });
+  modal._chatEl = global.document.createElement('div');
+  modal.concept_titles = ['A'];
+
+  await modal._sendTutorTurn(null);    // opening turn
+  await modal._sendTutorTurn('答案');   // subsequent turn
+
+  TestRunner.assertEquals(sessionsSeen[0], null, 'opening turn sessionId is null');
+  TestRunner.assertEquals(sessionsSeen[1], 'sess-X', 'subsequent turn reuses captured session');
+});
+
+TestRunner.test('SocraticModal _handleLLMDone persists session but does NOT auto-close', async () => {
+  setupDOM();
+  const SocraticModal = loadModal();
+  if (!SocraticModal) return;
+
+  let saved = false;
+  global.window.__TAURI__.core.invoke = async (cmd) => {
+    if (cmd === 'socratic_save_session') saved = true;
+  };
+  const modal = new SocraticModal({ projectPath: '/tmp/test' });
+  modal.opened = true;
+  modal._chatEl = global.document.createElement('div');
+  modal._card = global.document.createElement('div');
+  modal._appendDoneCard = () => {}; // bypass insertBefore (not in mock DOM)
+  modal.turns = [{ role: 'tutor', content: 'Q1' }];
+
+  await modal._handleLLMDone();
+
+  TestRunner.assert(saved, 'session should be persisted when LLM signals done');
+  TestRunner.assertEquals(modal._sessionSaved, true, '_sessionSaved should be set');
+  TestRunner.assertEquals(modal.opened, true, 'modal should stay open — no auto-close');
+});
+
+TestRunner.test('socraticChat returns captured session_id', async () => {
+  const { socraticChat } = require('../../../agent-bridge.js');
+
+  const mockQueryFn = () => (async function* () {
+    yield { type: 'assistant', session_id: 'sdk-sess-9', content: 'Q?' };
+    yield { type: 'result', subtype: 'success', result: 'Q?' };
+  })();
+
+  const result = await socraticChat(mockQueryFn, {}, {
+    project_path: '/tmp/test',
+    concept_titles: ['A', 'B'],
+    concept_edges: [['A', 'B']]
+  });
+
+  TestRunner.assertEquals(result.session_id, 'sdk-sess-9', 'should return session_id captured from the stream');
+});
+
+// ============================================
+// Cross-session memory: opening-turn prompt instructs the agent to read history
+// ============================================
+
+TestRunner.test('socraticChat: first-turn prompt names the unique skill and tells the agent to read history', async () => {
+  const { socraticChat } = require('../../../agent-bridge.js');
+
+  let captured = null;
+  const mockQueryFn = (req) => {
+    captured = req;
+    return (async function* () {
+      yield { type: 'result', subtype: 'success', result: '开场问题？' };
+    })();
+  };
+
+  await socraticChat(mockQueryFn, {}, {
+    project_path: '/tmp/test',
+    concept_titles: ['学习率', '梯度下降'],
+    concept_edges: [['梯度下降', '学习率']]
+  });
+
+  TestRunner.assertExists(captured, 'queryFn should be called');
+  TestRunner.assert(
+    captured.prompt.includes('typora-socratic-review skill'),
+    'first-turn prompt should name the unique skill'
+  );
+  TestRunner.assert(
+    captured.prompt.includes('.learning/socratic-sessions'),
+    'first-turn prompt should point the agent at the fixed history path'
+  );
+  TestRunner.assert(
+    captured.prompt.includes('user_ended') && captured.prompt.includes('llm_done'),
+    'first-turn prompt should reference the mastered/escaped distinction'
+  );
+  TestRunner.assert(
+    Array.isArray(captured.options.skills) && captured.options.skills.includes('typora-socratic-review'),
+    'skills option should explicitly request the unique skill'
+  );
+});
+
+TestRunner.test('socraticChat: subsequent-turn prompt is the raw user answer (no history instruction)', async () => {
+  const { socraticChat } = require('../../../agent-bridge.js');
+  let captured = null;
+  const mockQueryFn = (req) => {
+    captured = req;
+    return (async function* () {
+      yield { type: 'result', subtype: 'success', result: '下一问？' };
+    })();
+  };
+  await socraticChat(mockQueryFn, {}, {
+    project_path: '/tmp/test',
+    concept_titles: ['A'],
+    user_answer: '我觉得是因为梯度方向',
+    session_id: 'sess-1'
+  });
+  TestRunner.assertEquals(captured.prompt, '我觉得是因为梯度方向', 'subsequent turn forwards the raw user answer');
 });
 
 // ============================================

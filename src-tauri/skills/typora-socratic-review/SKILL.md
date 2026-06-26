@@ -1,6 +1,6 @@
 ---
-name: socratic-review
-description: Conduct a Socratic dialogue to deepen understanding of a concept cluster. Use when the host prompts "请使用 socratic-review skill 进行苏格拉底复习". Returns one Socratic question per turn in markdown; end session with `[SESSION_END]` marker when the user demonstrates mastery or asks to stop.
+name: typora-socratic-review
+description: Conduct a Socratic dialogue to deepen understanding of a concept cluster. Use when the host prompts "请使用 typora-socratic-review skill 进行苏格拉底复习". Returns one Socratic question per turn in markdown; end session with `[SESSION_END]` marker when the user demonstrates mastery or asks to stop.
 ---
 
 # Socratic Review
@@ -12,7 +12,7 @@ Drive a Socratic dialogue about a concept cluster. Ask, don't lecture. Adapt to 
 Host prompt shape:
 
 ```
-请使用 socratic-review skill 进行苏格拉底复习。
+请使用 typora-socratic-review skill 进行苏格拉底复习。
 concept_titles: ["反向传播", "梯度下降", "学习率"]
 project_path: /path/to/project
 ```
@@ -63,6 +63,29 @@ You have read access to the project. Use it:
 - **Read** `{project_path}/*.concepts.json` for exact concept definitions and dependencies
 
 This lets you tailor questions to what the user has actually been exposed to, not just the abstract concept names. The project-onboarding skill (run at session start) gave you the lay of the land.
+
+## Learn from past sessions — MANDATORY on the opening turn
+
+On the **opening turn** of every session (the first turn, before you ask anything), you **MUST** read the user's past Socratic history. This is not optional, and you do not need to ask permission — the directory is fixed and you have read access.
+
+**Fixed path (relative to the project root, which is your cwd):**
+
+```
+.learning/socratic-sessions/*.json
+```
+
+Do this, in order, every opening turn:
+
+1. **Glob** `.learning/socratic-sessions/*.json`. If there are none, this is the user's first session — just open normally and skip the rest.
+2. **Read** the most recent few (filenames are ISO timestamps; newest sorts last).
+3. Each file has `concept_titles`, a `turns` array (your past questions + the user's answers), and an **`end_reason`**.
+4. **Synthesize it yourself** — don't just scan. Form a real picture of where the user is:
+   - **`end_reason: llm_done`** — the user demonstrated mastery and a past session closed cleanly. These concepts are **genuinely understood**. Do NOT re-ask the same questions. Go deeper, approach from a new angle, or probe a relationship you haven't tested.
+   - **`end_reason: user_ended`** (or any session that stopped before the user answered the core questions) — the user **bailed before mastering the concept**. "Asked once" is NOT "understood". These are your **priority targets.** Bring the user back to the exact point they didn't think through. Read what you asked last time and come at the gap from a **different direction** — do not repeat questions verbatim, but do not let the gap stand either.
+
+The point is NOT to politely avoid repetition — it's to make Socratic review **inescapable**: what the user dodged comes back; what they truly mastered does not. A concept only earns "don't repeat" status by being closed with `llm_done`. Everything left unfinished is fair game — and should be prioritized.
+
+Do this **once, at the opening** — not every turn. On subsequent turns the conversation is already in this session's context; re-reading the files each turn just adds latency.
 
 ## When to end the session
 

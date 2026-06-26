@@ -3484,6 +3484,8 @@ struct SocraticChatMessage {
 pub struct SocraticChatResponse {
     content: String,
     done: bool,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -3602,9 +3602,13 @@ window.agentBridge = {
       showToast('请先进入课程模式', 'info');
       return;
     }
-    // Use the active tab's path as project root (rough heuristic)
+    // Prefer the learning module's project root (same source the auto-trigger
+    // flow uses); fall back to the active editor tab's directory.
     const activeTab = state.tabs[state.activeTab];
-    const projectPath = activeTab?.baseDir || activeTab?.path?.replace(/[^\\/]+$/, '') || '';
+    const projectPath = window.LearningModeIntegration?.getProjectPath?.()
+      || activeTab?.baseDir
+      || activeTab?.path?.replace(/[^\\/]+$/, '')
+      || '';
     if (!projectPath) {
       showToast('请先打开一个学习项目', 'info');
       return;
@@ -3612,7 +3616,6 @@ window.agentBridge = {
     try {
       const modal = new window.SocraticModal({ projectPath });
       await modal.open();
-      showToast('Socratic 复习已打开（8a MVP: tutor 回复为 stub，真实 LLM 见 Sprint 8b）');
     } catch (e) {
       console.error('[Socratic] open failed:', e);
       showToast('打开 Socratic 失败: ' + e.message, 'error');

@@ -49,6 +49,8 @@
       this.cluster = null;
       this.concept_ids = [];
       this.concept_titles = [];
+      this.concept_edges = [];
+      this.sessionId = null;
       this.turns = [];
       this.notebookCards = [];
       this.opened = false;
@@ -59,7 +61,6 @@
       this._startedAt = null;
       this._endConfirmShown = false;
       this._sessionSaved = false;
-      this._autoEndTimer = null;
     }
 
     async open() {
@@ -74,6 +75,12 @@
         });
         this.concept_ids = (this.cluster?.concepts || []).map(c => c.id);
         this.concept_titles = (this.cluster?.concepts || []).map(c => c.title);
+        // Map edge (id, id) pairs to (title, title) pairs for the opening prompt
+        const idToTitle = {};
+        (this.cluster?.concepts || []).forEach(c => { idToTitle[c.id] = c.title; });
+        this.concept_edges = (this.cluster?.edges || [])
+          .map(e => [idToTitle[e.from], idToTitle[e.to]])
+          .filter(pair => pair[0] && pair[1]);
       } catch (e) {
         console.error('[SocraticModal] cluster select failed:', e);
         // Fallback: empty cluster, but still open (sparse KG)
@@ -161,13 +168,23 @@
       });
 
       this._card.querySelector('#socraticEndBtn').addEventListener('click', () => {
-        self._show2ndConfirm();
+        self._handleEndClick();
       });
 
       this._escHandler = (e) => {
-        if (e.key === 'Escape') self._show2ndConfirm();
+        if (e.key === 'Escape') self._handleEndClick();
       };
       document.addEventListener('keydown', this._escHandler);
+    }
+
+    /** End/close button: if the session is already done & saved, just close;
+     *  otherwise ask for confirmation before ending early. */
+    _handleEndClick() {
+      if (this._sessionSaved) {
+        this._close();
+        return;
+      }
+      this._show2ndConfirm();
     }
 
     async _handleSend() {
@@ -177,18 +194,23 @@
       this._appendUserBubble(text);
       this.turns.push({ role: 'user', content: text });
       this.notebookCards.push({ type: 'a', content: text });
-      await this._sendTutorTurn();
+      await this._sendTutorTurn(text);
     }
 
-    async _sendTutorTurn() {
+    async _sendTutorTurn(userAnswer = null) {
       // Show loading
       const loadingEl = this._appendLoadingBubble();
       try {
         const resp = await window.__TAURI__.core.invoke('socratic_chat', {
           projectPath: this.projectPath,
-          conceptTitles: this.concept_titles
+          conceptTitles: this.concept_titles,
+          conceptEdges: this.concept_edges,
+          userAnswer: userAnswer,
+          sessionId: this.sessionId
         });
         loadingEl.remove();
+        // Capture / refresh the SDK session id so subsequent turns resume it
+        if (resp.session_id) this.sessionId = resp.session_id;
         this.turns.push({ role: 'tutor', content: resp.content });
         this.notebookCards.push({ type: 'q', content: resp.content });
         this._appendTutorBubble(resp.content);
@@ -198,7 +220,7 @@
         }
       } catch (e) {
         loadingEl.remove();
-        const friendlyError = '暂时无法连接：' + (e.message || '未知错误') + '。请稍后重试。';
+        const friendlyError = '暂时无法连接：' + (e?.message || (typeof e === 'string' ? e : '') || '未知错误') + '。请稍后重试。';
         this.turns.push({ role: 'tutor', content: friendlyError });
         this.notebookCards.push({ type: 'error', content: friendlyError });
         this._appendTutorBubble(friendlyError);
@@ -255,8 +277,19 @@
     async _handleLLMDone() {
       this.showDoneCard();
       this._appendDoneCard();
-      // Wait a moment then auto-end
-      this._autoEndTimer = setTimeout(() => this.endSession('llm_done'), 1500);
+      // Persist now, but keep the modal open so the user reads at their own pace.
+      // No auto-close — the dialogue is over; the user closes when ready.
+      await this._persistSession('llm_done');
+      this._lockInput();
+    }
+
+    /** Disable input after the dialogue ends; relabel end button to "关闭" */
+    _lockInput() {
+      if (this._inputEl) this._inputEl.disabled = true;
+      const sendBtn = this._card && this._card.querySelector('#socraticSendBtn');
+      if (sendBtn) sendBtn.disabled = true;
+      const endBtn = this._card && this._card.querySelector('#socraticEndBtn');
+      if (endBtn) endBtn.textContent = '关闭';
     }
 
     _appendDoneCard() {
@@ -302,29 +335,33 @@
     /** User confirmed end after 2nd confirm */
     async confirmEnd() {
       this.confirmDialog = null;
-      // Cancel auto-end timer if user manually ends before it fires
-      if (this._autoEndTimer) {
-        clearTimeout(this._autoEndTimer);
-        this._autoEndTimer = null;
-      }
       await this.endSession('user_ended');
     }
 
-    /** End the session (saves to disk) */
+    /** End the session (saves to disk, then closes) */
     async endSession(reason) {
-      // Guard against double-save (e.g. user manual end + auto-end timer)
+      // Already persisted (e.g. llm_done) — just close.
       if (this._sessionSaved) {
         this._close();
         return;
       }
+      const ok = await this._persistSession(reason);
+      // On save failure, _persistSession shows the error and we keep the modal open.
+      if (ok) this._close();
+    }
+
+    /** Persist the session to disk + update state. Returns true on success.
+     *  Does NOT close the modal — callers decide. */
+    async _persistSession(reason) {
+      // Guard against double-save
+      if (this._sessionSaved) return true;
       this._sessionSaved = true;
 
       this.endReason = reason;
       this.showDoneCard();
 
       if (!window.__TAURI__) {
-        this._close();
-        return;
+        return true;
       }
 
       const session = {
@@ -344,10 +381,10 @@
         });
       } catch (e) {
         console.error('[SocraticModal] save_session failed:', e);
-        // Round 3: Don't auto-close on save failure — let user see the error
+        // Round 3: Don't close on save failure — let user see the error
         this.saveError = '保存失败：' + (e.message || '磁盘写入错误') + '。对话内容仍保留在内存中，可尝试再次结束。';
         this._appendTutorBubble(this.saveError);
-        return; // Don't close modal
+        return false;
       }
 
       // Update socratic-state (last_socratic_at, recent_hashes)
@@ -361,7 +398,7 @@
         }
       }
 
-      this._close();
+      return true;
     }
   }
 

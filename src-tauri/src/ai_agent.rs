@@ -2261,11 +2261,13 @@ pub async fn load_extra_questions(
 pub async fn socratic_chat(
     project_path: String,
     concept_titles: Vec<String>,
+    concept_edges: Vec<Vec<String>>,
+    user_answer: Option<String>,
     app_handle: tauri::AppHandle,
     session_id: Option<String>,
 ) -> Result<crate::SocraticChatResponse, String> {
-    log::info!("[Sprint8b] socratic_chat START: project={}, concepts={:?}, session_id={}",
-        project_path, concept_titles, session_id.as_deref().unwrap_or("(none)"));
+    log::info!("[Sprint8b] socratic_chat START: project={}, concepts={:?}, has_answer={}, session_id={}",
+        project_path, concept_titles, user_answer.is_some(), session_id.as_deref().unwrap_or("(none)"));
 
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
@@ -2281,6 +2283,8 @@ pub async fn socratic_chat(
         "args": {
             "project_path": project_path,
             "concept_titles": concept_titles,
+            "concept_edges": concept_edges,
+            "user_answer": user_answer,
             "session_id": session_id,
         }
     });
@@ -2316,14 +2320,23 @@ pub async fn socratic_chat(
         return Err(format!("Agent socratic review failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    log::info!("[Sprint8b] socratic_chat: raw_stdout={}", stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    log::info!("[Sprint8b] socratic_chat: raw_stdout={}", stdout.trim());
 
-    // Parse JSON response: { "content": "...", "done": true/false }
-    let result: crate::SocraticChatResponse = serde_json::from_str(&stdout)
-        .map_err(|e| {
-            log::error!("[Sprint8b] socratic_chat: parse failed: {} — raw: {}", e, stdout);
-            format!("Failed to parse socratic response: {}. Raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())])
+    // stdout is line-delimited JSON (see agent-bridge.js: stdout = JSON lines).
+    // When the agent makes tool calls (e.g. reading socratic-sessions history),
+    // `progress_log` event lines precede the final result object. Parse the LAST
+    // line that deserializes into a SocraticChatResponse — event lines lack the
+    // required `content` field, so they're skipped.
+    let result: crate::SocraticChatResponse = stdout
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .find_map(|l| serde_json::from_str::<crate::SocraticChatResponse>(l.trim()).ok())
+        .ok_or_else(|| {
+            log::error!("[Sprint8b] socratic_chat: no parseable result line — raw: {}", stdout.trim());
+            let trimmed = stdout.trim();
+            format!("Failed to parse socratic response. Raw: {}", &trimmed[..std::cmp::min(200, trimmed.len())])
         })?;
 
     log::info!("[Sprint8b] socratic_chat SUCCESS: content_len={}, done={}", result.content.len(), result.done);

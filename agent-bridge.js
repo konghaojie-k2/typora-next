@@ -465,7 +465,7 @@ ${prevContext}
             // Allow Write so the agent can persist the .md / .quiz.json / .concepts.json
             allowedTools: ['Read', 'Write', 'Glob', 'Grep'],
             // Discover all bundled skills (chapter-generation + project-onboarding
-            // + explanation + socratic-review live in .claude/skills/ of the project)
+            // + explanation + typora-socratic-review live in .claude/skills/ of the project)
             skills: 'all',
             // Project files are at the project root; agent uses cwd
             cwd: project_path,
@@ -642,16 +642,41 @@ ${conceptsJson}
  * @returns {Promise<{content: string, done: boolean}>}
  */
 async function socraticChat(queryFn, config, args) {
-  const { project_path, concept_titles } = args;
+  const { project_path, concept_titles, concept_edges, user_answer } = args;
 
   if (!project_path) {
     throw new Error('project_path is required for socratic review');
   }
 
-  log('info', 'Starting socratic review', { project_path, concept_titles });
+  const isFirstTurn = !user_answer;
+  log('info', 'Starting socratic review', { project_path, concept_titles, first_turn: isFirstTurn });
 
-  const socraticPrompt = `开始苏格拉底复习。当前概念簇：${concept_titles.join('、')}`;
+  let socraticPrompt;
+  if (isFirstTurn) {
+    // Opening turn: name the skill explicitly (unique name avoids collision with
+    // any global ~/.claude/skills skill) and feed the concept cluster + edge
+    // relationships. The agent reads `.learning/socratic-sessions/*.json` itself
+    // (the dir is fixed; the skill mandates it) and produces its own
+    // mastered-vs-escaped assessment — a real summary, not a mechanical list.
+    const titles = (concept_titles || []).join('、');
+    const rels = (concept_edges || [])
+      .map(pair => `${pair[0]} → ${pair[1]}`)
+      .join('；');
+    socraticPrompt =
+      `请使用 typora-socratic-review skill 进行苏格拉底复习。\n` +
+      `概念簇：${titles || '（空）'}\n` +
+      `概念关系：${rels || '（无显式关系）'}\n` +
+      `这是首轮。请严格按 skill 要求：先 Glob 并阅读 .learning/socratic-sessions/*.json（最近几份），` +
+      `自行提炼哪些概念已掌握(end_reason=llm_done)、哪些被逃避(end_reason=user_ended)，` +
+      `再围绕概念关系开场——优先把逃避的概念带回来、换角度重提，不要逐字重复旧问题。`;
+  } else {
+    // Subsequent turn: the user's answer. Prior turns are carried by the SDK
+    // session (resume via session_id).
+    socraticPrompt = user_answer;
+  }
 
+  // Capture the (possibly refreshed) SDK session id so the host can resume next turn
+  let capturedSessionId = null;
   const output = await collectAgentOutputWithRecovery(
     queryFn,
     {
@@ -660,23 +685,28 @@ async function socraticChat(queryFn, config, args) {
         cwd: project_path,
         permissionMode: 'bypassPermissions',
         allowDangerouslySkipPermissions: true,
-        skills: 'all',
+        skills: ['typora-socratic-review'],
         includePartialMessages: true,
       }
     },
-    args.session_id
+    args.session_id,
+    (msg) => { if (msg && typeof msg === 'object' && msg.session_id) capturedSessionId = msg.session_id; }
   );
 
   if (!output || output.trim().length === 0) {
     throw new Error('Agent returned empty socratic response');
   }
 
-  // Check for session end marker injected by skill rules
-  const done = output.includes('[SESSION_END]');
+  // Check for session end marker injected by skill rules. The opening turn must
+  // never end the session — mastery can't be demonstrated before the user has
+  // answered anything, yet some models append [SESSION_END] prematurely. Ignore
+  // the marker on the first turn.
+  const done = !isFirstTurn && output.includes('[SESSION_END]');
   const content = output.replace(/\[SESSION_END\]/g, '').trim();
 
-  log('info', 'Socratic review turn complete', { done, content_length: content.length });
-  return { content, done };
+  const session_id = capturedSessionId || args.session_id || null;
+  log('info', 'Socratic review turn complete', { done, content_length: content.length, has_session: !!session_id });
+  return { content, done, session_id };
 }
 
 /**
