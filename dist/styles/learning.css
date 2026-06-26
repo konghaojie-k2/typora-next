@@ -1778,7 +1778,9 @@ body.learning-mode .toolbar {
 }
 
 .review-btn-primary:hover {
-  opacity: 0.9;
+  background: linear-gradient(135deg, var(--color-accent-hover), var(--color-accent));
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
 }
 
 .review-progress {
@@ -3820,7 +3822,9 @@ body.learning-mode .toolbar {
 }
 
 .review-btn-primary:hover {
-  opacity: 0.9;
+  background: linear-gradient(135deg, var(--color-accent-hover), var(--color-accent));
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
 }
 
 .review-progress {
@@ -5862,7 +5866,9 @@ body.learning-mode .toolbar {
 }
 
 .review-btn-primary:hover {
-  opacity: 0.9;
+  background: linear-gradient(135deg, var(--color-accent-hover), var(--color-accent));
+  box-shadow: 0 6px 18px rgba(59, 130, 246, 0.35);
+  transform: translateY(-1px);
 }
 
 .review-progress {
