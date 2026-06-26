@@ -89,15 +89,13 @@
       const hasNextConcept = this.currentIndex < this.items.length - 1;
 
       // Disable all option buttons
-      const optionBtns = this._card.querySelectorAll('.quiz-option-btn');
+      const optionBtns = this._card.querySelectorAll('.review-option-btn');
       optionBtns.forEach((btn, idx) => {
         btn.style.pointerEvents = 'none';
         if (idx === question.answer) {
-          btn.style.borderColor = '#10b981';
-          btn.style.background = 'rgba(16,185,129,0.15)';
+          btn.classList.add('correct');
         } else if (idx === selectedIdx && !isCorrect) {
-          btn.style.borderColor = '#ef4444';
-          btn.style.background = 'rgba(239,68,68,0.15)';
+          btn.classList.add('wrong');
         }
       });
 
@@ -105,15 +103,15 @@
       const feedbackArea = this._card.querySelector('#reviewFeedbackArea');
       if (feedbackArea) {
         if (isCorrect) {
-          feedbackArea.innerHTML = `<div style="color:#10b981;font-weight:600;font-size:14px;">✅ 回答正确</div>`;
+          feedbackArea.innerHTML = `<div class="review-feedback-correct">✅ 回答正确</div>`;
         } else {
           // Wrong: show key_points
           const kps = (conceptCard && conceptCard.key_points) || [];
-          let kpHtml = '<div style="color:#ef4444;font-weight:600;font-size:14px;margin-bottom:8px;">❌ 回答错误，以下是你需要的重点：</div>';
+          let kpHtml = '<div class="review-feedback-wrong-title">❌ 回答错误，以下是你需要的重点：</div>';
           if (kps.length > 0) {
-            kpHtml += kps.map(kp => `<div style="margin-bottom:4px;padding:6px 10px;background:rgba(239,68,68,0.08);border-radius:6px;color:#e2e8f0;font-size:13px;">• ${kp}</div>`).join('');
+            kpHtml += kps.map(kp => `<div class="review-key-point">• ${kp}</div>`).join('');
           } else {
-            kpHtml += '<div style="color:#64748b;font-style:italic;font-size:13px;">（暂无重点提炼）</div>';
+            kpHtml += '<div class="review-feedback-empty">（暂无重点提炼）</div>';
           }
           feedbackArea.innerHTML = kpHtml;
         }
@@ -248,26 +246,9 @@
     _createDOM() {
       const overlay = document.createElement('div');
       overlay.className = 'review-modal-overlay';
-      overlay.style.cssText = `
-        position: fixed; inset: 0;
-        background: rgba(15,23,42,0.75);
-        backdrop-filter: blur(8px);
-        display: flex; align-items: center; justify-content: center;
-        z-index: 10000;
-        animation: fadeIn 0.3s ease;
-      `;
 
       const card = document.createElement('div');
       card.className = 'review-modal-card';
-      card.style.cssText = `
-        width: 560px; max-height: 85vh; overflow-y: auto;
-        background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
-        border: 1px solid rgba(129,140,248,0.25);
-        border-radius: 20px;
-        box-shadow: 0 25px 80px rgba(0,0,0,0.5);
-        padding: 32px;
-        animation: cardIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
-      `;
 
       this._renderDueFoundState(card);
 
@@ -295,39 +276,38 @@
       const estimatedMinutes = Math.max(3, conceptCount * 2);
 
       card.innerHTML = `
-        <div style="display:flex;align-items:center;gap:14px;margin-bottom:24px;">
-          <div style="width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#818cf8,#a78bfa);display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 8px 20px rgba(129,140,248,0.3);">🧠</div>
+        <div class="review-modal-header">
+          <div class="review-modal-icon">🧠</div>
           <div>
-            <div style="font-size:20px;font-weight:700;color:#f8fafc;">今日复习</div>
-            <div style="font-size:13px;color:#94a3b8;margin-top:2px;">根据遗忘曲线，今天有 ${conceptCount} 项内容需要回顾</div>
+            <div class="review-modal-title">今日复习</div>
+            <div class="review-modal-subtitle">根据遗忘曲线，今天有 ${conceptCount} 项内容需要回顾</div>
           </div>
         </div>
 
-        <div style="display:flex;gap:12px;margin-bottom:24px;">
-          <div style="flex:1;padding:12px 16px;background:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.06);text-align:center;">
-            <div style="font-size:22px;font-weight:700;color:#f59e0b;">${conceptCount}</div>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">薄弱概念</div>
+        <div class="review-modal-stats">
+          <div class="review-modal-stat">
+            <div class="review-modal-stat-value warning">${conceptCount}</div>
+            <div class="review-modal-stat-label">薄弱概念</div>
           </div>
-          <div style="flex:1;padding:12px 16px;background:rgba(255,255,255,0.04);border-radius:12px;border:1px solid rgba(255,255,255,0.06);text-align:center;">
-            <div style="font-size:22px;font-weight:700;color:#10b981;">${estimatedMinutes}</div>
-            <div style="font-size:12px;color:#64748b;margin-top:4px;">预计分钟</div>
+          <div class="review-modal-stat">
+            <div class="review-modal-stat-value success">${estimatedMinutes}</div>
+            <div class="review-modal-stat-label">预计分钟</div>
           </div>
         </div>
 
-        <div style="font-size:13px;font-weight:600;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:12px;">💡 薄弱概念</div>
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:20px;">
+        <div class="review-modal-section-title">💡 薄弱概念</div>
+        <div class="review-concept-list">
           ${dueConcepts.map(item => `
-            <div style="padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.02);position:relative;overflow:hidden;">
-              <div style="position:absolute;left:0;top:0;bottom:0;width:3px;background:${item.last_rating === 'struggling' ? '#ef4444' : '#f59e0b'};"></div>
-              <div style="font-size:14px;font-weight:600;color:#f1f5f9;padding-left:8px;">${item.concept}</div>
-              <div style="font-size:11px;color:#64748b;margin-top:4px;padding-left:8px;">来源：${item.source_chapter || '未知'}</div>
+            <div class="review-concept-item ${item.last_rating === 'struggling' ? 'struggling' : ''}">
+              <div class="review-concept-name">${item.concept}</div>
+              <div class="review-concept-source">来源：${item.source_chapter || '未知'}</div>
             </div>
           `).join('')}
         </div>
 
-        <div style="display:flex;gap:12px;">
-          <button id="reviewStartBtn" style="flex:1;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#818cf8,#a78bfa);color:white;box-shadow:0 4px 14px rgba(129,140,248,0.3);">开始复习</button>
-          <button id="reviewPostponeBtn" style="flex:1;padding:12px 20px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.06);color:#94a3b8;">稍后提醒</button>
+        <div class="review-modal-actions">
+          <button id="reviewStartBtn" class="review-btn review-btn-primary">开始复习</button>
+          <button id="reviewPostponeBtn" class="review-btn">稍后提醒</button>
         </div>
       `;
 
@@ -378,54 +358,41 @@
       const totalQ = quizQuestions.length;
 
       this._card.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-          <div style="font-size:16px;font-weight:700;color:#f8fafc;">🧠 复习测验</div>
-          <div style="font-size:13px;color:#64748b;">${progress}</div>
+        <div class="review-progress">
+          <div class="review-progress-title">🧠 复习测验</div>
+          <div class="review-progress-count">${progress}</div>
         </div>
 
-        <div style="background:rgba(129,140,248,0.08);border:1px solid rgba(129,140,248,0.2);border-radius:14px;padding:20px;margin-bottom:20px;">
-          <div style="font-size:18px;font-weight:700;color:#f8fafc;margin-bottom:4px;">${item.concept}</div>
-          <div style="font-size:12px;color:#94a3b8;">测验 ${qIdx + 1}/${totalQ}</div>
+        <div class="review-concept-header">
+          <div class="review-concept-title">${item.concept}</div>
+          <div class="review-concept-meta">测验 ${qIdx + 1}/${totalQ}</div>
         </div>
 
-        <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:16px;margin-bottom:16px;">
-          <div style="font-size:15px;color:#f1f5f9;line-height:1.6;font-weight:500;">${question.question}</div>
+        <div class="review-question-box">
+          <div class="review-question-text">${question.question}</div>
         </div>
 
-        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:16px;">
+        <div class="review-options">
           ${question.options.map((opt, oi) => `
-            <button class="quiz-option-btn" data-opt-index="${oi}" style="width:100%;padding:12px 16px;border-radius:10px;font-size:14px;cursor:pointer;text-align:left;border:1px solid rgba(255,255,255,0.1);background:rgba(255,255,255,0.04);color:#e2e8f0;transition:all 0.2s;">
+            <button class="review-option-btn" data-opt-index="${oi}">
               ${String.fromCharCode(65 + oi)}. ${opt}
             </button>
           `).join('')}
         </div>
 
-        <div id="reviewFeedbackArea" style="display:none;margin-bottom:16px;"></div>
+        <div id="reviewFeedbackArea" class="review-feedback"></div>
 
-        <button id="reviewNextBtn" style="display:none;width:100%;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#818cf8,#a78bfa);color:white;">下一题 →</button>
+        <button id="reviewNextBtn" class="review-next-btn">下一题 →</button>
 
-        <button id="reviewSkipBtn" style="width:100%;margin-top:10px;padding:10px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#64748b;">跳过，稍后提醒</button>
+        <button id="reviewSkipBtn" class="review-skip-btn">跳过，稍后提醒</button>
       `;
 
       // Bind option buttons
-      const optBtns = this._card.querySelectorAll('.quiz-option-btn');
+      const optBtns = this._card.querySelectorAll('.review-option-btn');
       optBtns.forEach(btn => {
         btn.addEventListener('click', () => {
           const idx = parseInt(btn.dataset.optIndex, 10);
           this.handleQuizAnswer(idx, question);
-        });
-        // Hover effect
-        btn.addEventListener('mouseenter', () => {
-          if (btn.style.pointerEvents !== 'none') {
-            btn.style.borderColor = 'rgba(129,140,248,0.5)';
-            btn.style.background = 'rgba(129,140,248,0.08)';
-          }
-        });
-        btn.addEventListener('mouseleave', () => {
-          if (btn.style.pointerEvents !== 'none') {
-            btn.style.borderColor = 'rgba(255,255,255,0.1)';
-            btn.style.background = 'rgba(255,255,255,0.04)';
-          }
         });
       });
 
@@ -449,38 +416,38 @@
       const prompt = conceptCard.prompt || `请回忆：${item.concept} 是什么？它的核心要点有哪些？`;
 
       this._card.innerHTML = `
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
-          <div style="font-size:16px;font-weight:700;color:#f8fafc;">🧠 复习中</div>
-          <div style="font-size:13px;color:#64748b;">${progress}</div>
+        <div class="review-progress">
+          <div class="review-progress-title">🧠 复习中</div>
+          <div class="review-progress-count">${progress}</div>
         </div>
 
-        <div style="background:rgba(129,140,248,0.08);border:1px solid rgba(129,140,248,0.2);border-radius:14px;padding:20px;margin-bottom:20px;">
-          <div style="font-size:18px;font-weight:700;color:#f8fafc;margin-bottom:8px;">${item.concept}</div>
-          <div style="font-size:13px;color:#94a3b8;">来源：${item.source_chapter || '未知'}</div>
+        <div class="review-concept-header">
+          <div class="review-concept-title">${item.concept}</div>
+          <div class="review-concept-meta">来源：${item.source_chapter || '未知'}</div>
         </div>
 
-        <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:16px;margin-bottom:16px;">
-          <div style="font-size:13px;color:#64748b;margin-bottom:6px;font-weight:600;">💡 回忆提示</div>
-          <div style="font-size:15px;color:#f1f5f9;line-height:1.6;">${prompt}</div>
+        <div class="review-question-box">
+          <div class="review-modal-section-title">💡 回忆提示</div>
+          <div class="review-question-text">${prompt}</div>
         </div>
 
-        <div id="reviewAnswerArea" style="display:none;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.2);border-radius:12px;padding:16px;margin-bottom:16px;">
-          <div style="font-size:13px;color:#10b981;margin-bottom:6px;font-weight:600;">📖 参考答案</div>
-          <div id="reviewKeyPoints" style="font-size:14px;color:#e2e8f0;line-height:1.6;"></div>
+        <div id="reviewAnswerArea" class="review-answer-area">
+          <div class="review-answer-title">📖 参考答案</div>
+          <div id="reviewKeyPoints" class="review-answer-content"></div>
         </div>
 
-        <button id="reviewShowAnswerBtn" style="width:100%;padding:10px;border-radius:10px;font-size:13px;font-weight:600;cursor:pointer;border:1px solid rgba(129,140,248,0.3);background:rgba(129,140,248,0.1);color:#818cf8;margin-bottom:16px;">👁 显示答案</button>
+        <button id="reviewShowAnswerBtn" class="review-show-answer-btn">👁 显示答案</button>
 
-        <div id="reviewRatingArea" style="display:none;">
-          <div style="font-size:13px;color:#94a3b8;margin-bottom:12px;text-align:center;">看完答案后，你掌握得怎么样？</div>
-          <div style="display:flex;gap:10px;">
-            <button id="reviewMasteredBtn" style="flex:1;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#10b981,#059669);color:white;">✓ 完全掌握</button>
-            <button id="reviewFuzzyBtn" style="flex:1;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#f59e0b,#d97706);color:white;">～ 有点模糊</button>
-            <button id="reviewStrugglingBtn" style="flex:1;padding:12px;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;border:none;background:linear-gradient(135deg,#ef4444,#dc2626);color:white;">✗ 完全忘了</button>
+        <div id="reviewRatingArea" class="review-rating-area">
+          <div class="review-rating-hint">看完答案后，你掌握得怎么样？</div>
+          <div class="review-rating-buttons">
+            <button id="reviewMasteredBtn" class="review-rating-btn mastered">✓ 完全掌握</button>
+            <button id="reviewFuzzyBtn" class="review-rating-btn learning">～ 有点模糊</button>
+            <button id="reviewStrugglingBtn" class="review-rating-btn struggling">✗ 完全忘了</button>
           </div>
         </div>
 
-        <button id="reviewSkipBtn" style="width:100%;margin-top:10px;padding:10px;border-radius:8px;font-size:12px;font-weight:500;cursor:pointer;border:1px solid rgba(255,255,255,0.08);background:transparent;color:#64748b;">跳过，稍后提醒</button>
+        <button id="reviewSkipBtn" class="review-skip-btn">跳过，稍后提醒</button>
       `;
 
       const showAnswerBtn = this._card.querySelector('#reviewShowAnswerBtn');
@@ -500,7 +467,7 @@
           if (kps.length > 0) {
             keyPointsEl.innerHTML = kps.map(kp => `<div style="margin-bottom:4px;">• ${kp}</div>`).join('');
           } else {
-            keyPointsEl.innerHTML = '<div style="color:#64748b;font-style:italic;">（暂无详细要点）</div>';
+            keyPointsEl.innerHTML = '<div class="review-feedback-empty">（暂无详细要点）</div>';
           }
           ratingArea.style.display = 'block';
         });
