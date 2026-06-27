@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.2.1] - 2026-06-27
+
+### Features — 复习系统最终验收
+
+- **项目级复习入口**：复习入口从章节 sidebar 移到项目知识图谱 Dashboard action 区，与苏格拉底同为全局学习入口
+- **手动触发 + loading 过渡**：取消进入项目时的自动弹窗；点击"🧠 今日复习"后关闭 Dashboard 并显示全屏 loading，卡片生成完成后再显示复习弹窗
+- **按需批量生成**：只生成今天到期且缺失 cards 的 concepts，通过一次 agent 调用（`review-gen-batch`）完成
+- **复习卡片 Agent 读取**：生成复习卡片时不再把章节内容直接拼进 prompt，改由 agent 使用 Read 工具读取章节文件
+
+### Fixes
+
+- 修复删除旧 review card 后仍显示占位内容的问题
+- 修复 `review-gen` / `review-gen-batch` stdout 被 `progress_log` 事件行污染导致 Rust 解析失败并 fallback 为占位 stub 的问题
+- 修复前端 `checkAndShowDailyReview` 并发触发导致后台多次调用 agent 的问题
+- 修复 `now_local_string()` 实际返回 UTC 的时区 bug，统一使用本地时间判断复习到期（兼容旧 UTC schedule 数据）
+- 修复手动打开知识图谱 Dashboard 时"今日复习"按钮无反应的问题
+
+### Infrastructure
+
+- 添加 `chrono` 依赖用于本地时间处理
+- 更新 `docs/review-flow.mmd` 流程图
+
 ## [0.2.0] - 2026-06-04
 
 ### Features — AI 学习设计师（3 个 Sprint）
