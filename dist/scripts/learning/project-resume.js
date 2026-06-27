@@ -323,6 +323,19 @@
       const graph = await kgm.loadGraph();
       console.log('[ProjectDashboard] Graph loaded:', graph ? graph.nodes.length + ' nodes' : 'null');
 
+      // Get today's due review count (project-level)
+      let dueCount = 0;
+      try {
+        if (window.ReviewScheduler) {
+          const scheduler = new window.ReviewScheduler();
+          const dueItems = await scheduler.getDueItems(basePath);
+          dueCount = (dueItems || []).length;
+          console.log('[ProjectDashboard] due review items:', dueCount);
+        }
+      } catch (e) {
+        console.warn('[ProjectDashboard] failed to get due items:', e);
+      }
+
       // Knowledge graph nodes already carry node_status. No merge needed.
       let mergedGraph = graph;
       let stats = null;
@@ -349,13 +362,22 @@
           },
           onClose: () => {
             resolve();
+          },
+          onReview: () => {
+            dashboard.close();
+            if (window.LearningModeIntegration && window.LearningModeIntegration.checkAndShowDailyReview) {
+              window.LearningModeIntegration.checkAndShowDailyReview(basePath);
+            } else {
+              console.warn('[ProjectDashboard] LearningModeIntegration not ready');
+            }
           }
         });
         dashboard.show({
           graph: mergedGraph,
           stats,
           chapters,
-          projectName: (project && project.name) || '学习项目'
+          projectName: (project && project.name) || '学习项目',
+          dueCount
         });
       });
     } catch (e) {
@@ -634,14 +656,34 @@
               title: ch.title || '第' + (i + 1) + '章',
               status: (ch.file && chaptersStatus[ch.file]) || 'not_generated'
             }));
+
+            // Compute today's due review count for project-level entry
+            let dueCount = 0;
+            try {
+              if (window.ReviewScheduler) {
+                const scheduler = new window.ReviewScheduler();
+                const dueItems = await scheduler.getDueItems(basePath);
+                dueCount = (dueItems || []).length;
+              }
+            } catch (e) {
+              console.warn('[ProjectResume] failed to get due items for dashboard:', e);
+            }
+
             const dashboard = new window.KnowledgeGraphDashboard({
-              onClose: () => dashboard.close()
+              onClose: () => dashboard.close(),
+              onReview: () => {
+                dashboard.close();
+                if (window.LearningModeIntegration && window.LearningModeIntegration.checkAndShowDailyReview) {
+                  window.LearningModeIntegration.checkAndShowDailyReview(basePath);
+                }
+              }
             });
             dashboard.show({
               graph: mergedGraph,
               stats,
               chapters,
-              projectName: (project && project.name) || '学习项目'
+              projectName: (project && project.name) || '学习项目',
+              dueCount
             });
           } catch (e) {
             console.error('[ProjectResume] KG open error:', e);

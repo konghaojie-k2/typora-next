@@ -14,11 +14,13 @@ The host's prompt will look like:
 ```
 请使用 review-generation skill 为以下章节生成复习卡片。
 - chapter_file: "01-diffusion-model.md"
-- concepts: ["扩散模型的马尔可夫链", "噪声调度", "反向去噪"]
-- weak_concepts: ["扩散模型的马尔可夫链"]
+- concepts: [{"id":"diffusion-markov","name":"扩散模型的马尔可夫链"},{"id":"noise-schedule","name":"噪声调度"},{"id":"reverse-denoising","name":"反向去噪"}]
+- weak_concepts: ["diffusion-markov"]
+
+请使用 Read 工具读取项目根目录下的 01-diffusion-model.md 获取章节内容，然后为每个 concept 生成复习卡片。
 ```
 
-The host will include the chapter content (or a substantial excerpt) in the prompt. Skill's job is generated structured JSON output.
+The host will provide the chapter file path and concept list. Use the Read tool to fetch chapter content from the project directory. Skill's job is to generate structured JSON output.
 
 ## Output Format
 

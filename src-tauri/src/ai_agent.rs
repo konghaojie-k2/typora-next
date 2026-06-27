@@ -2403,17 +2403,102 @@ pub async fn generate_review_content_agent(
         return Err(format!("Agent review generation failed: {}", stderr));
     }
 
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    log::info!("[PB1] review-gen: raw_stdout={}", &stdout[..std::cmp::min(500, stdout.len())]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    log::info!("[PB1] review-gen: raw_stdout={}", stdout.trim());
 
-    // Parse JSON response: { cards: { ... } }
-    let result: serde_json::Value = serde_json::from_str(&stdout)
-        .map_err(|e| {
-            log::error!("[PB1] review-gen: parse failed: {} — raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())]);
-            format!("Failed to parse review-gen response: {}. Raw: {}", e, &stdout[..std::cmp::min(200, stdout.len())])
+    // stdout is line-delimited JSON. progress_log event lines precede the
+    // final result object, so parse the LAST line that contains a "cards" field.
+    let result: serde_json::Value = stdout
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .find_map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
+            if v.get("cards").is_some() { Some(v) } else { None }
+        })
+        .ok_or_else(|| {
+            log::error!("[PB1] review-gen: no parseable cards line — raw: {}", stdout.trim());
+            format!("Failed to parse review-gen response: no valid cards object. Raw: {}", &stdout.trim()[..std::cmp::min(200, stdout.trim().len())])
         })?;
 
     log::info!("[PB1] review-gen SUCCESS: card_count={}", result.get("cards").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0));
+    Ok(result)
+}
+
+/// PB1 Batch: Generate review cards for multiple concepts across chapters in one agent call.
+/// Uses agent-bridge "review-gen-batch" stage.
+pub async fn generate_review_content_batch_agent(
+    project_path: String,
+    concepts: Vec<serde_json::Value>,
+    app_handle: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<serde_json::Value, String> {
+    log::info!("[PB1-Batch] generate_review_content_batch_agent START: project={}, concepts={}",
+        project_path, concepts.len());
+
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let bridge_path = get_agent_bridge_path()?;
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "concepts": concepts,
+            "session_id": session_id,
+        }
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("review-gen-batch")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    log::info!("[PB1-Batch] review-gen-batch: spawning node process...");
+    let output = cmd.output()
+        .map_err(|e| {
+            log::error!("[PB1-Batch] review-gen-batch: spawn failed: {}", e);
+            format!("Failed to spawn agent-bridge: {}", e)
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::error!("[PB1-Batch] review-gen-batch: agent failed: stderr={}", stderr);
+        return Err(format!("Agent review generation failed: {}", stderr));
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    log::info!("[PB1-Batch] review-gen-batch: raw_stdout={}", stdout.trim());
+
+    // stdout is line-delimited JSON. progress_log event lines precede the
+    // final result object, so parse the LAST line that contains a "cards" field.
+    let result: serde_json::Value = stdout
+        .lines()
+        .rev()
+        .filter(|l| !l.trim().is_empty())
+        .find_map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
+            if v.get("cards").is_some() { Some(v) } else { None }
+        })
+        .ok_or_else(|| {
+            log::error!("[PB1-Batch] review-gen-batch: no parseable cards line — raw: {}", stdout.trim());
+            format!("Failed to parse review-gen-batch response: no valid cards object. Raw: {}", &stdout.trim()[..std::cmp::min(200, stdout.trim().len())])
+        })?;
+
+    log::info!("[PB1-Batch] review-gen-batch SUCCESS: card_count={}", result.get("cards").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0));
     Ok(result)
 }
 

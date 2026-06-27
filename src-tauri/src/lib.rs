@@ -2414,6 +2414,156 @@ async fn generate_review_content(
     Ok(serde_json::json!({ "success": true, "cards_count": added_count }))
 }
 
+/// PB1 Batch: Generate review cards for multiple concepts across chapters in one agent call.
+/// Each concept must have an `id`, `name`, and `source_chapter`. The agent reads the
+/// relevant chapter files and returns cards for all concepts in a single JSON object.
+#[tauri::command]
+async fn generate_review_content_batch(
+    project_path: String,
+    concepts: Vec<serde_json::Value>,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    log::info!("[PB1-Batch] generate_review_content_batch START: project={}, concepts={}",
+        project_path, concepts.len());
+
+    if concepts.is_empty() {
+        return Ok(serde_json::json!({ "success": true, "cards_count": 0 }));
+    }
+
+    let _ = ai_agent::copy_bundled_skills_to_project(&project_path);
+
+    let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
+    std::fs::create_dir_all(&learning_dir)
+        .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
+
+    // Read existing review-cards.json (create if not exists)
+    let cards_path = learning_dir.join("review-cards.json");
+    let mut cards: serde_json::Value = if cards_path.exists() {
+        let content = std::fs::read_to_string(&cards_path)
+            .map_err(|e| format!("读取 review-cards.json 失败: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({ "version": "1.0", "cards": {} })
+        })
+    } else {
+        serde_json::json!({ "version": "1.0", "cards": {} })
+    };
+
+    if !cards.get("cards").and_then(|v| v.as_object()).is_some() {
+        cards["cards"] = serde_json::json!({});
+    }
+
+    // Filter to concepts that don't already have a card
+    let existing_ids: std::collections::HashSet<String> = cards["cards"].as_object()
+        .map(|o| o.keys().cloned().collect())
+        .unwrap_or_default();
+
+    let new_concepts: Vec<serde_json::Value> = concepts.into_iter()
+        .filter(|c| {
+            let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
+            !cid.is_empty() && !existing_ids.contains(cid)
+        })
+        .collect();
+
+    if new_concepts.is_empty() {
+        return Ok(serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }));
+    }
+
+    // Call agent-bridge review-gen-batch
+    let agent_result = ai_agent::generate_review_content_batch_agent(
+        project_path.clone(),
+        new_concepts.clone(),
+        app_handle,
+        None,
+    ).await;
+
+    let now = now_local_string();
+    let mut added_count = 0u32;
+
+    match agent_result {
+        Ok(agent_cards) => {
+            if let Some(returned_cards) = agent_cards.get("cards").and_then(|v| v.as_object()) {
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                for (cid, card_value) in returned_cards {
+                    if !cards_obj.contains_key(cid) {
+                        let mut card = card_value.clone();
+                        if card.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                            card["generated_at"] = serde_json::json!(now);
+                        }
+                        cards_obj.insert(cid.clone(), card);
+                        added_count += 1;
+                    }
+                }
+            }
+
+            // Fill any concepts the agent skipped with stub content
+            for c in &new_concepts {
+                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if cid.is_empty() { continue; }
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) { continue; }
+                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let source = c.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                cards_obj.insert(cid.clone(), serde_json::json!({
+                    "concept_name": cname,
+                    "source_chapter": source,
+                    "quiz_questions": [
+                        {
+                            "type": "choice",
+                            "question": format!("{} 的核心思想是什么？", cname),
+                            "options": ["尚未生成（Agent不可用）", "请重试生成", "待Agent补充", "待定"],
+                            "answer": 0
+                        }
+                    ],
+                    "key_points": [
+                        format!("{} 是本章的核心概念（Agent不可用，此为临时内容）", cname),
+                        format!("{} 的理解对掌握后续内容很重要", cname)
+                    ],
+                    "generated_at": now,
+                    "from_weak": c.get("weak").and_then(|v| v.as_bool()).unwrap_or(false)
+                }));
+                added_count += 1;
+            }
+        }
+        Err(e) => {
+            log::warn!("[PB1-Batch] Agent review generation failed, using stub: {}", e);
+            for c in &new_concepts {
+                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                if cid.is_empty() { continue; }
+                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) { continue; }
+                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let source = c.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                cards_obj.insert(cid.clone(), serde_json::json!({
+                    "concept_name": cname,
+                    "source_chapter": source,
+                    "quiz_questions": [
+                        {
+                            "type": "choice",
+                            "question": format!("{} 的核心思想是什么？", cname),
+                            "options": ["尚未生成（Agent不可用）", "请重试生成", "待Agent补充", "待定"],
+                            "answer": 0
+                        }
+                    ],
+                    "key_points": [
+                        format!("{} 是本章的核心概念（Agent不可用，此为临时内容）", cname),
+                        format!("{} 的理解对掌握后续内容很重要", cname)
+                    ],
+                    "generated_at": now,
+                    "from_weak": c.get("weak").and_then(|v| v.as_bool()).unwrap_or(false)
+                }));
+                added_count += 1;
+            }
+        }
+    }
+
+    let json_str = serde_json::to_string_pretty(&cards)
+        .map_err(|e| format!("序列化 review-cards.json 失败: {}", e))?;
+    std::fs::write(&cards_path, json_str)
+        .map_err(|e| format!("写入 review-cards.json 失败: {}", e))?;
+
+    Ok(serde_json::json!({ "success": true, "cards_count": added_count }))
+}
+
 /// PB5: Check for concepts that are missing from review-cards.json.
 /// Scans project.json for completed chapters, then checks review-cards.json
 /// for each concept. Returns the list of missing concepts grouped by chapter.
@@ -2797,20 +2947,6 @@ struct ReviewSchedule {
     items: Vec<ReviewItem>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReviewCard {
-    concept: String,
-    prompt: String,
-    key_points: Vec<String>,
-    hint: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ReviewCards {
-    version: String,
-    items: Vec<ReviewCard>,
-}
-
 fn read_review_schedule(project_path: &str) -> Result<ReviewSchedule, String> {
     let path = std::path::PathBuf::from(project_path).join(".learning").join("review-schedule.json");
     if !path.exists() {
@@ -2839,18 +2975,7 @@ fn write_review_schedule(project_path: &str, schedule: &ReviewSchedule) -> Resul
 }
 
 fn now_local_string() -> String {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
-    let days = now / 86400;
-    let secs = (now % 86400) as u32;
-    let hour = secs / 3600;
-    let minute = (secs % 3600) / 60;
-    let second = secs % 60;
-
-    let (year, month, day) = days_to_ymd(days);
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, minute, second)
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
@@ -2923,7 +3048,21 @@ fn compute_next_interval(review_count: u32, rating: &str) -> u32 {
 }
 
 fn is_due(next_review_at: &str) -> bool {
-    next_review_at <= now_local_string().as_str()
+    // New data is written in local time; compare directly.
+    if next_review_at <= now_local_string().as_str() {
+        return true;
+    }
+    // Backward compatibility: previously review-schedule.json stored UTC
+    // timestamps. If parsing next_review_at as UTC yields a local time that
+    // is already past, treat it as due so legacy schedules don't get stuck.
+    if let Ok(utc_dt) = chrono::NaiveDateTime::parse_from_str(next_review_at, "%Y-%m-%d %H:%M:%S") {
+        let local_from_utc: chrono::DateTime<chrono::Local> =
+            chrono::TimeZone::from_utc_datetime(&chrono::Local, &utc_dt);
+        if local_from_utc.format("%Y-%m-%d %H:%M:%S").to_string() <= now_local_string() {
+            return true;
+        }
+    }
+    false
 }
 
 /// Get review items that are due today
@@ -3123,162 +3262,6 @@ async fn postpone_review_item(project_path: String, concept: String) -> Result<(
 
     write_review_schedule(&project_path, &schedule)?;
     Ok(())
-}
-
-fn generate_schedule_from_project(project_path: &str) -> Result<ReviewSchedule, String> {
-    // Read project.json for concepts
-    let project_json_path = std::path::PathBuf::from(project_path).join(".learning").join("project.json");
-    if !project_json_path.exists() {
-        return Ok(ReviewSchedule { version: "1.0".to_string(), items: vec![] });
-    }
-    let project_content = std::fs::read_to_string(&project_json_path)
-        .map_err(|e| format!("读取 project.json 失败: {}", e))?;
-    let project: serde_json::Value = serde_json::from_str(&project_content)
-        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
-
-    // Read quiz-history.json for review counts
-    let quiz_path = std::path::PathBuf::from(project_path).join(".learning").join("quiz-history.json");
-    let quiz_history: serde_json::Value = if quiz_path.exists() {
-        let content = std::fs::read_to_string(&quiz_path)
-            .map_err(|e| format!("读取 quiz-history.json 失败: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("解析 quiz-history.json 失败: {}", e))?
-    } else {
-        serde_json::json!({ "entries": [] })
-    };
-
-    // Read knowledge-graph.json for node_status (current concept mastery)
-    let graph_path = std::path::PathBuf::from(project_path).join(".learning").join("knowledge-graph.json");
-    let mut status_by_id: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    if graph_path.exists() {
-        if let Ok(content) = std::fs::read_to_string(&graph_path) {
-            if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
-                if let Some(arr) = parsed.get("nodes").and_then(|v| v.as_array()) {
-                    for n in arr {
-                        if let (Some(id), Some(status)) = (
-                            n.get("id").and_then(|v| v.as_str()),
-                            n.get("node_status").and_then(|v| v.as_str())
-                        ) {
-                            status_by_id.insert(id.to_string(), status.to_string());
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    let mut items = vec![];
-    // Iterate chapters[].concepts[] (new schema: {id, name} only) to build review items
-    if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
-        for ch in chapters {
-            let source_chapter = ch.get("file")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            if source_chapter.is_empty() {
-                continue;
-            }
-            let Some(concepts_arr) = ch.get("concepts").and_then(|v| v.as_array()) else {
-                continue;
-            };
-
-            // Count matching quiz entries
-            let entries = quiz_history.get("entries")
-                .and_then(|v| v.as_array())
-                .unwrap_or(&vec![])
-                .clone();
-            let chapter_entries: Vec<_> = entries.iter()
-                .filter(|e| {
-                    let cf = e.get("chapter_file").and_then(|v| v.as_str()).unwrap_or("");
-                    cf == source_chapter || source_chapter.ends_with(cf) || cf.ends_with(&source_chapter)
-                })
-                .collect();
-            // Quiz entries are not review records — only use them for last_rating
-            // review_count should start from 0 (new concept) or 1 (just quizzed)
-            let review_count = if chapter_entries.is_empty() { 0u32 } else { 1u32 };
-            let last_entry_ts = chapter_entries.last()
-                .and_then(|e| e.get("timestamp").and_then(|v| v.as_str()))
-                .map(|s| s.to_string());
-
-            for concept_item in concepts_arr {
-                // New schema: {id, name} only. Status comes from knowledge-graph.json.
-                let parsed: Option<(String, String)> = if let Some(s) = concept_item.as_str() {
-                    Some((s.to_string(), s.to_string()))
-                } else if let Some(obj) = concept_item.as_object() {
-                    let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let name = obj.get("name").and_then(|v| v.as_str()).unwrap_or(&id).to_string();
-                    if id.is_empty() { None } else { Some((id, name)) }
-                } else {
-                    None
-                };
-                let (concept_id, _concept_name) = match parsed {
-                    Some(t) => t,
-                    None => continue,
-                };
-                // Look up current mastery status from knowledge-graph.json
-                let status = status_by_id.get(&concept_id)
-                    .cloned()
-                    .unwrap_or_else(|| "learning".to_string());
-
-                let last_rating = if let Some(last) = chapter_entries.last() {
-                    last.get("rating").and_then(|v| v.as_str()).unwrap_or(&status).to_string()
-                } else {
-                    status.clone()
-                };
-
-                let next_review_at = if let Some(ref ts) = last_entry_ts {
-                    let interval = compute_next_interval(review_count, &last_rating);
-                    add_days_to_string(ts, interval as i32)
-                } else {
-                    // No quiz yet — schedule first review for tomorrow
-                    add_days_to_string(&now_local_string(), 1)
-                };
-
-                let status_str = if is_due(&next_review_at) { "due".to_string() } else { "upcoming".to_string() };
-                items.push(ReviewItem {
-                    concept: concept_id,
-                    source_chapter: source_chapter.clone(),
-                    review_count,
-                    last_reviewed: last_entry_ts.clone().unwrap_or_else(|| now_local_string()),
-                    next_review_at,
-                    last_rating,
-                    status: status_str,
-                });
-            }
-        }
-    }
-
-    // Generate review-cards.json with prompts for each concept
-    let mut cards = vec![];
-    if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
-        for ch in chapters {
-            if let Some(concepts_arr) = ch.get("concepts").and_then(|v| v.as_array()) {
-                for concept_item in concepts_arr {
-                    let concept_name = if let Some(s) = concept_item.as_str() {
-                        s.to_string()
-                    } else if let Some(obj) = concept_item.as_object() {
-                        obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
-                    } else {
-                        continue;
-                    };
-                    if concept_name.is_empty() { continue; }
-                    cards.push(ReviewCard {
-                        concept: concept_name.clone(),
-                        prompt: format!("请回忆：{} 是什么？它的核心要点有哪些？", concept_name),
-                        key_points: vec![],
-                        hint: "".to_string(),
-                    });
-                }
-            }
-        }
-    }
-    let review_cards = ReviewCards { version: "1.0".to_string(), items: cards };
-    let cards_path = std::path::PathBuf::from(project_path).join(".learning").join("review-cards.json");
-    if let Ok(json) = serde_json::to_string_pretty(&review_cards) {
-        let _ = std::fs::write(&cards_path, json);
-    }
-
-    Ok(ReviewSchedule { version: "1.0".to_string(), items })
 }
 
 // ============================================
@@ -3769,7 +3752,7 @@ pub fn run() {
             create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file, persist_chapter_file,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations, ai_agent::delete_explanation,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
-            generate_review_content, init_review_schedule, submit_review_result, check_missing_review_cards,
+            generate_review_content, generate_review_content_batch, init_review_schedule, submit_review_result, check_missing_review_cards,
             socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
             read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
             create_project_subdir

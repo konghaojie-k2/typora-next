@@ -727,25 +727,12 @@ async function generateReviewContent(queryFn, config, args) {
 
   log('info', 'Starting review-gen', { project_path, chapter_file, conceptCount: concepts?.length });
 
-  // Read the chapter .md file to provide context for question generation
-  const chapterPath = path.join(project_path, chapter_file);
-  let chapterContent = '';
-  if (fs.existsSync(chapterPath)) {
-    chapterContent = fs.readFileSync(chapterPath, 'utf-8').slice(0, 8000); // first 8k chars
-  }
-
-  const weakSet = new Set(weak_concepts || []);
-  const conceptList = (concepts || []).map(c =>
-    `${c.id || c.name}: ${c.name || c.id}${weakSet.has(c.id || c.name) ? ' (掌握较弱)' : ''}`
-  ).join('\n');
-
-  const prompt = `请使用 review-generation skill 为以下章节内容生成复习卡片。
+  const prompt = `请使用 review-generation skill 为以下章节生成复习卡片。
 - chapter_file: ${JSON.stringify(chapter_file)}
-- concepts: ${JSON.stringify((concepts || []).map(c => c.name || c.id || c))}
+- concepts: ${JSON.stringify((concepts || []).map(c => ({ id: c.id, name: c.name })))}
 - weak_concepts: ${JSON.stringify(weak_concepts || [])}
 
-章节内容（摘要）：
-${chapterContent.slice(0, 4000)}`;
+请使用 Read 工具读取项目根目录下的 ${chapter_file} 获取章节内容，然后为每个 concept 生成复习卡片。`;
 
   log('info', 'review-gen: invoking skill', { promptLength: prompt.length });
 
@@ -780,6 +767,80 @@ ${chapterContent.slice(0, 4000)}`;
   }
 
   log('info', 'review-gen complete', { cardCount: Object.keys(result.cards).length });
+  return result;
+}
+
+/**
+ * PB1 Batch: Generate review cards for multiple concepts across chapters in one agent call.
+ * @param {Function} queryFn - Agent SDK query function or mock
+ * @param {object} config - API config
+ * @param {object} args - { project_path, concepts: [{ id, name, source_chapter, weak }] }
+ * @returns {Promise<object>} { cards: { [concept_id]: { quiz_questions, key_points } } }
+ */
+async function generateReviewContentBatch(queryFn, config, args) {
+  const { project_path, concepts } = args;
+  if (!project_path) {
+    throw new Error('project_path is required for review-gen-batch');
+  }
+  if (!concepts || concepts.length === 0) {
+    return { cards: {} };
+  }
+
+  log('info', 'Starting review-gen-batch', { project_path, conceptCount: concepts.length });
+
+  // Group concepts by source chapter for the prompt
+  const byChapter = {};
+  for (const c of concepts) {
+    const ch = c.source_chapter || 'unknown';
+    if (!byChapter[ch]) byChapter[ch] = [];
+    byChapter[ch].push(c);
+  }
+
+  let chapterSection = '';
+  for (const [chFile, chConcepts] of Object.entries(byChapter)) {
+    chapterSection += `\n- chapter_file: ${JSON.stringify(chFile)}\n`;
+    chapterSection += `  concepts: ${JSON.stringify(chConcepts.map(c => ({ id: c.id, name: c.name, weak: !!c.weak })))}\n`;
+  }
+
+  const prompt = `请使用 review-generation skill 为以下多个章节的 concepts 批量生成复习卡片。
+${chapterSection}
+weak_concepts: ${JSON.stringify(concepts.filter(c => c.weak).map(c => c.id))}
+
+请使用 Read 工具读取上述章节文件获取内容，然后为每个 concept 生成复习卡片。所有 concept 的 cards 放在同一个 JSON 对象中返回。`;
+
+  log('info', 'review-gen-batch: invoking skill', { promptLength: prompt.length });
+
+  const raw = await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt,
+      options: {
+        cwd: project_path,
+        allowedTools: ['Read', 'Grep'],
+        skills: ['review-generation'],
+        includePartialMessages: true,
+      }
+    },
+    args.session_id
+  );
+
+  if (!raw || raw.trim().length < 10) {
+    throw new Error('Agent returned empty review content');
+  }
+
+  // Extract JSON from response (handle code blocks)
+  let jsonStr = raw.trim();
+  const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (jsonMatch) {
+    jsonStr = jsonMatch[1].trim();
+  }
+
+  const result = JSON.parse(jsonStr);
+  if (!result.cards || typeof result.cards !== 'object') {
+    throw new Error('Agent response missing "cards" field');
+  }
+
+  log('info', 'review-gen-batch complete', { cardCount: Object.keys(result.cards).length });
   return result;
 }
 
@@ -1058,6 +1119,14 @@ async function main() {
         // Output JSON for Rust to parse and write to review-cards.json
         console.log(JSON.stringify(reviewCards));
         log('info', 'Review-gen stage completed', { cardCount: Object.keys(reviewCards.cards || {}).length });
+        process.exit(0);
+        break;
+      case 'review-gen-batch':
+        log('info', 'Starting review-gen-batch stage', { project_path: taskArgs.project_path, conceptCount: taskArgs.concepts?.length, session_id: taskArgs.session_id || null });
+        const batchCards = await generateReviewContentBatch(queryFn, config, taskArgs);
+        // Output JSON for Rust to parse and write to review-cards.json
+        console.log(JSON.stringify(batchCards));
+        log('info', 'Review-gen-batch stage completed', { cardCount: Object.keys(batchCards.cards || {}).length });
         process.exit(0);
         break;
       case 'generate-extra-quiz': {

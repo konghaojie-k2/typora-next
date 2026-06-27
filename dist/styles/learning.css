@@ -1397,6 +1397,29 @@ body.learning-mode .toolbar {
   box-shadow: 0 6px 24px rgba(79, 70, 229, 0.35);
 }
 
+/* 橙色复习按钮 — 提醒今日有到期复习项 */
+.kg-action-btn.kg-action-review {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  border-color: transparent;
+  color: var(--color-bg-primary);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.25);
+}
+
+.kg-action-btn.kg-action-review:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(245, 158, 11, 0.35);
+}
+
+.kg-review-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Detail drawer */
 .kg-detail-drawer {
   position: absolute;
@@ -3441,6 +3464,29 @@ body.learning-mode .toolbar {
   box-shadow: 0 6px 24px rgba(79, 70, 229, 0.35);
 }
 
+/* 橙色复习按钮 — 提醒今日有到期复习项 */
+.kg-action-btn.kg-action-review {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  border-color: transparent;
+  color: var(--color-bg-primary);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.25);
+}
+
+.kg-action-btn.kg-action-review:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(245, 158, 11, 0.35);
+}
+
+.kg-review-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+  font-weight: 600;
+}
+
 /* Detail drawer */
 .kg-detail-drawer {
   position: absolute;
@@ -5483,6 +5529,29 @@ body.learning-mode .toolbar {
 .kg-action-btn.kg-action-primary:hover {
   opacity: 0.9;
   box-shadow: 0 6px 24px rgba(79, 70, 229, 0.35);
+}
+
+/* 橙色复习按钮 — 提醒今日有到期复习项 */
+.kg-action-btn.kg-action-review {
+  background: linear-gradient(135deg, #f59e0b, #ef4444);
+  border-color: transparent;
+  color: var(--color-bg-primary);
+  box-shadow: 0 4px 16px rgba(245, 158, 11, 0.25);
+}
+
+.kg-action-btn.kg-action-review:hover {
+  opacity: 0.9;
+  box-shadow: 0 6px 24px rgba(245, 158, 11, 0.35);
+}
+
+.kg-review-count {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.25);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 /* Detail drawer */

@@ -25,6 +25,7 @@
       this.state = 'hidden';
       this.onEnterReading = (options && options.onEnterReading) || (() => {});
       this.onClose = (options && options.onClose) || (() => {});
+      this.onReview = (options && options.onReview) || (() => {});
       this._overlay = null;
       this._drawer = null;
       this._data = null;
@@ -312,6 +313,19 @@
     _createActions(data) {
       const actions = document.createElement('div');
       actions.className = 'kg-actions';
+
+      // Review button (project-level entry)
+      const dueCount = (data && data.dueCount) || 0;
+      if (dueCount > 0) {
+        const reviewBtn = document.createElement('button');
+        reviewBtn.className = 'kg-action-btn kg-action-review';
+        reviewBtn.setAttribute('data-action', 'review');
+        reviewBtn.innerHTML = `🧠 今日复习 <span class="kg-review-count">${dueCount}</span>`;
+        reviewBtn.addEventListener('click', () => {
+          this.onReview();
+        });
+        actions.appendChild(reviewBtn);
+      }
 
       // Enter reading button
       const enterBtn = document.createElement('button');

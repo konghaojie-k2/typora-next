@@ -25,6 +25,8 @@
   let _projectPath = '';
   let _lastQuizSubmission = null;
   let _reviewModal = null;
+  let _reviewCheckInProgress = false;
+  let _reviewLoadingEl = null;
 
   // Sprint 6 PB2: Cornell Sidebar state
   let _cornellSidebarEl = null;      // sidebar DOM element
@@ -1279,9 +1281,6 @@
     const newTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
     if (newTitle) _currentChapterTitle = newTitle;
     updateSidebarHeader();
-
-    // S4: Show review notice if due items exist (always check, even if sidebar already exists)
-    showReviewNoticeIfDue();
   }
 
   function initCornellSidebar() {
@@ -1316,45 +1315,6 @@
     const md = document.getElementById('markdownBody');
     _currentChapterTitle = md ? (md.querySelector('h1, h2')?.textContent || '') : '';
     updateSidebarHeader();
-  }
-
-  async function showReviewNoticeIfDue() {
-    if (!_projectPath || !window.ReviewScheduler) return;
-    try {
-      const scheduler = new window.ReviewScheduler();
-      const items = await scheduler.getDueItems(_projectPath);
-      const dueCount = (items || []).length;
-
-      const existing = document.getElementById('cornellReviewNotice');
-      if (dueCount === 0) {
-        if (existing) existing.remove();
-        return;
-      }
-
-      if (existing) {
-        const textEl = existing.querySelector('.text');
-        if (textEl) textEl.textContent = `今日有 ${dueCount} 项待复习`;
-        return;
-      }
-
-      const body = document.getElementById('cornellSidebarBody');
-      if (!body) return;
-
-      const notice = document.createElement('div');
-      notice.id = 'cornellReviewNotice';
-      notice.className = 'cornell-review-notice';
-      notice.innerHTML = `
-        <span class="icon">🧠</span>
-        <span class="text">今日有 ${dueCount} 项待复习</span>
-        <button class="btn">开始</button>
-      `;
-      notice.querySelector('.btn').addEventListener('click', () => {
-        checkDailyReview(_projectPath);
-      });
-      body.insertBefore(notice, body.firstChild);
-    } catch (e) {
-      console.warn('[ReviewNotice] failed:', e);
-    }
   }
 
   function updateSidebarHeader() {
@@ -1837,12 +1797,45 @@
   // 4. Daily Review (Sprint 4: 遗忘曲线提醒)
   // ============================================
 
+  function showReviewModal(projectPath, items, cards) {
+    if (!window.ReviewModal) {
+      console.warn('[Sprint4] ReviewModal not loaded');
+      return;
+    }
+    if (_reviewModal && _reviewModal.getState() !== 'hidden') return;
+
+    const scheduler = new window.ReviewScheduler();
+    _reviewModal = new window.ReviewModal({
+      items,
+      cards,
+      onComplete: async (answers) => {
+        const beforeStatus = {};
+        for (const item of items) {
+          beforeStatus[item.concept] = item.status || 'due';
+        }
+
+        for (const ans of answers) {
+          await scheduler.submitReviewResult(projectPath, ans.concept, ans.rating, ans.answers || []);
+        }
+        _reviewModal = null;
+
+        showReviewSummary(projectPath, items, answers, beforeStatus);
+      },
+      onPostpone: async () => {
+        for (const item of items) {
+          await scheduler.syncPostpone(projectPath, item.concept);
+        }
+        _reviewModal = null;
+      }
+    });
+    _reviewModal.show();
+  }
+
   async function checkDailyReview(projectPath) {
     if (!window.ReviewScheduler || !window.ReviewModal) {
       console.warn('[Sprint4] ReviewScheduler or ReviewModal not loaded');
       return;
     }
-    if (!document.body.classList.contains('learning-mode')) return;
     if (_reviewModal && _reviewModal.getState() !== 'hidden') return;
 
     try {
@@ -1851,48 +1844,15 @@
 
       if (!items || items.length === 0) return;
 
-      // Load review cards (prompts + key points)
       const cards = await scheduler.getReviewCards(projectPath);
-
-      _reviewModal = new window.ReviewModal({
-        items,
-        cards,
-        onComplete: async (answers) => {
-          // Record status before review
-          const beforeStatus = {};
-          for (const item of items) {
-            beforeStatus[item.concept] = item.status || 'due';
-          }
-
-          for (const ans of answers) {
-            await scheduler.submitReviewResult(projectPath, ans.concept, ans.rating, ans.answers || []);
-          }
-          _reviewModal = null;
-
-          // Show review summary modal with status changes
-          showReviewSummary(projectPath, items, answers, beforeStatus);
-
-          // Refresh sidebar review notice after review completion
-          showReviewNoticeIfDue();
-        },
-        onPostpone: async () => {
-          for (const item of items) {
-            await scheduler.syncPostpone(projectPath, item.concept);
-          }
-          _reviewModal = null;
-
-          // Refresh sidebar review notice after postpone
-          showReviewNoticeIfDue();
-        }
-      });
-      _reviewModal.show();
+      showReviewModal(projectPath, items, cards);
     } catch (err) {
       console.error('[Sprint4] checkDailyReview error:', err);
     }
   }
 
   // ============================================
-  // PB5: Missing Review Cards Recovery
+  // PB5: Missing Review Cards Recovery (legacy: scans completed chapters)
   // ============================================
 
   async function checkMissingReviewCards(projectPath) {
@@ -1905,14 +1865,117 @@
       for (const chapter of missing) {
         const chFile = chapter.chapter_file || '';
         const weakConcepts = chapter.missing_concepts || [];
-        window.__TAURI__.core.invoke('generate_review_content', {
-          projectPath,
-          chapterFile: chFile,
-          weakConcepts
-        }).catch(err => console.warn('[PB5] auto-regenerate failed for', chFile, err));
+        try {
+          await window.__TAURI__.core.invoke('generate_review_content', {
+            projectPath,
+            chapterFile: chFile,
+            weakConcepts
+          });
+          console.log('[PB5] auto-regenerate completed for', chFile);
+        } catch (err) {
+          console.warn('[PB5] auto-regenerate failed for', chFile, err);
+        }
       }
     } catch (err) {
       console.warn('[PB5] checkMissingReviewCards error:', err);
+    }
+  }
+
+  /**
+   * Show a full-screen loading overlay while review cards are being generated.
+   */
+  function showReviewLoading(message) {
+    hideReviewLoading();
+    const overlay = document.createElement('div');
+    overlay.id = 'reviewLoadingOverlay';
+    overlay.style.cssText = `
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(4px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10010;
+      flex-direction: column;
+      gap: 16px;
+    `;
+    overlay.innerHTML = `
+      <div style="width: 48px; height: 48px; border: 4px solid rgba(255,255,255,0.2); border-top-color: #f59e0b; border-radius: 50%; animation: review-spin 1s linear infinite;"></div>
+      <div style="color: white; font-size: 15px; font-weight: 500;">${message || '正在准备复习卡片...'}</div>
+      <style>
+        @keyframes review-spin { to { transform: rotate(360deg); } }
+      </style>
+    `;
+    document.body.appendChild(overlay);
+    _reviewLoadingEl = overlay;
+  }
+
+  function hideReviewLoading() {
+    if (_reviewLoadingEl) {
+      _reviewLoadingEl.remove();
+      _reviewLoadingEl = null;
+    }
+  }
+
+  /**
+   * Unified entry for daily review: only generate cards for concepts that are due
+   * today and missing review cards. Batch-generate them in one agent call, then
+   * show the review modal. Used from the project dashboard review entry.
+   */
+  async function checkAndShowDailyReview(projectPath) {
+    if (!projectPath || !window.__TAURI__ || !window.ReviewScheduler || !window.ReviewModal) {
+      console.warn('[ReviewEntry] prerequisites not ready');
+      return;
+    }
+    if (_reviewModal && _reviewModal.getState() !== 'hidden') return;
+    if (_reviewCheckInProgress) {
+      console.log('[ReviewEntry] already checking, skip duplicate');
+      return;
+    }
+
+    try {
+      _reviewCheckInProgress = true;
+      showReviewLoading('正在准备复习卡片...');
+
+      const scheduler = new window.ReviewScheduler();
+      const items = await scheduler.getDueItems(projectPath);
+      if (!items || items.length === 0) {
+        hideReviewLoading();
+        return;
+      }
+
+      const cards = await scheduler.getReviewCards(projectPath);
+
+      const missingConcepts = items
+        .filter(item => !cards[item.concept])
+        .map(item => ({
+          id: item.concept,
+          name: item.concept,
+          source_chapter: item.source_chapter || '',
+          weak: true
+        }));
+
+      if (missingConcepts.length > 0) {
+        showReviewLoading(`正在为 ${missingConcepts.length} 个概念生成复习卡片...`);
+        console.log('[ReviewEntry] batch generating cards for', missingConcepts.length, 'due concepts');
+        await window.__TAURI__.core.invoke('generate_review_content_batch', {
+          projectPath,
+          concepts: missingConcepts
+        });
+      }
+
+      const updatedCards = await scheduler.getReviewCards(projectPath);
+      hideReviewLoading();
+      showReviewModal(projectPath, items, updatedCards);
+    } catch (err) {
+      console.error('[ReviewEntry] checkAndShowDailyReview error:', err);
+      hideReviewLoading();
+      if (window.showToast) {
+        window.showToast('准备复习卡片失败，请重试', 'error');
+      }
+    } finally {
+      _reviewCheckInProgress = false;
     }
   }
 
@@ -1966,12 +2029,14 @@
     setupSelectionExplainer,
     checkDailyReview,
     checkMissingReviewCards,
+    checkAndShowDailyReview,
     clearCues,
     createCue,
     getProjectPath() { return _projectPath; },
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }
       closeQuizModal();
+      hideReviewLoading();
       // Hide AI explain button when exiting learning mode
       const aiBtn = document.getElementById('aiExplainBtn');
       if (aiBtn) aiBtn.style.display = 'none';

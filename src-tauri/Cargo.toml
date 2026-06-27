@@ -38,6 +38,9 @@ notify = "8"
 # HTTP client for AI API
 ureq = { version = "2", features = ["json"] }
 
+# Date/time handling
+chrono = "0.4"
+
 # ZIP archive for sharing documents
 zip = "2"
 walkdir = "2"

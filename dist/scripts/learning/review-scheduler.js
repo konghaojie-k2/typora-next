@@ -164,9 +164,23 @@
         if (!content) return {};
         const data = JSON.parse(content);
         const map = {};
-        (data.items || []).forEach(card => {
-          map[card.concept] = card;
-        });
+
+        // Current format written by generate_review_content: { cards: { concept: card } }
+        if (data.cards && typeof data.cards === 'object') {
+          Object.entries(data.cards).forEach(([concept, card]) => {
+            map[concept] = card;
+          });
+        }
+
+        // Legacy format (init_review_schedule placeholder): { items: [{ concept, ... }] }
+        if (Array.isArray(data.items)) {
+          data.items.forEach(card => {
+            if (card && card.concept) {
+              map[card.concept] = card;
+            }
+          });
+        }
+
         return map;
       } catch (err) {
         console.warn('[ReviewScheduler] getReviewCards failed:', err);
