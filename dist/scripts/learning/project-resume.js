@@ -452,7 +452,7 @@
       );
       if (_postTrigger && hasPending && !hasStruggling) {
         setTimeout(() => {
-          _postTrigger({ chapters: project.chapters }, basePath).catch(err =>
+          _postTrigger(basePath).catch(err =>
             console.warn('[ProjectResume] post-restore triggerNextChapters:', err)
           );
         }, 500);
@@ -501,7 +501,7 @@
               if (overlay) overlay.restore();
               const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
               if (triggerNext) {
-                triggerNext({ chapters: project.chapters }, basePath).catch(err => {
+                triggerNext(basePath).catch(err => {
                   console.error('[ProjectResume] triggerNextChapters failed:', err);
                   resumeBtn.disabled = false;
                   resumeBtn.textContent = '📦 继续生成 (' + pendingCount + ' 章待生成)';
@@ -559,7 +559,7 @@
             }
             const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
             if (triggerNext) {
-              triggerNext({ chapters: project.chapters }, basePath);
+              triggerNext(basePath);
             }
           }
         };

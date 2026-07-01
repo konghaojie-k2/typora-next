@@ -1040,7 +1040,6 @@
     projectPath: null,
     totalChapters: 0,
     windowSize: DEFAULT_WINDOW_SIZE,
-    initialTriggered: false,
     inFlight: false  // serialize to avoid concurrent generate_chapters calls
   };
 
@@ -1052,11 +1051,10 @@
    */
   function initSlidingWindow(projectPath, totalChapters, windowSize) {
     windowState.projectPath = projectPath;
-    windowState.totalChapters = totalChapters;
+    windowState.totalChapters = totalChapters || 0;
     windowState.windowSize = (typeof windowSize === 'number' && windowSize > 0)
       ? windowSize
       : DEFAULT_WINDOW_SIZE;
-    windowState.initialTriggered = false;
     windowState.inFlight = false;
   }
 
@@ -1102,14 +1100,20 @@
    * @param {object} outline - full outline (needed for chapter titles/concepts)
    * @param {string} projectPath
    */
-  async function triggerSlidingWindow(manager, outline, projectPath) {
+  async function triggerSlidingWindow(manager, projectPath) {
     if (windowState.inFlight) {
       console.log('[SlidingWindow] Already in flight, skipping');
       return;
     }
     if (!window.__TAURI__) return;
 
-    const indices = _computeWindowIndices(manager);
+    // Use the manager if available; otherwise fall back to window state.
+    const mgr = manager || (window.LearningProgress && window.LearningProgress._manager);
+    if (!mgr) {
+      console.warn('[SlidingWindow] triggerSlidingWindow called without manager');
+      return;
+    }
+    const indices = _computeWindowIndices(mgr);
     if (indices.length === 0) {
       console.log('[SlidingWindow] Nothing to generate, window satisfied');
       return;
@@ -1121,7 +1125,7 @@
     // Mark them as 'generating' optimistically so the UI shows progress
     for (const i of indices) {
       try {
-        manager.setStatus(i, 'generating');
+        mgr.setStatus(i, 'generating');
       } catch (_) {
         // May already be in a different state (e.g. ready) due to FS poll
       }
@@ -1153,7 +1157,7 @@
 
       await window.__TAURI__.core.invoke('generate_chapters', {
         projectPath: projectPath || windowState.projectPath,
-        outline,
+        outline: { chapters: mgr.chapters },
         chapterIndices: indices,
         sessionId  // null is fine — Rust passes Option<String>
       });
@@ -1188,21 +1192,24 @@
 
     /**
      * Manually trigger the next batch of windowed generations.
-     * Useful for "Generate" button or external controls (e.g. resume).
+     * Unified entry used by first-time generation, resume, chapter completion,
+     * and the "继续生成" button.
      */
-    triggerNextChapters(outline, projectPath) {
+    triggerNextChapters(projectPath) {
+      const mgr = (window.LearningProgress && window.LearningProgress._manager) || null;
+      if (!mgr) {
+        console.warn('[SlidingWindow] triggerNextChapters called without manager');
+        return Promise.resolve();
+      }
       // Make sure windowState has up-to-date projectPath + totalChapters
       // (startGeneration normally sets this; resume may bypass it)
       if (projectPath && !windowState.projectPath) {
         windowState.projectPath = projectPath;
       }
-      if (outline && outline.chapters && !windowState.totalChapters) {
-        windowState.totalChapters = outline.chapters.length;
+      if (!windowState.totalChapters) {
+        windowState.totalChapters = mgr.chapters.length;
       }
-      // Use the stashed _manager (set by startGeneration or resume) so
-      // triggerSlidingWindow can call manager.setStatus() without NPE.
-      const mgr = (window.LearningProgress && window.LearningProgress._manager) || null;
-      return triggerSlidingWindow(mgr, outline, projectPath);
+      return triggerSlidingWindow(mgr, projectPath);
     },
 
     /**
@@ -1269,7 +1276,7 @@
             genBtn.disabled = true;
             genBtn.textContent = '生成中...';
           }
-          triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath).then(() => {
+          window.LearningProgress.triggerNextChapters(projectPath).then(() => {
             if (genBtn) {
               genBtn.disabled = false;
               genBtn.textContent = '🔄 重新生成';
@@ -1326,7 +1333,7 @@
             return;
           }
           if (ui.updateChapter) ui.updateChapter(index);
-          triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath);
+          window.LearningProgress.triggerNextChapters(projectPath);
         };
 
         // Sliding window: when a chapter becomes 'completed', enqueue the next
@@ -1341,7 +1348,7 @@
               return;
             }
             // The user just finished a chapter. Slide the window forward.
-            triggerSlidingWindow(manager, { chapters: manager.chapters }, projectPath);
+            window.LearningProgress.triggerNextChapters(projectPath);
           }
         };
 
@@ -1400,7 +1407,7 @@
       // Call Rust to start generation — sliding window (first N chapters)
       console.log('[ProgressTracker] Sliding window: triggering initial generation');
       initSlidingWindow(projectPath, outline.chapters?.length || 0, windowState.windowSize);
-      triggerSlidingWindow(manager, outline, projectPath).catch(err => {
+      window.LearningProgress.triggerNextChapters(projectPath).catch(err => {
         console.error('[ProgressTracker] Initial sliding window trigger failed:', err);
       });
     },

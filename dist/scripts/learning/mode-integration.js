@@ -786,7 +786,7 @@
               console.log('[QuizSaveHistory] retake struggling→' + payload.rating + ' → trigger sliding window');
               const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
               if (triggerNext) {
-                triggerNext({ chapters: mgr.chapters }, _projectPath).catch(err =>
+                triggerNext(_projectPath).catch(err =>
                   console.warn('[QuizSaveHistory] retake triggerNextChapters:', err)
                 );
               }

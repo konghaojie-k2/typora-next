@@ -5,7 +5,7 @@ use tauri::Manager;
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, State};
 
-use crate::{get_config, AppConfig};
+use crate::{get_config, AppConfig, AppState};
 
 /// Agent message types emitted to frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -803,8 +803,17 @@ pub async fn generate_chapters(
     agent_process: State<'_, AgentProcess>,
     chapter_indices: Option<Vec<usize>>,
     session_id: Option<String>,
+    app_state: State<'_, AppState>,
 ) -> Result<(), String> {
     let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+
+    // Mark generation as in-progress so the main window close guard can warn
+    // the user before aborting background chapter generation.
+    {
+        if let Ok(mut guard) = app_state.generation_in_progress.lock() {
+            *guard = true;
+        }
+    }
 
     let args = serde_json::json!({
         "project_path": project_path,
@@ -836,6 +845,12 @@ pub async fn generate_chapters(
                 );
             }
         }
+
+        // Generation finished (success or error) — clear the guard flag.
+        let state = app_handle.state::<AppState>();
+        if let Ok(mut guard) = state.generation_in_progress.lock() {
+            *guard = false;
+        };
     });
 
     Ok(())

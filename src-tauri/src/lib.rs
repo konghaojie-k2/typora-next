@@ -65,6 +65,12 @@ pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
     watched_path: Mutex<Option<String>>,
     md2docx_pid: Mutex<Option<u32>>,
+    /// Serialize access to .learning/project.json to prevent read-modify-write races
+    /// between concurrent commands (e.g. persist_quiz_result vs persist_chapter_file).
+    project_json_lock: Mutex<()>,
+    /// True while chapter generation is running in the background. Used to guard
+    /// the main window close event so users don't accidentally abort generation.
+    generation_in_progress: Mutex<bool>,
 }
 
 /// Kill all existing md2docx_service processes (Windows only)
@@ -1950,6 +1956,7 @@ async fn persist_quiz_result(
     weak_concepts: Vec<String>,
     answers: Vec<QuizAnswerRecord>,
     timestamp: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
     std::fs::create_dir_all(&learning_dir)
@@ -1989,6 +1996,12 @@ async fn persist_quiz_result(
 
     // 1. Update project.json — write chapter status to top-level chapters_status map
     //    (chapter.concepts is {id, name} only, no status fields)
+    //    Hold the project.json lock for the entire read-modify-write to avoid races
+    //    with persist_chapter_file / syncProjectStatus.
+    let _project_guard = state
+        .project_json_lock
+        .lock()
+        .map_err(|e| format!("获取 project.json 锁失败: {}", e))?;
     let project_json_path = learning_dir.join("project.json");
     let mut project: serde_json::Value = if project_json_path.exists() {
         let content = std::fs::read_to_string(&project_json_path)
@@ -2208,6 +2221,7 @@ async fn persist_chapter_file(
     chapter_index: usize,
     file_basename: String,
     status: String,
+    state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let project_json_path = std::path::PathBuf::from(&project_path)
         .join(".learning")
@@ -2215,6 +2229,14 @@ async fn persist_chapter_file(
     if !project_json_path.exists() {
         return Err("project.json not found".to_string());
     }
+
+    // Serialize project.json access to prevent read-modify-write races with
+    // persist_quiz_result / other commands.
+    let _project_guard = state
+        .project_json_lock
+        .lock()
+        .map_err(|e| format!("获取 project.json 锁失败: {}", e))?;
+
     let content = std::fs::read_to_string(&project_json_path)
         .map_err(|e| format!("读取 project.json 失败: {}", e))?;
     let mut project: serde_json::Value = serde_json::from_str(&content)
@@ -2227,12 +2249,25 @@ async fn persist_chapter_file(
         }
     }
 
-    // Update chapters_status map
+    // Update chapters_status map, but never downgrade a completed chapter.
+    // This protects against race windows where the lock holder reads a state
+    // just before persist_quiz_result writes "completed".
     if project.get("chapters_status").is_none() {
         project["chapters_status"] = serde_json::json!({});
     }
     if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
-        status_map.insert(file_basename, serde_json::json!(status));
+        let current = status_map
+            .get(&file_basename)
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if current == "completed" {
+            log::info!(
+                "[persist_chapter_file] {} already completed, skipping status update",
+                file_basename
+            );
+        } else {
+            status_map.insert(file_basename, serde_json::json!(status));
+        }
     }
 
     let json_str = serde_json::to_string_pretty(&project)
@@ -2240,6 +2275,19 @@ async fn persist_chapter_file(
     std::fs::write(&project_json_path, json_str)
         .map_err(|e| format!("写入 project.json 失败: {}", e))?;
     Ok(())
+}
+
+/// Exit the application immediately. Used by the generation close guard when the
+/// user confirms they want to close despite generation being in progress.
+#[tauri::command]
+fn exit_app(app_handle: tauri::AppHandle) {
+    app_handle.exit(0);
+}
+
+/// Hide the main window so generation can continue in the background.
+#[tauri::command]
+fn hide_main_window(window: tauri::WebviewWindow) -> Result<(), String> {
+    window.hide().map_err(|e| format!("隐藏窗口失败: {}", e))
 }
 
 /// PB1: Generate review cards (quiz questions + key points) for each concept in a chapter.
@@ -3673,6 +3721,8 @@ pub fn run() {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
             md2docx_pid: Mutex::new(None),
+            project_json_lock: Mutex::new(()),
+            generation_in_progress: Mutex::new(false),
         })
         .manage(ai_agent::AgentProcess::default())
         .setup(|app| {
@@ -3750,6 +3800,7 @@ pub fn run() {
             ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
             ai_agent::ensure_extra_questions, ai_agent::load_extra_questions,
             create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file, persist_chapter_file,
+            exit_app, hide_main_window,
             ai_agent::persist_explanation, ai_agent::load_chapter_explanations, ai_agent::delete_explanation,
             get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
             generate_review_content, generate_review_content_batch, init_review_schedule, submit_review_result, check_missing_review_cards,
@@ -3759,13 +3810,32 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app_handle, event| {
-            if let tauri::RunEvent::Exit = event {
-                #[cfg(windows)]
-                {
-                    println!("[DEBUG] Killing all md2docx_service processes on exit");
-                    kill_md2docx_service_processes();
+        .run(|app_handle, event| {
+            match event {
+                tauri::RunEvent::Exit => {
+                    #[cfg(windows)]
+                    {
+                        println!("[DEBUG] Killing all md2docx_service processes on exit");
+                        kill_md2docx_service_processes();
+                    }
                 }
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
+                    ..
+                } if label == "main" => {
+                    let state = app_handle.state::<AppState>();
+                    let generation_running = state
+                        .generation_in_progress
+                        .lock()
+                        .map(|g| *g)
+                        .unwrap_or(false);
+                    if generation_running {
+                        api.prevent_close();
+                        let _ = app_handle.emit("generation-close-requested", ());
+                    }
+                }
+                _ => {}
             }
         });
 }

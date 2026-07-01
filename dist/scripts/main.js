@@ -266,6 +266,72 @@ window.agentBridge = {
     });
   }
 
+  /**
+   * Generation close guard: when the user tries to close the main window while
+   * chapter generation is running in the background, show a DOM confirmation
+   * because WebView confirm()/alert() are not available in Tauri.
+   */
+  function setupGenerationCloseGuard() {
+    if (!window.__TAURI__) return;
+    const { listen } = window.__TAURI__.event;
+    listen('generation-close-requested', () => {
+      if (document.getElementById('generationCloseGuardModal')) return;
+
+      const overlay = document.createElement('div');
+      overlay.id = 'generationCloseGuardModal';
+      overlay.style.cssText = `
+        position: fixed; inset: 0;
+        background: rgba(15, 23, 42, 0.55);
+        backdrop-filter: blur(4px);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 99999; padding: 24px;
+      `;
+
+      const panel = document.createElement('div');
+      panel.style.cssText = `
+        background: #fff; border-radius: 16px;
+        max-width: 420px; width: 100%;
+        padding: 24px;
+        box-shadow: 0 25px 80px rgba(0,0,0,0.25);
+        font-family: inherit;
+      `;
+      panel.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+          <span style="font-size:28px;">⚠️</span>
+          <div style="font-size:18px;font-weight:700;color:#111827;">生成尚未完成</div>
+        </div>
+        <div style="font-size:14px;color:#4b5563;line-height:1.6;margin-bottom:20px;">
+          当前有章节正在后台生成中。关闭窗口会中断生成，已生成的进度可能丢失。
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;">
+          <button id="genGuardCancel" style="padding:8px 16px;border-radius:8px;border:1px solid #e5e7eb;background:#fff;color:#374151;font-size:13px;cursor:pointer;">取消</button>
+          <button id="genGuardBackground" style="padding:8px 16px;border-radius:8px;border:1px solid #c4b5fd;background:#f5f3ff;color:#7c3aed;font-size:13px;cursor:pointer;">后台继续</button>
+          <button id="genGuardClose" style="padding:8px 16px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:13px;cursor:pointer;">仍要关闭</button>
+        </div>
+      `;
+
+      overlay.appendChild(panel);
+      document.body.appendChild(overlay);
+
+      document.getElementById('genGuardCancel').addEventListener('click', () => {
+        overlay.remove();
+      });
+
+      document.getElementById('genGuardBackground').addEventListener('click', () => {
+        window.__TAURI__.core.invoke('hide_main_window').catch(err =>
+          console.error('[GenerationGuard] hide_main_window failed:', err)
+        );
+        overlay.remove();
+      });
+
+      document.getElementById('genGuardClose').addEventListener('click', () => {
+        window.__TAURI__.core.invoke('exit_app').catch(err =>
+          console.error('[GenerationGuard] exit_app failed:', err)
+        );
+      });
+    });
+  }
+
   function showRefreshPrompt(path) {
     state.refreshPromptVisible = true;
     const existing = document.getElementById('refresh-prompt');
@@ -3629,6 +3695,7 @@ window.agentBridge = {
     setupScrollObserver();
     setupThemeDetection();
     setupFileWatcher();
+    setupGenerationCloseGuard();
     loadConfig();
     loadRecentFiles();
     loadUIState();
