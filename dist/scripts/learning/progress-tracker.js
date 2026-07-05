@@ -1217,7 +1217,7 @@
      * @param {object} outline - { chapters: [...] }
      * @param {string} projectPath
      */
-    startGeneration(outline, projectPath) {
+    async startGeneration(outline, projectPath) {
       console.log('[ProgressTracker] startGeneration called, chapters:', outline.chapters?.length, 'path:', projectPath);
 
       // Point the sidebar file tree to the project directory so new chapters
@@ -1225,6 +1225,11 @@
       // has the correct currentFolder context.
       if (window.TyporaNext && window.TyporaNext.loadFolderPath) {
         window.TyporaNext.loadFolderPath(projectPath);
+      }
+
+      // Enter learning mode (unified workspace switch)
+      if (window.TyporaNext && window.TyporaNext.setLearningMode) {
+        await window.TyporaNext.setLearningMode(true, projectPath);
       }
 
       const manager = new ChapterStatusManager(outline.chapters);
@@ -1352,10 +1357,6 @@
           }
         };
 
-        // Enter learning mode
-        if (window.TyporaNext && window.TyporaNext.setLearningMode) {
-          window.TyporaNext.setLearningMode(true, projectPath);
-        }
         // Trigger Agent SDK check now that we're in learning mode
         if (window.TyporaNext && window.TyporaNext.checkAgentSdk) {
           window.TyporaNext.checkAgentSdk();
@@ -1382,12 +1383,12 @@
         }
 
         // Exit learning mode handler
-        ui.onExitLearningClick = () => {
+        ui.onExitLearningClick = async () => {
           overlay.hide();
           container.style.display = 'none';
           if (orb) orb.style.display = 'none';
           if (window.TyporaNext) {
-            if (window.TyporaNext.setLearningMode) window.TyporaNext.setLearningMode(false);
+            if (window.TyporaNext.setLearningMode) await window.TyporaNext.setLearningMode(false);
             if (window.TyporaNext.unloadFolder) window.TyporaNext.unloadFolder();
           }
         };

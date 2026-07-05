@@ -57,7 +57,8 @@
    */
   function enhanceLearningElements() {
     console.log('[Sprint3] enhanceLearningElements called');
-    if (!document.body.classList.contains('learning-mode')) { console.log('[Sprint3] not in learning-mode, skip'); return; }
+    const inCourse = window.AppWorkspace?.isIn('course') ?? document.body.classList.contains('learning-mode');
+    if (!inCourse) { console.log('[Sprint3] not in course workspace, skip'); return; }
 
     const md = document.getElementById('markdownBody');
     if (!md) return;
@@ -145,7 +146,8 @@
   function setupQuizPanel(chapterFile, projectPath) {
     console.log('[Sprint3] setupQuizPanel called, chapterFile:', chapterFile, 'projectPath:', projectPath);
     if (!window.QuizPanel) { console.warn('[Sprint3] QuizPanel not loaded'); return; }
-    if (!document.body.classList.contains('learning-mode')) { console.log('[Sprint3] not in learning-mode, skip quiz'); return; }
+    const inCourse = window.AppWorkspace?.isIn('course') ?? document.body.classList.contains('learning-mode');
+    if (!inCourse) { console.log('[Sprint3] not in course workspace, skip quiz'); return; }
 
     _projectPath = projectPath || '';
     _currentChapterFile = chapterFile || '';
@@ -1258,8 +1260,9 @@
 
   function setupSelectionExplainer() {
     console.log('[Sprint6] setupSelectionExplainer');
-    if (!document.body.classList.contains('learning-mode')) {
-      console.log('[Sprint6] not in learning-mode, skip sidebar');
+    const inCourse = window.AppWorkspace?.isIn('course') ?? document.body.classList.contains('learning-mode');
+    if (!inCourse) {
+      console.log('[Sprint6] not in course workspace, skip sidebar');
       return;
     }
 
@@ -1336,7 +1339,8 @@
   }
 
   function onSelectionChange() {
-    if (!document.body.classList.contains('learning-mode')) return;
+    const inCourse = window.AppWorkspace?.isIn('course') ?? document.body.classList.contains('learning-mode');
+    if (!inCourse) return;
 
     // Debounce: wait for selection to settle
     clearTimeout(window._cornellSelectionTimer);

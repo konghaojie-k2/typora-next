@@ -1180,9 +1180,20 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
     }
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RecentFileEntry {
+    path: String,
+    #[serde(default = "default_recent_mode")]
+    mode: String,
+}
+
+fn default_recent_mode() -> String {
+    "normal".to_string()
+}
+
 /// Get list of recently opened files
 #[tauri::command]
-async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<RecentFileEntry>, String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
@@ -1194,38 +1205,93 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<String>, String> 
     let content = std::fs::read_to_string(&file_path)
         .map_err(|e| format!("读取最近文件列表失败: {}", e))?;
 
-    let files: Vec<String> = serde_json::from_str(&content)
-        .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
+    // Try new format first, fall back to legacy flat string array.
+    let mut entries: Vec<RecentFileEntry> = match serde_json::from_str::<Vec<RecentFileEntry>>(&content) {
+        Ok(entries) => entries,
+        Err(_) => {
+            let legacy: Vec<String> = serde_json::from_str(&content)
+                .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
+            legacy.into_iter().map(|path| RecentFileEntry { path, mode: "normal".to_string() }).collect()
+        }
+    };
 
-    Ok(files)
+    // Infer mode for legacy/normal entries that point to learning projects.
+    for entry in entries.iter_mut() {
+        if entry.mode == "normal" && is_learning_project(&entry.path) {
+            entry.mode = "learning".to_string();
+        }
+    }
+
+    Ok(entries)
+}
+
+/// Check whether a path belongs to a learning project.
+/// For directories: checks for a `.learning/project.json` file directly inside.
+/// For files: walks up parent directories looking for `.learning/project.json`.
+fn is_learning_project(path: &str) -> bool {
+    let p = std::path::PathBuf::from(path);
+    if !p.exists() {
+        return false;
+    }
+    if p.is_dir() {
+        return p.join(".learning").join("project.json").is_file();
+    }
+    // File path: walk up until we find a learning project root.
+    let mut dir = match p.parent() {
+        Some(parent) => parent.to_path_buf(),
+        None => return false,
+    };
+    loop {
+        if dir.join(".learning").join("project.json").is_file() {
+            return true;
+        }
+        match dir.parent() {
+            Some(parent) => dir = parent.to_path_buf(),
+            None => return false,
+        }
+    }
 }
 
 /// Add a file to recent files list
 #[tauri::command]
-async fn add_recent_file(path: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn add_recent_file(path: String, mode: Option<String>, app: tauri::AppHandle) -> Result<(), String> {
     let config_dir = app.path().app_config_dir()
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
 
-    let mut files: Vec<String> = if file_path.exists() {
+    let mut entries: Vec<RecentFileEntry> = if file_path.exists() {
         let content = std::fs::read_to_string(&file_path)
             .map_err(|e| format!("读取最近文件列表失败: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("解析最近文件列表失败: {}", e))?
+        match serde_json::from_str::<Vec<RecentFileEntry>>(&content) {
+            Ok(entries) => entries,
+            Err(_) => {
+                let legacy: Vec<String> = serde_json::from_str(&content)
+                    .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
+                legacy.into_iter().map(|path| RecentFileEntry { path, mode: "normal".to_string() }).collect()
+            }
+        }
     } else {
         Vec::new()
     };
 
-    // Remove existing entry if present
-    files.retain(|p| p != &path);
-    // Add to front
-    files.insert(0, path);
-    // Limit to 20
-    if files.len() > 20 {
-        files.truncate(20);
+    // Infer mode for legacy/normal entries that point to learning projects.
+    for entry in entries.iter_mut() {
+        if entry.mode == "normal" && is_learning_project(&entry.path) {
+            entry.mode = "learning".to_string();
+        }
     }
 
-    let json = serde_json::to_string_pretty(&files)
+    let mode = mode.unwrap_or_else(|| "normal".to_string());
+    // Remove existing entry if present
+    entries.retain(|e| e.path != path);
+    // Add to front
+    entries.insert(0, RecentFileEntry { path, mode });
+    // Limit to 20
+    if entries.len() > 20 {
+        entries.truncate(20);
+    }
+
+    let json = serde_json::to_string_pretty(&entries)
         .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
 
     std::fs::write(&file_path, json)
@@ -1241,7 +1307,7 @@ async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
 
-    let files: Vec<String> = Vec::new();
+    let files: Vec<RecentFileEntry> = Vec::new();
     let json = serde_json::to_string_pretty(&files)
         .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
 
@@ -3806,6 +3872,8 @@ pub fn run() {
             generate_review_content, generate_review_content_batch, init_review_schedule, submit_review_result, check_missing_review_cards,
             socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
             read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
+            ai_agent::generate_paper_reader_guide,
+            ai_agent::submit_paper_reader_feedback,
             create_project_subdir
         ])
         .build(tauri::generate_context!())

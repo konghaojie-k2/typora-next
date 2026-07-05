@@ -88,6 +88,13 @@
               <path d="M2 12l10 5 10-5"/>
             </svg>
           </button>
+          <!-- Sprint 10: 论文导读 -->
+          <button class="btn-icon" id="paperReaderBtn" title="论文导读">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+          </button>
           <!-- Sprint 8a: 立即 Socratic 复习（绕过阈值，方便验收） -->
           <!-- Hidden by default; shown only in learning mode when triggered or dev flag on -->
           <button class="btn-icon" id="openSocraticBtn" title="Socratic 复习（需 dev flag）" style="display:none;">
@@ -422,6 +429,9 @@
   <script src="scripts/learning/socratic-state.js"></script>
   <script src="scripts/learning/socratic-trigger.js"></script>
   <script src="scripts/learning/socratic-modal.js"></script>
+  <!-- Sprint 10: Paper Reader -->
+  <script src="scripts/learning/paper-reader.js"></script>
+  <script src="scripts/learning/paper-reader-integration.js"></script>
   <script src="scripts/main.js"></script>
   <script>
     // Learning mode: toolbar button opens hub (project list)

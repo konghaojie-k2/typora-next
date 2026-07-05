@@ -135,6 +135,40 @@ async function runAcceptanceTests() {
   totalFailed += sprint8Result.failed;
   if (sprint8Steps._cleanup) sprint8Steps._cleanup.call({});
 
+  // Sprint 10: Paper Reader Workspace
+  console.log(`\n${YELLOW}▶ Sprint 10: Paper Reader Workspace${RESET}`);
+  const sprint10FeaturesDir = path.join(__dirname, '../sprint10/features');
+  const sprint10Steps = require('./sprint10_paper_reader.steps');
+
+  const pb1Result = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'pb1_paper_reader_open.feature'),
+    sprint10Steps
+  );
+  totalPassed += pb1Result.passed;
+  totalFailed += pb1Result.failed;
+
+  const pb2Result = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'pb2_paper_reader_navigation.feature'),
+    sprint10Steps
+  );
+  totalPassed += pb2Result.passed;
+  totalFailed += pb2Result.failed;
+
+  const pb3Result = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'pb3_paper_reader_feedback.feature'),
+    sprint10Steps
+  );
+  totalPassed += pb3Result.passed;
+  totalFailed += pb3Result.failed;
+
+  const pb4Result = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'pb4_paper_reader_state_machine.feature'),
+    sprint10Steps
+  );
+  totalPassed += pb4Result.passed;
+  totalFailed += pb4Result.failed;
+  if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

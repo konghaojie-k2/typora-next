@@ -94,8 +94,15 @@
     // Toolbar button - smart toggle: restore panel if in learning mode, else open hub
     const toolbarBtn = document.getElementById('newLearningProjectBtn');
     if (toolbarBtn) {
-      toolbarBtn.addEventListener('click', () => {
-        if (document.body.classList.contains('learning-mode')) {
+      toolbarBtn.addEventListener('click', async () => {
+        // Sprint 10: paper reader mode switch guard
+        if (window.isPaperReaderActive && window.isPaperReaderActive()) {
+          const ok = await window.confirmPaperReaderSwitch('切换模式将关闭论文，是否继续？');
+          if (!ok) return;
+          if (window.closePaperReader) window.closePaperReader();
+        }
+
+        if (window.AppWorkspace?.isIn('course') ?? document.body.classList.contains('learning-mode')) {
           // Already in learning mode - toggle panel/orb
           const panel = document.getElementById('learningProgressPanel');
           const orb = document.getElementById('learningModeOrb');
@@ -297,7 +304,7 @@
     showError(null);
   }
 
-  function transitionTo(step) {
+  async function transitionTo(step) {
     dialogState.step = step;
 
     // Hide all steps
@@ -338,7 +345,7 @@
         closeDialog();
         // Hand off to progress tracker
         if (window.LearningProgress) {
-          window.LearningProgress.startGeneration(dialogState.outline, dialogState.projectPath);
+          await window.LearningProgress.startGeneration(dialogState.outline, dialogState.projectPath);
         }
         break;
     }

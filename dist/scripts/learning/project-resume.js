@@ -110,10 +110,12 @@
    * @returns {string}
    */
   function getChapterStatus(ch, chaptersStatus) {
-    if (!ch || !chaptersStatus) return 'not_generated';
-    if (ch.file && chaptersStatus[ch.file]) return chaptersStatus[ch.file];
-    // v2 schema: status is in chapters_status map only. No fallback to ch.status.
-    return 'not_generated';
+    if (!ch) return 'not_generated';
+    if (chaptersStatus) {
+      if (ch.file && chaptersStatus[ch.file]) return chaptersStatus[ch.file];
+    }
+    // Fallback to legacy ch.status for backwards compatibility (tests, old project.json).
+    return ch.status || 'not_generated';
   }
 
   /**
@@ -179,7 +181,7 @@
         // v2 schema: rating is NOT on chapter, must derive from quiz-history.
         project._ratingsByFile = await _loadChapterRatings(path);
 
-        loadProjectUI(project, path);
+        await loadProjectUI(project, path);
         return project;
       }
     } catch (e) {
@@ -393,7 +395,7 @@
   /**
    * Load project into UI - show progress panel with existing state
    */
-  function loadProjectUI(project, basePath) {
+  async function loadProjectUI(project, basePath) {
     // Set up progress tracker with existing project
     if (window.LearningProgress) {
       const { ChapterStatusManager, ProgressUI, AgentEventBridge } = window.LearningProgress;
@@ -586,7 +588,7 @@
 
         // Enter learning mode
         if (window.TyporaNext && window.TyporaNext.setLearningMode) {
-          window.TyporaNext.setLearningMode(true, basePath);
+          await window.TyporaNext.setLearningMode(true, basePath);
         }
         // Trigger Agent SDK check now that we're in learning mode
         if (window.TyporaNext && window.TyporaNext.checkAgentSdk) {
@@ -696,12 +698,12 @@
         };
 
         // Exit learning mode handler
-        ui.onExitLearningClick = () => {
+        ui.onExitLearningClick = async () => {
           container.style.display = 'none';
           if (orb) orb.style.display = 'none';
           document.removeEventListener('click', onClickOutside);
           if (window.TyporaNext) {
-            if (window.TyporaNext.setLearningMode) window.TyporaNext.setLearningMode(false);
+            if (window.TyporaNext.setLearningMode) await window.TyporaNext.setLearningMode(false);
             if (window.TyporaNext.unloadFolder) window.TyporaNext.unloadFolder();
           }
         };

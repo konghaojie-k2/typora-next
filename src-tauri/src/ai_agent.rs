@@ -195,7 +195,10 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
         exe_dir.join("_up_").join("skills"),       // Tauri resources (Windows MSI)
         exe_dir.join("resources").join("skills"),  // Tauri resources alt layout
         exe_dir.join("..").join("skills"),       // target/release/../skills = target/skills
-        exe_dir.join("..").join("..").join("skills"),  // target/release/../../skills = src-tauri/skills
+        exe_dir.join("..").join("..").join("skills"),  // target/release/../../skills = project-root/skills
+        exe_dir.join("..").join("src-tauri").join("skills"), // target/release/ -> target/src-tauri/skills
+        exe_dir.join("..").join("..").join("src-tauri").join("skills"), // target/release/ -> project-root/src-tauri/skills
+        exe_dir.join("..").join("..").join("..").join("src-tauri").join("skills"), // worktree root/src-tauri/skills
         exe_dir.join("..").join("..").join("..").join("skills"),  // project root/skills (fallback)
     ];
 
@@ -2592,4 +2595,239 @@ pub async fn explore_chat(
 
     log::info!("[Sprint9] explore_chat SUCCESS: response_len={}", stdout.len());
     Ok(stdout)
+}
+
+// ============================================
+// Sprint 10: Paper Reader Guide Generation
+// ============================================
+
+/// Resolve the cache directory and output file path for a paper reader guide.
+/// Pure function; used by `generate_paper_reader_guide` and its tests.
+pub fn resolve_paper_reader_guide_paths(paper_file: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+    let paper_path = std::path::PathBuf::from(paper_file);
+    let paper_dir = paper_path.parent()
+        .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
+    let paper_stem = paper_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("paper");
+    let guide_dir = paper_dir.join(".learning").join("paper-reader-guides");
+    let output_file = guide_dir.join(format!("{}.json", paper_stem));
+    Ok((guide_dir, output_file))
+}
+
+/// Generate a structured reading guide for an academic paper.
+/// Round 2: checks `.learning/paper-reader-guides/{stem}.json` first and returns
+/// the cached guide if it exists. Otherwise calls agent-bridge "paper-reader"
+/// stage; the agent writes the guide JSON, and Rust reads it back.
+#[tauri::command]
+pub async fn generate_paper_reader_guide(
+    paper_file: String,
+    app_handle: tauri::AppHandle,
+) -> Result<serde_json::Value, String> {
+    log::info!("[Sprint10] generate_paper_reader_guide START: paper_file={}", paper_file);
+
+    let paper_path = std::path::PathBuf::from(&paper_file);
+    if !paper_path.exists() {
+        return Err(format!("Paper file not found: {}", paper_file));
+    }
+    let (guide_dir, output_file) = resolve_paper_reader_guide_paths(&paper_file)?;
+    std::fs::create_dir_all(&guide_dir)
+        .map_err(|e| format!("Failed to create guide dir: {}", e))?;
+
+    // Round 2: cache hit — read existing guide directly.
+    if output_file.exists() {
+        log::info!("[Sprint10] paper-reader: cache hit, reading {}", output_file.display());
+        let guide_content = std::fs::read_to_string(&output_file)
+            .map_err(|e| format!("Failed to read cached guide file {}: {}", output_file.display(), e))?;
+        let guide: serde_json::Value = serde_json::from_str(&guide_content)
+            .map_err(|e| format!("Failed to parse cached guide JSON: {}", e))?;
+        log::info!("[Sprint10] paper-reader cache hit SUCCESS: title={}", guide.get("title").and_then(|t| t.as_str()).unwrap_or("(none)"));
+        return Ok(guide);
+    }
+
+    // Ensure bundled skills (typora-paper-reader) are available in the project.
+    let paper_dir = paper_path.parent()
+        .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
+    if let Err(e) = copy_bundled_skills_to_project(&paper_dir.to_string_lossy()) {
+        log::warn!("[Sprint10] paper-reader: failed to copy bundled skills: {}", e);
+    }
+
+    // Round 3: guard window close while generating.
+    {
+        let state = app_handle.state::<crate::AppState>();
+        if let Ok(mut g) = state.generation_in_progress.lock() {
+            *g = true;
+        };
+    }
+
+    let generate_result = async {
+        let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+        let bridge_path = get_agent_bridge_path()?;
+
+        let payload = serde_json::json!({
+            "config": {
+                "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+                "ai_base_url": config.ai_base_url,
+                "api_key": config.api_key,
+                "model": config.model,
+            },
+            "args": {
+                "paper_file": paper_file,
+                "output_file": output_file.to_string_lossy().to_string(),
+                "persona": {
+                    "level": "beginner",
+                    "background": ["neural_network_basics"],
+                    "goal": "understand_generative_models",
+                    "preference": "plain_language"
+                },
+                "session_id": null,
+            }
+        });
+
+        let mut cmd = std::process::Command::new("node");
+        cmd.arg(&bridge_path)
+            .arg("paper-reader")
+            .arg(payload.to_string())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            cmd.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        log::info!("[Sprint10] paper-reader: spawning node process...");
+        let output = cmd.output()
+            .map_err(|e| {
+                log::error!("[Sprint10] paper-reader: spawn failed: {}", e);
+                format!("Failed to spawn agent-bridge: {}", e)
+            })?;
+
+        log::info!("[Sprint10] paper-reader: exit_code={:?}, stdout_len={}, stderr_len={}",
+            output.status.code(), output.stdout.len(), output.stderr.len());
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            log::error!("[Sprint10] paper-reader: agent failed: stderr={}", stderr);
+            return Err(format!("Agent paper reader failed: {}", stderr));
+        }
+
+        // Agent wrote the guide to output_file; read it back.
+        let guide_content = std::fs::read_to_string(&output_file)
+            .map_err(|e| format!("Failed to read guide file {}: {}", output_file.display(), e))?;
+        let guide: serde_json::Value = serde_json::from_str(&guide_content)
+            .map_err(|e| format!("Failed to parse guide JSON: {}", e))?;
+
+        log::info!("[Sprint10] paper-reader SUCCESS: title={}", guide.get("title").and_then(|t| t.as_str()).unwrap_or("(none)"));
+        Ok(guide)
+    }.await;
+
+    // Always clear the generation guard.
+    {
+        let state = app_handle.state::<crate::AppState>();
+        if let Ok(mut g) = state.generation_in_progress.lock() {
+            *g = false;
+        };
+    }
+
+    generate_result
+}
+
+/// Submit paper reader feedback and persist it to disk.
+/// Writes one file per paper: `.learning/paper-reader-feedback/{stem}.json`.
+#[tauri::command]
+pub async fn submit_paper_reader_feedback(
+    paper_file: String,
+    understanding_percentage: u8,
+    method_suitability: String,
+) -> Result<(), String> {
+    log::info!("[Sprint10] submit_paper_reader_feedback START: paper_file={}", paper_file);
+
+    if understanding_percentage > 100 {
+        return Err("understanding_percentage must be between 0 and 100".to_string());
+    }
+    if !matches!(method_suitability.as_str(), "too_shallow" | "just_right" | "too_deep") {
+        return Err("method_suitability must be one of: too_shallow, just_right, too_deep".to_string());
+    }
+
+    let paper_path = std::path::PathBuf::from(&paper_file);
+    let paper_dir = paper_path.parent()
+        .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
+    let paper_stem = paper_path.file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("paper");
+    let feedback_dir = paper_dir.join(".learning").join("paper-reader-feedback");
+    std::fs::create_dir_all(&feedback_dir)
+        .map_err(|e| format!("Failed to create feedback dir: {}", e))?;
+    let feedback_file = feedback_dir.join(format!("{}.json", paper_stem));
+
+    let now = chrono::Local::now();
+    let entry_id = format!("fb_{}_{}", now.format("%Y%m%d"), now.format("%H%M%S"));
+    let new_entry = serde_json::json!({
+        "id": entry_id,
+        "timestamp": now.to_rfc3339(),
+        "understanding_percentage": understanding_percentage,
+        "method_suitability": method_suitability,
+    });
+
+    let mut feedback = if feedback_file.exists() {
+        let content = std::fs::read_to_string(&feedback_file)
+            .map_err(|e| format!("Failed to read feedback file: {}", e))?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({
+            "paper_file": paper_file,
+            "paper_title": paper_stem,
+            "feedback_history": []
+        }))
+    } else {
+        serde_json::json!({
+            "paper_file": paper_file,
+            "paper_title": paper_stem,
+            "feedback_history": []
+        })
+    };
+
+    if let Some(history) = feedback.get_mut("feedback_history").and_then(|h| h.as_array_mut()) {
+        history.push(new_entry);
+    } else {
+        feedback["feedback_history"] = serde_json::json!([new_entry]);
+    }
+
+    std::fs::write(&feedback_file,
+        serde_json::to_string_pretty(&feedback).map_err(|e| format!("Failed to serialize feedback: {}", e))?,
+    ).map_err(|e| format!("Failed to write feedback file: {}", e))?;
+
+    log::info!("[Sprint10] submit_paper_reader_feedback SUCCESS: file={}", feedback_file.display());
+    Ok(())
+}
+
+#[cfg(test)]
+mod paper_reader_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_resolve_paper_reader_guide_paths() {
+        let (guide_dir, output_file) =
+            resolve_paper_reader_guide_paths("C:\\\\Users\\\\test\\\\papers\\\\1312.6114.md").unwrap();
+
+        assert_eq!(
+            guide_dir,
+            PathBuf::from("C:\\\\Users\\\\test\\\\papers\\\\.learning\\\\paper-reader-guides")
+        );
+        assert_eq!(
+            output_file,
+            PathBuf::from("C:\\\\Users\\\\test\\\\papers\\\\.learning\\\\paper-reader-guides\\\\1312.6114.json")
+        );
+    }
+
+    #[test]
+    fn test_resolve_paper_reader_guide_paths_bare_filename() {
+        let result = resolve_paper_reader_guide_paths("1312.6114.md");
+        assert!(result.is_ok());
+        let (guide_dir, output_file) = result.unwrap();
+        assert_eq!(guide_dir, PathBuf::from(".learning\\\\paper-reader-guides"));
+        assert_eq!(output_file, PathBuf::from(".learning\\\\paper-reader-guides\\\\1312.6114.json"));
+    }
 }

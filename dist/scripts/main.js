@@ -43,7 +43,7 @@ window.agentBridge = {
   // State Management
   // ============================================
   const state = {
-    tabs: [],           // {path, content, baseDir, name, scrollTop}
+    tabs: [],           // {path, content, baseDir, name, scrollTop, mode}
     activeTab: -1,      // index of active tab
     sourceMode: false,
     sidebarCollapsed: false,
@@ -56,8 +56,17 @@ window.agentBridge = {
     recentFiles: [],
     searchQuery: '',
     searchMatches: [],
-    searchCurrentIndex: -1
+    searchCurrentIndex: -1,
+    workspace: {
+      current: 'normal',  // 'normal' | 'course' | 'paper'
+      context: {
+        projectPath: null,       // course
+        activePaperPath: null,   // paper
+        paperProjectPath: null   // paper
+      }
+    }
   };
+  let paperReaderSidebarWasCollapsed = null;
 
   // ============================================
   // DOM Elements
@@ -76,12 +85,14 @@ window.agentBridge = {
     openFolderToolbarBtn: document.getElementById('openFolderToolbarBtn'),
     fileTreeSearch: document.getElementById('fileTreeSearch'),
     contentArea: document.getElementById('contentArea'),
+    contentMainWrapper: document.getElementById('contentMainWrapper'),
     markdownBody: document.getElementById('markdownBody'),
     sourceView: document.getElementById('sourceView'),
     sourceCode: document.getElementById('sourceCode'),
     tabsBar: document.getElementById('tabsBar'),
     tabsList: document.getElementById('tabsList'),
     openFileBtn: document.getElementById('openFileBtn'),
+    paperReaderBtn: document.getElementById('paperReaderBtn'),
     sourceToggle: document.getElementById('sourceToggle'),
     exportPdfBtn: document.getElementById('exportPdfBtn'),
     exportWordBtn: document.getElementById('exportWordBtn'),
@@ -208,6 +219,104 @@ window.agentBridge = {
       }
     }
   }
+
+  // Sprint 10 PB1: Open paper reader workspace
+  async function openPaperReader() {
+    if (!window.__TAURI__) {
+      showError('论文导读需要在桌面应用中使用');
+      return;
+    }
+    if (!window.PaperReader || !window.PaperReaderIntegration) {
+      showError('论文导读模块未加载');
+      return;
+    }
+    await AppWorkspace.switchTo('paper');
+  }
+
+  /**
+   * Open a specific paper file in the paper workspace.
+   * If called without a path, prompts the user via file dialog.
+   */
+  async function openPaperFile(paperFile) {
+    if (!window.__TAURI__) {
+      showError('论文导读需要在桌面应用中使用');
+      return;
+    }
+    if (!window.PaperReader || !window.PaperReaderIntegration) {
+      showError('论文导读模块未加载');
+      return;
+    }
+
+    if (!paperFile) {
+      try {
+        const result = await invoke('open_file_dialog');
+        if (!result || !result.path) return;
+        paperFile = result.path;
+      } catch (err) {
+        if (err !== 'No file selected') {
+          console.error('Failed to select paper:', err);
+          showError('选择论文失败: ' + err);
+        }
+        return;
+      }
+    }
+
+    // Ensure we are in the paper workspace.
+    if (!AppWorkspace.isIn('paper')) {
+      const switched = await AppWorkspace.switchTo('paper', {
+        context: { activePaperPath: paperFile }
+      });
+      if (!switched) return;
+    }
+
+    // Add or switch to the paper tab.
+    const existingIndex = state.tabs.findIndex(t => t.path === paperFile);
+    if (existingIndex >= 0) {
+      await switchTab(existingIndex);
+      return;
+    }
+
+    try {
+      showToast('正在生成导读...', 'info', 0);
+      const result = await invoke('open_file', { path: paperFile });
+      hideToast();
+      if (result && result.content) {
+        await addTab(result.path, result.content, result.base_dir || '', {
+          mode: 'paper',
+          workspaceContext: {
+            activePaperPath: result.path,
+            paperProjectPath: result.base_dir || ''
+          }
+        });
+        invoke('add_recent_file', { path: paperFile, mode: 'paper' }).then(() => {
+          loadRecentFiles();
+        }).catch(err => console.error('Failed to add recent paper file:', err));
+      }
+    } catch (err) {
+      hideToast();
+      console.error('Failed to open paper file:', err);
+      showError('无法打开论文文件: ' + err);
+    }
+  }
+
+  // Legacy paper-reader overlay functions (renderPaperReaderWelcome,
+  // startPaperReaderFileSelection, renderPaperReaderLoading,
+  // ensurePaperReaderWrapper, closePaperReader) were removed in Phase 2.
+  // Paper reader now uses the tab enhancement model via PaperReaderIntegration
+  // and openPaperFile(). Keep minimal compatibility shims for external callers.
+  window.isPaperReaderActive = function () {
+    return AppWorkspace.isIn('paper') && state.tabs.some(t => t.mode === 'paper');
+  };
+
+  window.confirmPaperReaderSwitch = function (message) {
+    return _showConfirm(message);
+  };
+
+  window.closePaperReader = async function () {
+    if (AppWorkspace.isIn('paper')) {
+      await AppWorkspace.switchTo('normal');
+    }
+  };
 
   // ============================================
   // File Watch
@@ -383,20 +492,31 @@ window.agentBridge = {
   // ============================================
   // Tab Management
   // ============================================
-  async function addTab(path, content, baseDir) {
-    // Scope check: if learning mode is scoped to a project and the user
-    // opens a file outside it, warn that course mode will be exited.
-    if (_learningProjectPath) {
-      // Normalize both paths to lower-case backslash for reliable comparison
-      const projectNorm = _learningProjectPath.replace(/\//g, '\\').toLowerCase();
-      const fileNorm = path.replace(/\//g, '\\').toLowerCase();
-      if (!fileNorm.startsWith(projectNorm)) {
-        const msg = '当前处于课程模式，打开非课程文件将退出课程模式。\n\n章节生成可能会被中断。确定要打开这个文件吗？';
-        const ok = await _showConfirm(msg);
-        if (!ok) {
-          return; // User cancelled, don't open the file
+  async function addTab(path, content, baseDir, options = {}) {
+    // Determine target workspace mode. Default to current workspace for
+    // backward compatibility (e.g. chapter files opened while in course mode).
+    let mode = options.mode || AppWorkspace.getCurrent();
+    // Rust backend uses 'learning' for course projects; normalize to frontend id.
+    if (mode === 'learning') mode = 'course';
+
+    // Switch workspace if needed.
+    if (mode !== AppWorkspace.getCurrent()) {
+      const switched = await AppWorkspace.switchTo(mode, { context: options.workspaceContext });
+      if (!switched) return;
+    }
+
+    // Course scope guard: opening a file outside the current project exits
+    // course workspace and opens it as a normal tab.
+    if (AppWorkspace.isIn('course')) {
+      const projectPath = AppWorkspace.getContext().projectPath;
+      if (projectPath) {
+        const projectNorm = projectPath.replace(/\//g, '\\').toLowerCase();
+        const fileNorm = path.replace(/\//g, '\\').toLowerCase();
+        if (!fileNorm.startsWith(projectNorm)) {
+          const switched = await AppWorkspace.switchTo('normal');
+          if (!switched) return;
+          mode = 'normal';
         }
-        setLearningMode(false); // Full teardown
       }
     }
 
@@ -419,7 +539,7 @@ window.agentBridge = {
       baseDir,
       name: getFileName(path),
       scrollTop: 0,
-      mode: 'normal'
+      mode
     };
 
     state.tabs.push(tab);
@@ -428,9 +548,6 @@ window.agentBridge = {
     await loadTabContent(state.activeTab);
 
     // Reset DOM scroll to the new tab's saved position (0 for new tabs).
-    // Without this, the browser's default overflow-anchor preserves the
-    // previous tab's scrollTop on innerHTML replacement, so the new file
-    // opens at the old file's scroll position.
     if (elements.markdownBody) {
       elements.markdownBody.scrollTop = tab.scrollTop || 0;
     }
@@ -438,14 +555,25 @@ window.agentBridge = {
     watchCurrentFile(path);
     showToast('已打开: ' + tab.name);
 
-    // Add to recent files
-    invoke('add_recent_file', { path }).then(() => {
+    // Add to recent files with the correct workspace mode
+    invoke('add_recent_file', { path, mode }).then(() => {
       loadRecentFiles();
     }).catch(err => {
       console.error('Failed to add recent file:', err);
     });
 
     saveUIState();
+  }
+
+  // Read the scroll position for a tab. Paper tabs scroll inside
+  // #paper-reader-main; everything else scrolls on #markdownBody.
+  function _readTabScroll(tab) {
+    if (!tab) return 0;
+    if (tab.mode === 'paper') {
+      const main = document.getElementById('paper-reader-main');
+      return main ? main.scrollTop : 0;
+    }
+    return elements.markdownBody ? elements.markdownBody.scrollTop : 0;
   }
 
   async function switchTab(index) {
@@ -456,17 +584,24 @@ window.agentBridge = {
 
     // Save scroll position of current tab before switching
     const currentTab = state.tabs[state.activeTab];
-    if (currentTab && elements.markdownBody) {
-      currentTab.scrollTop = elements.markdownBody.scrollTop;
+    if (currentTab) {
+      currentTab.scrollTop = _readTabScroll(currentTab);
+    }
+
+    // Unmount the outgoing paper reader so its DOM/interval does not linger
+    // while the incoming tab renders into #markdownBody.
+    if (currentTab && currentTab.mode === 'paper' && window.PaperReaderIntegration) {
+      window.PaperReaderIntegration.unmountTab(currentTab);
     }
 
     state.activeTab = index;
     renderTabs();
     await loadTabContent(index);
 
-    // Restore scroll position of the new tab after render completes
+    // Restore scroll position of the new tab after render completes.
+    // Paper reader restores its own scroll inside #paper-reader-main.
     const tab = state.tabs[index];
-    if (tab && elements.markdownBody) {
+    if (tab && tab.mode !== 'paper' && elements.markdownBody) {
       elements.markdownBody.scrollTop = tab.scrollTop || 0;
     }
 
@@ -480,11 +615,18 @@ window.agentBridge = {
 
     // Save scroll position of current tab before closing
     const closingTab = state.tabs[state.activeTab];
-    if (closingTab && elements.markdownBody) {
-      closingTab.scrollTop = elements.markdownBody.scrollTop;
+    if (closingTab) {
+      closingTab.scrollTop = _readTabScroll(closingTab);
     }
 
-    const closedPath = state.tabs[index].path;
+    const closedTab = state.tabs[index];
+    const closedPath = closedTab.path;
+
+    // Tear down the paper reader for the tab being closed (frees DOM/listeners).
+    if (closedTab.mode === 'paper' && window.PaperReaderIntegration) {
+      window.PaperReaderIntegration.unmountTab(closedTab);
+    }
+
     state.tabs.splice(index, 1);
 
     // If no other tab still references this file, tear down its exploration panel
@@ -507,7 +649,7 @@ window.agentBridge = {
       await loadTabContent(state.activeTab);
       const activeTab = state.tabs[state.activeTab];
       if (activeTab) {
-        if (elements.markdownBody) {
+        if (activeTab.mode !== 'paper' && elements.markdownBody) {
           elements.markdownBody.scrollTop = activeTab.scrollTop || 0;
         }
         watchCurrentFile(activeTab.path);
@@ -562,7 +704,7 @@ window.agentBridge = {
     menu.style.top = event.clientY + 'px';
 
     const tab = state.tabs[index];
-    const inLearningMode = document.body.classList.contains('learning-mode');
+    const inLearningMode = AppWorkspace.isIn('course');
     const items = [
       { label: '在文件夹中显示', action: () => {
         if (tab && tab.path) {
@@ -637,7 +779,7 @@ window.agentBridge = {
     menu.style.left = event.clientX + 'px';
     menu.style.top = event.clientY + 'px';
 
-    const inLearningMode = document.body.classList.contains('learning-mode');
+    const inLearningMode = AppWorkspace.isIn('course');
     const items = [
       { label: '打开', action: () => openTreeFile(filePath) }
     ];
@@ -700,7 +842,7 @@ window.agentBridge = {
   function showMarkdownContextMenu(event) {
     const tab = state.tabs[state.activeTab];
     if (!tab || !tab.path.toLowerCase().endsWith('.md')) return;
-    if (document.body.classList.contains('learning-mode')) return;
+    if (AppWorkspace.isIn('course')) return;
 
     event.preventDefault();
 
@@ -793,6 +935,16 @@ window.agentBridge = {
     if (index < 0 || index >= state.tabs.length) return;
     const tab = state.tabs[index];
 
+    // Paper tabs render through the PaperReader integration, not the normal
+    // markdown pipeline. The reader renders into #markdownBody directly.
+    if (tab.mode === 'paper' && window.PaperReaderIntegration) {
+      await window.PaperReaderIntegration.enhancePaperTab(tab);
+      elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
+        item.classList.toggle('active', item.dataset.path === tab.path);
+      });
+      return;
+    }
+
     await renderMarkdown(tab.content, tab.baseDir);
 
     // Update file tree active state
@@ -857,7 +1009,7 @@ window.agentBridge = {
       initDownloadButtons();
 
       // Sprint 3: Enhance learning elements (concept/question/quiz cards)
-      console.log('[Sprint3-MAIN] checking LearningModeIntegration:', typeof window.LearningModeIntegration, 'learning-mode:', document.body.classList.contains('learning-mode'));
+      console.log('[Sprint3-MAIN] checking LearningModeIntegration:', typeof window.LearningModeIntegration, 'course-mode:', AppWorkspace.isIn('course'));
       if (window.LearningModeIntegration) {
         try {
           window.LearningModeIntegration.enhanceLearningElements();
@@ -871,7 +1023,7 @@ window.agentBridge = {
       console.log('[DEBUG renderMarkdown] applyAnnotations done');
 
       // Sprint 3: Setup quiz panel + selection explainer (only in learning mode)
-      if (document.body.classList.contains('learning-mode') && window.LearningModeIntegration) {
+      if (AppWorkspace.isIn('course') && window.LearningModeIntegration) {
         try {
           // Get current chapter file path and project base dir
           const activeTab = state.tabs[state.activeTab];
@@ -930,6 +1082,13 @@ window.agentBridge = {
       panel.unmount();
       explorationPanels.delete(filePath);
     }
+  }
+
+  function closeAllExplorationPanels() {
+    for (const [filePath, panel] of explorationPanels) {
+      panel.unmount();
+    }
+    explorationPanels.clear();
   }
 
   /**
@@ -1179,6 +1338,24 @@ window.agentBridge = {
     }
   }
 
+  function getModeIcon(mode) {
+    switch (mode) {
+      case 'learning': return '🎓';
+      case 'paper': return '📄';
+      case 'normal':
+      default: return '📄';
+    }
+  }
+
+  function getModeLabel(mode) {
+    switch (mode) {
+      case 'learning': return '课程';
+      case 'paper': return '论文';
+      case 'normal':
+      default: return '';
+    }
+  }
+
   function renderRecentFiles() {
     if (!elements.recentFilesList || !elements.recentFilesSection) return;
 
@@ -1190,21 +1367,111 @@ window.agentBridge = {
     elements.recentFilesSection.style.display = '';
     elements.recentFilesList.innerHTML = '';
 
-    state.recentFiles.forEach(path => {
+    state.recentFiles.forEach(entry => {
+      const path = entry.path || entry;
+      const mode = entry.mode || 'normal';
       const item = document.createElement('div');
       item.className = 'recent-file-item';
-      item.textContent = getFileName(path);
       item.title = path;
-      item.addEventListener('click', () => openRecentFile(path));
+
+      const icon = document.createElement('span');
+      icon.className = 'recent-file-mode-icon';
+      icon.textContent = getModeIcon(mode);
+      item.appendChild(icon);
+
+      const name = document.createElement('span');
+      name.className = 'recent-file-name';
+      name.textContent = getFileName(path);
+      item.appendChild(name);
+
+      const label = getModeLabel(mode);
+      if (label) {
+        const tag = document.createElement('span');
+        tag.className = 'recent-file-mode-tag';
+        tag.textContent = label;
+        item.appendChild(tag);
+      }
+
+      item.addEventListener('click', () => openRecentFile(entry));
       elements.recentFilesList.appendChild(item);
     });
   }
 
-  async function openRecentFile(path) {
+  // Pure routing logic for recent files: normalizes the backend mode label and
+  // builds the workspace context for addTab. Extracted so it can be unit-tested.
+  function resolveRecentFileRoute(entry, openResult) {
+    const path = (entry && entry.path) || (typeof entry === 'string' ? entry : '');
+    let mode = (entry && entry.mode) || 'normal';
+    // Rust backend uses 'learning' for course projects.
+    if (mode === 'learning') mode = 'course';
+    if (mode !== 'normal' && mode !== 'course' && mode !== 'paper') {
+      mode = 'normal';
+    }
+    const baseDir = (openResult && openResult.base_dir) || '';
+    const workspaceContext = mode === 'course'
+      // Course recent entries point at either the project folder or a chapter
+      // file. projectPath must be the project ROOT (the chapter's parent dir),
+      // not the chapter file — otherwise the course-scope guard in addTab
+      // misfires on sibling chapters and switches back to normal mode.
+      ? { projectPath: baseDir || path }
+      : mode === 'paper'
+        ? { activePaperPath: path, paperProjectPath: baseDir }
+        : {};
+    return { path, mode, baseDir, workspaceContext };
+  }
+
+  async function openRecentFile(entry) {
     try {
-      const result = await invoke('open_file', { path });
+      const route = resolveRecentFileRoute(entry, null);
+
+      // Course recent entries point at either the project folder or a chapter
+      // file. Clicking one must (1) enter course mode with the project ROOT
+      // as projectPath, and (2) if the entry is a chapter file, open that
+      // chapter as a course tab. We must NOT call open_file on a folder path
+      // (it fails with "no corresponding file").
+      if (route.mode === 'course') {
+        let projectPath = route.path;
+        let chapterResult = null;
+        try {
+          const result = await invoke('open_file', { path: route.path });
+          if (result && result.content) {
+            // path is a chapter file — project root is its parent directory.
+            projectPath = result.base_dir || route.path;
+            chapterResult = result;
+          }
+        } catch (_) {
+          // path is likely the project folder itself; open_file fails — fine.
+        }
+        const switched = await AppWorkspace.switchTo('course', {
+          context: { projectPath }
+        });
+        if (!switched) return;
+        // Restore the progress panel + orb + chapter list. Course onEnter
+        // only loads the folder tree and badge; the bottom-right panel is
+        // set up by project-resume. Without this, re-entering course from
+        // recent leaves the panel hidden (it was hidden by course onExit)
+        // until the user clicks the toolbar course button to toggle it.
+        // loadProject's internal setLearningMode→switchTo('course') is a
+        // no-op here (already in course), so no re-entry loop.
+        if (window.LearningProjectResume && window.LearningProjectResume.loadProject) {
+          await window.LearningProjectResume.loadProject(projectPath);
+        }
+        if (chapterResult) {
+          await addTab(route.path, chapterResult.content, chapterResult.base_dir || '', {
+            mode: 'course'
+          });
+        }
+        return;
+      }
+
+      // Normal / paper: open the file and add a tab.
+      const result = await invoke('open_file', { path: route.path });
       if (result && result.content) {
-        addTab(result.path, result.content, result.base_dir || '');
+        const finalRoute = resolveRecentFileRoute(entry, result);
+        addTab(finalRoute.path, result.content, finalRoute.baseDir, {
+          mode: finalRoute.mode,
+          workspaceContext: finalRoute.workspaceContext
+        });
       }
     } catch (err) {
       console.error('Failed to open recent file:', err);
@@ -1278,29 +1545,73 @@ window.agentBridge = {
   /**
    * Toggle learning mode visual indicator
    */
-  // Track which project workspace learning mode is scoped to.
-  // When a file is opened outside this path, learning mode is visually
-  // suppressed (no CSS class) but NOT torn down — generation continues.
-  let _learningProjectPath = null;
-
   // DOM-based confirm dialog (reliable in Tauri WebView where browser confirm() may not work)
-  function _showConfirm(msg) {
+  // Workspace accent colors, used by the confirm dialog chips and the
+  // toolbar badges. Keep in sync with the CSS for body.{learning,paper}-mode.
+  const WORKSPACE_COLORS = {
+    normal: '#6b7280',
+    course: '#8b5cf6',
+    paper: '#f97316'
+  };
+
+  function _workspaceChip(label, workspaceId) {
+    const chip = document.createElement('span');
+    chip.className = 'workspace-chip';
+    const color = WORKSPACE_COLORS[workspaceId] || '#6b7280';
+    chip.style.cssText = `display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:9999px;font-size:13px;font-weight:600;color:#fff;background:${color};white-space:nowrap;`;
+    chip.textContent = label;
+    return chip;
+  }
+
+  // Render a confirmation dialog. Accepts either a plain string (legacy) or
+  // a structured payload { from, fromId, to, toId, impact } so the current
+  // and target workspaces can be visually emphasized.
+  function _showConfirm(payload) {
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:99999;';
       const box = document.createElement('div');
-      box.style.cssText = 'background:var(--color-bg-primary,#fff);border-radius:12px;padding:24px;max-width:420px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:inherit;';
-      const p = document.createElement('p');
-      p.style.cssText = 'margin:0 0 20px;font-size:14px;line-height:1.6;color:var(--color-text-primary,#1f2937);white-space:pre-wrap;';
-      p.textContent = msg;
-      box.appendChild(p);
+      box.style.cssText = 'background:var(--color-bg-primary,#fff);border-radius:12px;padding:24px;max-width:460px;box-shadow:0 20px 60px rgba(0,0,0,0.3);font-family:inherit;';
+
+      if (payload && typeof payload === 'object' && payload.from && payload.to) {
+        // Structured: title + from→to chips + impact line.
+        const title = document.createElement('div');
+        title.style.cssText = 'margin:0 0 14px;font-size:15px;font-weight:600;color:var(--color-text-primary,#1f2937);';
+        title.textContent = '切换工作区';
+        box.appendChild(title);
+
+        const row = document.createElement('div');
+        row.style.cssText = 'display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap;';
+        row.appendChild(_workspaceChip(payload.from, payload.fromId));
+        const arrow = document.createElement('span');
+        arrow.style.cssText = 'color:var(--color-text-tertiary,#9ca3af);font-size:16px;';
+        arrow.textContent = '→';
+        row.appendChild(arrow);
+        row.appendChild(_workspaceChip(payload.to, payload.toId));
+        box.appendChild(row);
+
+        if (payload.impact) {
+          const impact = document.createElement('p');
+          impact.style.cssText = 'margin:0 0 20px;font-size:13px;line-height:1.6;color:var(--color-text-secondary,#4a4a68);white-space:pre-wrap;';
+          impact.textContent = payload.impact;
+          box.appendChild(impact);
+        }
+      } else {
+        // Legacy plain-text message.
+        const msg = typeof payload === 'string' ? payload : String(payload);
+        const p = document.createElement('p');
+        p.style.cssText = 'margin:0 0 20px;font-size:14px;line-height:1.6;color:var(--color-text-primary,#1f2937);white-space:pre-wrap;';
+        p.textContent = msg;
+        box.appendChild(p);
+      }
+
       const btnRow = document.createElement('div');
       btnRow.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;';
       const cancelBtn = document.createElement('button');
       cancelBtn.textContent = '取消';
-      cancelBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:1px solid var(--color-border,#e5e7eb);background:var(--color-bg-primary,#fff);cursor:pointer;font-size:14px;font-family:inherit;';
+      cancelBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:1px solid var(--color-border,#e5e7eb);background:var(--color-bg-primary,#fff);cursor:pointer;font-size:14px;font-family:inherit;color:var(--color-text-primary,#1f2937);';
       const okBtn = document.createElement('button');
-      okBtn.textContent = '确定';
+      okBtn.textContent = '确认切换';
       okBtn.style.cssText = 'padding:8px 16px;border-radius:6px;border:none;background:#2563eb;color:#fff;cursor:pointer;font-size:14px;font-family:inherit;';
       btnRow.appendChild(cancelBtn);
       btnRow.appendChild(okBtn);
@@ -1313,53 +1624,168 @@ window.agentBridge = {
     });
   }
 
-  function setLearningMode(enabled, projectPath) {
-    if (enabled && projectPath) {
-      _learningProjectPath = projectPath;
-    } else if (!enabled) {
-      _learningProjectPath = null;
-      // Full state cleanup: hide progress panel, restore orb, exit learning mode UI
-      const panel = document.getElementById('learningProgressPanel');
-      const orb = document.getElementById('learningModeOrb');
-      if (panel) panel.style.display = 'none';
-      if (orb) orb.style.display = 'none';
-    }
-    document.body.classList.toggle('learning-mode', enabled);
+  // ============================================
+  // AppWorkspace State Machine
+  // ============================================
+  // Unified workspace management for Normal / Course / Paper modes.
+  // Each workspace registers lifecycle hooks; transitions are driven by a
+  // declarative rule table so adding a new workspace only requires a new
+  // registry entry.
+  const AppWorkspace = {
+    registry: new Map(),
+    switching: false,
 
-    // Sprint 8a: update Socratic quick-trigger button visibility
-    _updateSocraticButtonState();
+    register(spec) {
+      if (!spec || !spec.id) throw new Error('Workspace spec must have an id');
+      this.registry.set(spec.id, spec);
+    },
 
-    // Insert/remove badge in toolbar
-    let badge = document.getElementById('learningModeBadge');
-    if (enabled) {
-      if (!badge) {
-        badge = document.createElement('span');
-        badge.id = 'learningModeBadge';
-        badge.className = 'learning-mode-badge';
-        badge.textContent = '🎓 课程模式';
-        const toolbarRight = document.querySelector('.toolbar-right');
-        if (toolbarRight) {
-          toolbarRight.insertBefore(badge, toolbarRight.firstChild);
-        }
+    getCurrent() {
+      return state.workspace.current;
+    },
+
+    isIn(workspaceId) {
+      return state.workspace.current === workspaceId;
+    },
+
+    getContext() {
+      return state.workspace.context;
+    },
+
+    setContext(patch) {
+      Object.assign(state.workspace.context, patch);
+    },
+
+    _getRule(from, to) {
+      // Exact match first, then wildcard rules
+      const exact = TransitionRules.find(r => r.from === from && r.to === to);
+      if (exact) return exact;
+      const fromWildcard = TransitionRules.find(r => r.from === '*' && r.to === to);
+      if (fromWildcard) return fromWildcard;
+      const toWildcard = TransitionRules.find(r => r.from === from && r.to === '*');
+      if (toWildcard) return toWildcard;
+      const bothWildcard = TransitionRules.find(r => r.from === '*' && r.to === '*');
+      return bothWildcard || null;
+    },
+
+    async switchTo(targetId, options = {}) {
+      if (this.switching) return false;
+      const fromId = state.workspace.current;
+      if (fromId === targetId) return true;
+
+      const spec = this.registry.get(targetId);
+      if (!spec) {
+        console.error('[AppWorkspace] Unknown workspace:', targetId);
+        return false;
       }
-    } else if (badge) {
-      badge.remove();
-    }
 
-    // S4: teardown learning mode integrations when exiting
-    if (!enabled && window.LearningModeIntegration) {
-      window.LearningModeIntegration.teardown();
-    }
+      const context = options.context || {};
+      if (spec.canEnter && !spec.canEnter(context)) {
+        showError(`无法进入 ${spec.displayName || targetId} 工作区`);
+        return false;
+      }
 
-    // Sprint 8a: update Socratic quick-trigger button visual state (always visible)
-    _updateSocraticButtonState();
+      const rule = this._getRule(fromId, targetId);
+      if (rule && (rule.confirm || rule.impact)) {
+        const fromSpec = this.registry.get(fromId);
+        const payload = {
+          from: fromSpec ? fromSpec.displayName : fromId,
+          fromId,
+          to: spec.displayName || targetId,
+          toId: targetId,
+          impact: typeof rule.impact === 'function'
+            ? rule.impact(fromId, targetId, options)
+            : rule.impact
+        };
+        // Legacy string rule (confirm) — pass through as plain text.
+        const legacy = typeof rule.confirm === 'function'
+          ? rule.confirm(fromId, targetId, options)
+          : rule.confirm;
+        const ok = legacy
+          ? await _showConfirm(legacy)
+          : await _showConfirm(payload);
+        if (!ok) return false;
+      }
+
+      this.switching = true;
+      try {
+        // Exit current workspace
+        const fromSpec = this.registry.get(fromId);
+        if (fromSpec && fromSpec.onExit) {
+          await fromSpec.onExit(targetId);
+        }
+
+        // Clean up exploration panels when leaving Normal workspace
+        closeAllExplorationPanels();
+
+        // Close all tabs from previous workspace
+        closeAllTabs();
+
+        // Switch state
+        state.workspace.current = targetId;
+        state.workspace.context = { ...context };
+
+        // Apply body class for CSS
+        document.body.classList.remove('learning-mode', 'paper-reader-mode');
+        if (spec.bodyClass) {
+          document.body.classList.add(spec.bodyClass);
+        }
+
+        // Enter target workspace
+        if (spec.onEnter) {
+          await spec.onEnter(fromId, options);
+        }
+
+        return true;
+      } catch (err) {
+        console.error('[AppWorkspace] Failed to switch workspace:', err);
+        showError('工作区切换失败: ' + err.message);
+        return false;
+      } finally {
+        this.switching = false;
+      }
+    }
+  };
+
+  // Expose globally for sub-modules
+  window.AppWorkspace = AppWorkspace;
+
+  // Transition rule table: define which workspace switches need confirmation.
+  // The confirm value can be a string or a function returning a string.
+  // Transition rule table. `impact` describes the consequence of the switch
+  // (the from→to pair is rendered separately as colored chips). The chips
+  // already say "常规模式 → 课程模式", so impact only needs to explain *what
+  // happens to the current content*.
+  const TransitionRules = [
+    { from: 'normal', to: 'course', impact: '当前常规文档将被关闭，你可以在最近打开里找回它们。课程模式会加载选定项目的章节树与学习进度。' },
+    { from: 'course', to: 'normal', impact: '将关闭当前课程的所有章节标签。若章节生成仍在进行，会被中断；项目进度已保存，下次进入课程可继续。' },
+    { from: 'normal', to: 'paper', impact: '当前常规文档将被关闭，你可以在最近打开里找回它们。论文导读会为论文生成或加载 AI 导读。' },
+    { from: 'paper', to: 'normal', impact: '将关闭当前论文标签。你的阅读进度与导读已保留，下次打开同一篇论文会恢复。' },
+    { from: 'course', to: 'paper', impact: '将关闭当前课程的所有章节标签（项目进度已保存）。随后进入论文导读。' },
+    { from: 'paper', to: 'course', impact: '将关闭当前论文标签（阅读进度已保留）。随后进入课程模式。' }
+  ];
+
+  function closeAllTabs() {
+    state.tabs = [];
+    state.activeTab = -1;
+    renderTabs();
+    showWelcome();
+  }
+
+  async function setLearningMode(enabled, projectPath) {
+    // Compatibility wrapper around the unified AppWorkspace state machine.
+    if (enabled && projectPath) {
+      await AppWorkspace.switchTo('course', { context: { projectPath } });
+    } else if (!enabled) {
+      await AppWorkspace.switchTo('normal');
+    }
   }
 
   function _updateSocraticButtonState(forceVisible = false) {
     const socraticBtn = document.getElementById('openSocraticBtn');
     if (!socraticBtn) return;
     const devOn = window.SocraticTrigger?.isDevQuickTriggerEnabled?.();
-    const inLearning = document.body.classList.contains('learning-mode');
+    const inLearning = AppWorkspace.isIn('course');
     const visible = devOn || (inLearning && forceVisible);
 
     socraticBtn.style.display = visible ? '' : 'none';
@@ -1367,6 +1793,152 @@ window.agentBridge = {
       ? '立即 Socratic 复习 (Ctrl+Shift+S) — DEV 已启用'
       : 'Socratic 快捷入口';
     socraticBtn.style.opacity = devOn ? '1' : '0.7';
+  }
+
+  function registerWorkspaces() {
+    AppWorkspace.register({
+      id: 'normal',
+      displayName: '常规模式',
+      bodyClass: null,
+      canEnter() { return true; },
+      async onEnter() {
+        // Normal workspace is the default; nothing special to set up.
+      },
+      async onExit() {
+        // Cleanup is handled by closeAllTabs and closeAllExplorationPanels.
+      }
+    });
+
+    AppWorkspace.register({
+      id: 'course',
+      displayName: '课程模式',
+      bodyClass: 'learning-mode',
+      canEnter(ctx) { return !!ctx.projectPath; },
+      async onEnter(fromId, options) {
+        const projectPath = options.context?.projectPath;
+        if (!projectPath) return;
+
+        // Track learning project in recent files with the correct mode badge.
+        invoke('add_recent_file', { path: projectPath, mode: 'learning' })
+          .then(() => loadRecentFiles())
+          .catch(err => console.error('Failed to track learning project:', err));
+
+        // Load project folder tree.
+        await loadFolderPath(projectPath);
+
+        // Insert course badge in toolbar.
+        let badge = document.getElementById('learningModeBadge');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.id = 'learningModeBadge';
+          badge.className = 'workspace-badge learning-mode-badge';
+          badge.textContent = '🎓 课程模式';
+          const toolbarRight = document.querySelector('.toolbar-right');
+          if (toolbarRight) {
+            toolbarRight.insertBefore(badge, toolbarRight.firstChild);
+          }
+        }
+
+        _updateSocraticButtonState();
+      },
+      async onExit(toId) {
+        // Hide progress panel and orb.
+        const panel = document.getElementById('learningProgressPanel');
+        const orb = document.getElementById('learningModeOrb');
+        if (panel) panel.style.display = 'none';
+        if (orb) orb.style.display = 'none';
+
+        // Remove course badge.
+        const badge = document.getElementById('learningModeBadge');
+        if (badge) badge.remove();
+
+        // Teardown learning mode integrations.
+        if (window.LearningModeIntegration) {
+          window.LearningModeIntegration.teardown();
+        }
+
+        // Unload folder tree.
+        unloadFolder();
+
+        _updateSocraticButtonState();
+      }
+    });
+
+    AppWorkspace.register({
+      id: 'paper',
+      displayName: '论文导读',
+      bodyClass: 'paper-reader-mode',
+      canEnter() { return true; },
+      async onEnter(fromId, options) {
+        // The paper reader's reading-order nav is hosted in the left TOC
+        // panel, so we want the sidebar VISIBLE and on the TOC tab (the
+        // opposite of the old overlay model which collapsed the sidebar).
+        paperReaderSidebarWasCollapsed = state.sidebarCollapsed;
+        if (state.sidebarCollapsed) toggleSidebar();
+        switchSidebarTab('toc');
+
+        // Insert paper badge in toolbar (orange accent, mirrors course badge).
+        let badge = document.getElementById('paperReaderBadge');
+        if (!badge) {
+          badge = document.createElement('span');
+          badge.id = 'paperReaderBadge';
+          badge.className = 'workspace-badge paper-reader-badge';
+          badge.textContent = '📄 论文导读';
+          const toolbarRight = document.querySelector('.toolbar-right');
+          if (toolbarRight) {
+            toolbarRight.insertBefore(badge, toolbarRight.firstChild);
+          }
+        }
+
+        const ctx = options.context || {};
+        AppWorkspace.setContext(ctx);
+
+        if (ctx.activePaperPath) {
+          // Opened from recent files or direct invocation: create a paper tab.
+          try {
+            const result = await invoke('open_file', { path: ctx.activePaperPath });
+            if (result && result.content) {
+              await addTab(result.path, result.content, result.base_dir || '', {
+                mode: 'paper',
+                workspaceContext: {
+                  activePaperPath: result.path,
+                  paperProjectPath: result.base_dir || ''
+                }
+              });
+              return;
+            }
+          } catch (err) {
+            console.error('[PaperWorkspace] Failed to open paper file:', err);
+            showError('无法打开论文文件: ' + err);
+          }
+        }
+
+        // No paper file specified: show welcome screen.
+        if (window.PaperReaderIntegration) {
+          window.PaperReaderIntegration.showWelcome(elements.markdownBody);
+        }
+      },
+      async onExit(toId) {
+        // Remove paper badge.
+        const badge = document.getElementById('paperReaderBadge');
+        if (badge) badge.remove();
+
+        if (window.PaperReaderIntegration) {
+          window.PaperReaderIntegration.teardown();
+        }
+        // Restore the TOC panel placeholder (the paper reader sidebar was
+        // hosted there; teardown already detached it via reader.close()).
+        if (elements.tocTree) {
+          elements.tocTree.innerHTML = '<p class="toc-empty">打开文件以显示目录</p>';
+        }
+        // Re-collapse the sidebar if it was collapsed before entry (we
+        // expanded it on enter to host the reading-order nav).
+        if (paperReaderSidebarWasCollapsed === true && !state.sidebarCollapsed) {
+          toggleSidebar();
+        }
+        paperReaderSidebarWasCollapsed = null;
+      }
+    });
   }
 
   function renderFileTree(entries, container = null, depth = 0) {
@@ -2832,6 +3404,14 @@ window.agentBridge = {
     toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, duration);
   }
 
+  function hideToast() {
+    const toast = document.getElementById('app-toast');
+    if (toast) {
+      clearTimeout(toast._timer);
+      toast.style.opacity = '0';
+    }
+  }
+
   // ============================================
   // Agent SDK Status Indicator
   // ============================================
@@ -3385,6 +3965,9 @@ window.agentBridge = {
   // ============================================
   function bindEvents() {
     elements.openFileBtn.addEventListener('click', openFile);
+    if (elements.paperReaderBtn) {
+      elements.paperReaderBtn.addEventListener('click', openPaperReader);
+    }
     elements.sourceToggle.addEventListener('click', toggleSourceMode);
     elements.sidebarToggle.addEventListener('click', toggleSidebar);
     elements.tabFiles.addEventListener('click', () => switchSidebarTab('files'));
@@ -3659,7 +4242,7 @@ window.agentBridge = {
       showToast('Socratic 模块未加载', 'error');
       return;
     }
-    if (!document.body.classList.contains('learning-mode')) {
+    if (!AppWorkspace.isIn('course')) {
       showToast('请先进入课程模式', 'info');
       return;
     }
@@ -3687,6 +4270,7 @@ window.agentBridge = {
   // Initialization
   // ============================================
   function init() {
+    registerWorkspaces();
     initTheme();
     bindEvents();
     initTranslation();
@@ -4259,7 +4843,7 @@ window.agentBridge = {
     if (!selectionToolbar) createSelectionToolbar();
     const aiBtn = selectionToolbar.querySelector('#aiExplainBtn');
     if (aiBtn) {
-      aiBtn.style.display = document.body.classList.contains('learning-mode') ? 'inline-flex' : 'none';
+      aiBtn.style.display = AppWorkspace.isIn('course') ? 'inline-flex' : 'none';
     }
     selectionToolbar.style.display = 'flex';
     selectionToolbar.style.left = (rect.left + rect.width / 2 - 60) + 'px';
@@ -4575,8 +5159,12 @@ window.agentBridge = {
   // Export for testing/debugging
   window.TyporaNext = {
     state,
+    AppWorkspace,
     openFile,
     openFolder,
+    openPaperReader,
+    openPaperFile,
+    resolveRecentFileRoute,
     loadFolderPath,
     unloadFolder,
     setLearningMode,

@@ -710,6 +710,59 @@ async function socraticChat(queryFn, config, args) {
 }
 
 /**
+ * Generate a structured reading guide for an academic paper.
+ * The agent uses typora-paper-reader skill to read the paper and write
+ * the guide JSON to output_file. Host only validates the file exists.
+ *
+ * @param {Function} queryFn - Agent SDK query function or mock
+ * @param {object} config - API config
+ * @param {object} args - { paper_file, output_file, persona, session_id }
+ */
+async function generatePaperReaderGuide(queryFn, config, args) {
+  const { paper_file, output_file, persona, session_id } = args;
+  if (!paper_file) {
+    throw new Error('paper_file is required for paper-reader');
+  }
+  if (!fs.existsSync(paper_file)) {
+    throw new Error(`paper_file not found: ${paper_file}`);
+  }
+  if (!output_file) {
+    throw new Error('output_file is required for paper-reader');
+  }
+
+  log('info', 'Starting paper-reader guide generation', { paper_file, output_file, session_id: session_id || null });
+  emit('status', { message: 'AI 正在阅读论文并生成导读...' });
+
+  const prompt = `请使用 typora-paper-reader skill 为以下论文生成导读。
+- paper_file: ${JSON.stringify(paper_file)}
+- output_file: ${JSON.stringify(output_file)}
+- persona: ${JSON.stringify(persona || {})}
+
+请使用 Read 工具读取论文全文，然后使用 Write 工具将 guide JSON 写入 output_file。`;
+
+  await collectAgentOutputWithRecovery(
+    queryFn,
+    {
+      prompt,
+      options: {
+        cwd: path.dirname(paper_file),
+        allowedTools: ['Read', 'Write', 'Glob', 'Grep'],
+        skills: ['typora-paper-reader'],
+        includePartialMessages: true
+      }
+    },
+    session_id
+  );
+
+  if (!fs.existsSync(output_file)) {
+    throw new Error(`Agent did not write expected file: ${output_file}`);
+  }
+
+  log('info', 'paper-reader guide generation complete', { output_file });
+  emit('complete', { output_file });
+}
+
+/**
  * Generate review cards (quiz questions + key points) for a completed chapter.
  * PB1 Round 2: Agent reads the chapter .md file and generates per-concept
  * review content. Outputs structured JSON for Rust to write to review-cards.json.
@@ -1136,6 +1189,13 @@ async function main() {
         process.exit(0);
         break;
       }
+      case 'paper-reader': {
+        log('info', 'Starting paper-reader stage', { paper_file: taskArgs.paper_file, output_file: taskArgs.output_file, session_id: taskArgs.session_id || null });
+        await generatePaperReaderGuide(queryFn, config, taskArgs);
+        log('info', 'Paper-reader stage completed');
+        process.exit(0);
+        break;
+      }
       case 'init':
         log('info', 'Starting init stage', { project_path: taskArgs.project_path });
         const initResult = await initSession(queryFn, config, taskArgs);
@@ -1180,6 +1240,7 @@ module.exports = {
   exploreChat,
   chatWithAgent,
   initSession,
+  generatePaperReaderGuide,
   checkAgentSDK,
   emit,
   emitError,

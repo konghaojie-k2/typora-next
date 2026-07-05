@@ -53,6 +53,9 @@
   --color-warning: #f59e0b;
   --color-error: #ef4444;
 
+  /* Hover backgrounds */
+  --color-bg-hover: #f1f5f9;
+
   /* Shadows */
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
@@ -93,6 +96,9 @@
   --color-accent: #60a5fa;
   --color-accent-hover: #93c5fd;
   --color-accent-light: #1e3a5f;
+
+  /* Hover backgrounds */
+  --color-bg-hover: #1e293b;
 }
 
 /* Dark Theme - system preference fallback */
@@ -113,8 +119,107 @@
     --color-accent: #60a5fa;
     --color-accent-hover: #93c5fd;
     --color-accent-light: #1e3a5f;
+
+    /* Hover backgrounds */
+    --color-bg-hover: #1e293b;
   }
 }
+
+/* ============================================
+   Paper Reader Welcome & Loading
+   ============================================ */
+.paper-reader-welcome {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 32px;
+  text-align: center;
+  color: var(--color-text-primary, #1a1a2e);
+  background: var(--color-bg-primary, #fff);
+}
+.paper-reader-welcome-icon {
+  color: var(--color-accent, #3b82f6);
+  opacity: 0.9;
+}
+.paper-reader-welcome-title { margin: 0; font-size: 24px; font-weight: 600; }
+.paper-reader-welcome-desc {
+  margin: 0;
+  font-size: 15px;
+  color: var(--color-text-secondary, #4a4a68);
+  max-width: 420px;
+  line-height: 1.6;
+}
+.paper-reader-welcome-formats { margin-top: 4px; }
+.paper-reader-welcome-format-tag {
+  font-size: 12px;
+  color: var(--color-text-tertiary, #6b7280);
+  background: var(--color-bg-tertiary, #f1f5f9);
+  padding: 4px 10px;
+  border-radius: var(--radius-full, 9999px);
+}
+.paper-reader-welcome-btn {
+  margin-top: 8px;
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: var(--color-accent, #3b82f6);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.paper-reader-welcome-btn:hover { background: var(--color-accent-hover, #2563eb); }
+.paper-reader-welcome-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-text-muted, #9ca3af);
+}
+.paper-reader-loading {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  color: var(--color-text-secondary, #4a4a68);
+  background: var(--color-bg-primary, #fff);
+}
+.paper-reader-loading-steps { display: flex; align-items: center; gap: 8px; }
+.paper-reader-loading-step { display: flex; align-items: center; gap: 6px; opacity: 0.45; transition: opacity 0.3s; }
+.paper-reader-loading-step.active { opacity: 1; }
+.paper-reader-loading-step-icon {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  background: var(--color-bg-tertiary, #e2e8f0);
+  color: var(--color-text-secondary, #64748b);
+  font-size: 12px;
+  font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.paper-reader-loading-step.active .paper-reader-loading-step-icon {
+  background: var(--color-accent, #3b82f6);
+  color: #fff;
+}
+.paper-reader-loading-step-label { font-size: 13px; }
+.paper-reader-loading-step-line {
+  width: 32px;
+  height: 2px;
+  background: var(--color-border, #e2e8f0);
+  border-radius: 1px;
+}
+.paper-reader-loading-spinner {
+  width: 44px; height: 44px;
+  border: 3px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-accent, #3b82f6);
+  border-radius: 50%;
+  animation: paper-reader-spin 1s linear infinite;
+}
+.paper-reader-loading-text { font-size: 14px; margin: 0; }
+@keyframes paper-reader-spin { to { transform: rotate(360deg); } }
 
 /* ============================================
    Base Styles
@@ -353,6 +458,9 @@ main {
   gap: 2px;
 }
 .recent-file-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   padding: 4px 8px;
   border-radius: var(--radius-sm);
   font-size: 13px;
@@ -364,6 +472,24 @@ main {
 }
 .recent-file-item:hover {
   background: var(--color-bg-hover);
+}
+.recent-file-mode-icon {
+  flex-shrink: 0;
+  font-size: 12px;
+  opacity: 0.85;
+}
+.recent-file-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.recent-file-mode-tag {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-tertiary);
 }
 
 .file-tree-search {
@@ -2634,4 +2760,70 @@ pre.mermaid .download-btn {
   border-top-color: transparent;
   border-radius: 50%;
   animation: spin 1s linear infinite;
+}
+/* ============================================
+   Workspace badges + mode accents (Phase 3 UX)
+   ============================================ */
+
+/* Toolbar badge base — a colored pill identifying the active workspace. */
+.workspace-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+  user-select: none;
+}
+
+/* Course mode: purple accent. */
+.learning-mode-badge {
+  background: #8b5cf6;
+}
+
+/* Paper mode: orange accent. */
+.paper-reader-badge {
+  background: #f97316;
+}
+
+/* Mode accents on the toolbar so the active workspace is unmistakable.
+   A 2px colored bottom border replaces the default hairline. */
+body.learning-mode .toolbar {
+  border-bottom: 2px solid #8b5cf6;
+  background: linear-gradient(to bottom, #faf5ff, var(--color-bg-secondary));
+}
+
+[data-theme="dark"] body.learning-mode .toolbar {
+  background: linear-gradient(to bottom, rgba(139, 92, 246, 0.12), var(--color-bg-secondary));
+}
+
+body.paper-reader-mode .toolbar {
+  border-bottom: 2px solid #f97316;
+}
+
+/* Subtle background tint for paper mode to distinguish from normal. */
+body.paper-reader-mode .toolbar {
+  background: linear-gradient(to bottom, #fff7ed, var(--color-bg-secondary));
+}
+
+body.paper-reader-mode[data-theme="dark"] .toolbar,
+[data-theme="dark"] body.paper-reader-mode .toolbar {
+  background: linear-gradient(to bottom, rgba(249, 115, 22, 0.12), var(--color-bg-secondary));
+}
+/* Note: data-theme lives on <html>, so only the [data-theme="dark"]
+   body.paper-reader-mode descendant selector above actually matches. */
+
+
+/* Paper reader sidebar hosted inside the left TOC panel: fill the panel
+   width instead of the fixed 220px in-content width. */
+.toc-tree .paper-reader-sidebar,
+#tocTree .paper-reader-sidebar {
+  width: 100%;
+  flex-shrink: 1;
+  border-right: none;
+  padding: 12px;
+  background: transparent;
 }
