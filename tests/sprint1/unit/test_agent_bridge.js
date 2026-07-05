@@ -69,8 +69,8 @@ TestRunner.test('generateFilename handles empty title', () => {
 
 TestRunner.test('collectAgentOutput prefers result over assistant chunks', async () => {
   async function* mockStream() {
-    yield { type: 'assistant', content: 'Hello ' };
-    yield { type: 'assistant', content: 'World' };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello ' }] } };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'World' }] } };
     yield { type: 'result', subtype: 'success', result: '!' };
   }
 
@@ -80,8 +80,8 @@ TestRunner.test('collectAgentOutput prefers result over assistant chunks', async
 
 TestRunner.test('collectAgentOutput aggregates assistant messages when no result', async () => {
   async function* mockStream() {
-    yield { type: 'assistant', content: 'Hello ' };
-    yield { type: 'assistant', content: 'World' };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'Hello ' }] } };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: 'World' }] } };
   }
 
   const result = await collectAgentOutput(mockStream());

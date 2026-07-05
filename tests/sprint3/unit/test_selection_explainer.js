@@ -45,7 +45,7 @@ if (typeof global.document === 'undefined') {
 
 let SelectionExplainer;
 try {
-  SelectionExplainer = require('../../../../dist/scripts/learning/selection-explainer');
+  SelectionExplainer = require('../../../dist/scripts/learning/selection-explainer');
 } catch (e) {
   SelectionExplainer = null;
 }

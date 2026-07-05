@@ -165,8 +165,12 @@ TestRunner.test('QuizPanel does NOT trigger onAdaptRequested for mastered', () =
 });
 
 // ============================================
-// Run
+// Run (only when invoked directly, not via run_all.js)
 // ============================================
-TestRunner.run().then(({ passed, failed }) => {
-  if (failed > 0) process.exit(1);
-});
+module.exports = TestRunner;
+
+if (require.main === module) {
+  TestRunner.run().then(({ passed, failed }) => {
+    if (failed > 0) process.exit(1);
+  });
+}

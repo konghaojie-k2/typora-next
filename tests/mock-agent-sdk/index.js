@@ -1,7 +1,15 @@
 /**
  * Mock Claude Agent SDK for testing
  * Returns predefined responses without calling real API
+ *
+ * Simulates the Phase D contract: for chapter-generation prompts the agent
+ * uses its Write tool to create the .md file on disk (in options.cwd), then
+ * returns a short confirmation string. The host (generateChapters) verifies
+ * the file exists — so the mock must actually write it.
  */
+
+const fs = require('fs');
+const path = require('path');
 
 const MOCK_OUTLINE = {
   chapters: [
@@ -35,6 +43,17 @@ const MOCK_CHAPTER_CONTENT = `# 为什么学这个
 Transformer 是当今最重要的深度学习架构之一。
 `;
 
+// Replicate agent-bridge.js generateFilename sanitization so the mock writes
+// the same filename the host will look for.
+function mockGenerateFilename(index, title) {
+  const paddedIndex = String(index).padStart(2, '0');
+  const safeTitle = title
+    .replace(/[^一-龥a-zA-Z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
+  return `${paddedIndex}-${safeTitle}.md`;
+}
+
 /**
  * Mock query function that simulates Agent SDK behavior
  */
@@ -45,16 +64,35 @@ async function* query({ prompt, options }) {
   if (prompt.includes('设计学习大纲') || prompt.includes('学习设计师')) {
     // Plan stage: return JSON outline
     const jsonStr = JSON.stringify(MOCK_OUTLINE, null, 2);
-    yield { type: 'assistant', content: jsonStr };
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: jsonStr }] } };
     yield { type: 'result', subtype: 'success', result: jsonStr };
+  } else if (prompt.includes('chapter-generation skill') || /chapter_index:\s*\d/.test(prompt)) {
+    // Generate stage: simulate the agent using its Write tool to create the
+    // .md file in options.cwd, then return a short confirmation.
+    const idxMatch = prompt.match(/chapter_index:\s*(\d+)/);
+    const titleMatch = prompt.match(/chapter_title:\s*(.*)$/m);
+    const idx = idxMatch ? parseInt(idxMatch[1], 10) : 0;
+    let title = '';
+    if (titleMatch) {
+      try { title = JSON.parse(titleMatch[1].trim()); }
+      catch (_) { title = titleMatch[1].trim().replace(/^["']|["']$/g, ''); }
+    }
+    const cwd = (options && options.cwd) || '.';
+    const filename = mockGenerateFilename(idx, title);
+    const filepath = path.join(cwd, filename);
+    try { fs.writeFileSync(filepath, MOCK_CHAPTER_CONTENT, 'utf-8'); } catch (_) {}
+    const confirmation = `第 ${idx + 1} 章已生成: ${filename}`;
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: confirmation }] } };
+    yield { type: 'result', subtype: 'success', result: confirmation };
   } else if (prompt.includes('生成') && prompt.includes('Markdown')) {
-    // Generate stage: return markdown content
-    yield { type: 'assistant', content: MOCK_CHAPTER_CONTENT };
+    // Legacy generate branch (kept for older callers)
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: MOCK_CHAPTER_CONTENT }] } };
     yield { type: 'result', subtype: 'success', result: MOCK_CHAPTER_CONTENT };
   } else {
     // Default fallback
-    yield { type: 'assistant', content: '# Mock Content\n\nThis is a mock response.' };
-    yield { type: 'result', subtype: 'success', result: '# Mock Content' };
+    const fallback = '# Mock Content\n\nThis is a mock response.';
+    yield { type: 'assistant', message: { content: [{ type: 'text', text: fallback }] } };
+    yield { type: 'result', subtype: 'success', result: fallback };
   }
 }
 

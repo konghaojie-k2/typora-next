@@ -34,7 +34,7 @@ function beforeLoad() {
     }
   }
   try {
-    ElementRenderer = require('../../../../dist/scripts/learning/element-renderer');
+    ElementRenderer = require('../../../dist/scripts/learning/element-renderer');
   } catch (e) {
     ElementRenderer = null;
   }
