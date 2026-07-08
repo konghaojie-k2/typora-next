@@ -167,7 +167,17 @@ async function runAcceptanceTests() {
   );
   totalPassed += pb4Result.passed;
   totalFailed += pb4Result.failed;
+
+  const paperImportSteps = require('./sprint10_paper_import.steps');
+  const pb5Result = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'paper_import.feature'),
+    paperImportSteps
+  );
+  totalPassed += pb5Result.passed;
+  totalFailed += pb5Result.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
+  if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
 
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);

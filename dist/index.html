@@ -252,6 +252,24 @@
           <span class="setting-hint">用于 AI 修复 Mermaid 图表</span>
         </div>
         <div class="setting-item">
+          <label class="setting-label" for="settingMineruToken">minerU API Token</label>
+          <input type="password" id="settingMineruToken" class="setting-input" placeholder="在 mineru.net API 管理页面创建">
+          <span class="setting-hint">用于 PDF / URL 论文导入</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingMineruBaseUrl">minerU Base URL</label>
+          <input type="text" id="settingMineruBaseUrl" class="setting-input" placeholder="https://mineru.net">
+          <span class="setting-hint">留空使用 https://mineru.net</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label" for="settingMineruModel">minerU 模型版本</label>
+          <select id="settingMineruModel" class="setting-select">
+            <option value="vlm" selected>vlm（推荐，复杂版式）</option>
+            <option value="pipeline">pipeline（标准解析）</option>
+          </select>
+          <span class="setting-hint">选择解析模型版本</span>
+        </div>
+        <div class="setting-item">
           <label class="setting-label"></label>
           <button class="modal-btn modal-btn-secondary" id="settingsTest" type="button">测试连接</button>
           <span class="setting-hint" id="testResult"></span>
@@ -432,6 +450,7 @@
   <!-- Sprint 10: Paper Reader -->
   <script src="scripts/learning/paper-reader.js"></script>
   <script src="scripts/learning/paper-reader-integration.js"></script>
+  <script src="scripts/learning/paper-import.js"></script>
   <script src="scripts/main.js"></script>
   <script>
     // Learning mode: toolbar button opens hub (project list)

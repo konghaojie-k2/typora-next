@@ -28,7 +28,7 @@
             AI 会帮你标出论文重点，按推荐顺序阅读，并用"人话"解释难点。
           </p>
           <div class="paper-reader-welcome-formats">
-            <span class="paper-reader-welcome-format-tag">当前支持：本地 Markdown (.md)</span>
+            <span class="paper-reader-welcome-format-tag">当前支持：本地 Markdown (.md)、PDF、论文 URL</span>
           </div>
           <button class="paper-reader-welcome-btn" id="paper-reader-select-file">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px;">
@@ -37,15 +37,48 @@
             </svg>
             选择本地论文文件
           </button>
-          <p class="paper-reader-welcome-hint">
-            未来还将支持粘贴论文 URL、上传 PDF。
-          </p>
+          <div class="paper-reader-welcome-divider"><span>或</span></div>
+          <button class="paper-reader-welcome-btn paper-reader-welcome-btn-secondary" id="paper-reader-select-pdf">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle;margin-right:6px;">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <line x1="16" y1="13" x2="8" y2="13"/>
+              <line x1="16" y1="17" x2="8" y2="17"/>
+              <polyline points="10 9 9 9 8 9"/>
+            </svg>
+            导入本地 PDF
+          </button>
+          <div class="paper-reader-url-form">
+            <input type="text" id="paper-reader-url-input" class="paper-reader-url-input" placeholder="粘贴论文 URL（支持 arXiv）" />
+            <button class="paper-reader-welcome-btn" id="paper-reader-import-url">导入</button>
+          </div>
         </div>
       `;
 
       const btn = container.querySelector('#paper-reader-select-file');
       if (btn && window.TyporaNext && window.TyporaNext.openPaperFile) {
         btn.addEventListener('click', () => window.TyporaNext.openPaperFile());
+      }
+
+      const pdfBtn = container.querySelector('#paper-reader-select-pdf');
+      if (pdfBtn && window.TyporaNext && window.TyporaNext.openPaperPdf) {
+        pdfBtn.addEventListener('click', () => window.TyporaNext.openPaperPdf());
+      }
+
+      const urlInput = container.querySelector('#paper-reader-url-input');
+      const urlBtn = container.querySelector('#paper-reader-import-url');
+      const triggerUrlImport = () => {
+        if (window.TyporaNext && window.TyporaNext.openPaperUrl) {
+          window.TyporaNext.openPaperUrl();
+        }
+      };
+      if (urlBtn) {
+        urlBtn.addEventListener('click', triggerUrlImport);
+      }
+      if (urlInput) {
+        urlInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') triggerUrlImport();
+        });
       }
     },
 
@@ -179,7 +212,13 @@
           const idx = window.TyporaNext.state.tabs.findIndex(t => t.path === tab.path);
           if (idx >= 0) window.TyporaNext.closeTab(idx);
         },
-        onConfirmClose: () => Promise.resolve(true)
+        onConfirmClose: () => {
+          const message = '退出论文导读将关闭当前论文标签，阅读进度已保留。是否继续？';
+          if (window.TyporaNext && window.TyporaNext._showConfirm) {
+            return window.TyporaNext._showConfirm(message);
+          }
+          return Promise.resolve(window.confirm(message));
+        }
       });
       reader.paperFile = tab.path;
       reader.render(tab.paperGuide, tab.paperOriginalHtml);

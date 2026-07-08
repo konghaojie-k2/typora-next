@@ -72,7 +72,7 @@ function createAppWorkspace() {
       }
 
       const rule = getRule(fromId, targetId);
-      if (rule && rule.confirm) {
+      if (rule && rule.confirm && !options.skipConfirm) {
         lastConfirmMessage = rule.confirm;
         if (!lastConfirmResult) return false;
       }
@@ -180,6 +180,62 @@ TestRunner.test('context can be updated after switch', () => {
   AppWorkspace.register({ id: 'course' });
   AppWorkspace.setContext({ projectPath: '/p' });
   TestRunner.assertEquals(state.context.projectPath, '/p', 'context should be patched');
+});
+
+TestRunner.test('switchTo skips confirmation when skipConfirm is true', async () => {
+  const { AppWorkspace } = createAppWorkspace();
+  AppWorkspace.register({ id: 'paper' });
+  AppWorkspace._setConfirmResult(false);
+
+  const ok = await AppWorkspace.switchTo('paper', { skipConfirm: true });
+  TestRunner.assert(ok, 'switch should succeed with skipConfirm');
+  TestRunner.assert(AppWorkspace.isIn('paper'), 'should be in paper workspace');
+  TestRunner.assertEquals(
+    AppWorkspace._getLastConfirmMessage(),
+    null,
+    'confirm message should not be recorded when skipped'
+  );
+});
+
+TestRunner.test('switchTo still confirms when skipConfirm is false', async () => {
+  const { AppWorkspace } = createAppWorkspace();
+  AppWorkspace.register({ id: 'paper' });
+  AppWorkspace._setConfirmResult(false);
+
+  const ok = await AppWorkspace.switchTo('paper', { skipConfirm: false });
+  TestRunner.assert(!ok, 'switch should be cancelled');
+  TestRunner.assert(AppWorkspace.isIn('normal'), 'should stay in normal');
+});
+
+TestRunner.test('closing last specialized tab exits workspace without confirmation', async () => {
+  const { AppWorkspace, state } = createAppWorkspace();
+  const events = [];
+
+  AppWorkspace.register({
+    id: 'paper',
+    async onExit(to) { events.push(`paper-exit-${to}`); }
+  });
+  AppWorkspace.register({
+    id: 'normal',
+    async onEnter(from) { events.push(`normal-enter-${from}`); }
+  });
+
+  // Simulate entering paper workspace and opening one tab.
+  await AppWorkspace.switchTo('paper');
+  const tabs = [{ path: '/paper.md', mode: 'paper' }];
+
+  // Simulate closeTab: last tab removed, then silent switch to normal.
+  tabs.splice(0, 1);
+  const ok = await AppWorkspace.switchTo('normal', { skipConfirm: true });
+
+  TestRunner.assert(ok, 'silent exit should succeed');
+  TestRunner.assert(AppWorkspace.isIn('normal'), 'should return to normal workspace');
+  TestRunner.assertEquals(events[0], 'paper-exit-normal', 'paper onExit should fire');
+  TestRunner.assertEquals(events[1], 'normal-enter-paper', 'normal onEnter should fire');
+  TestRunner.assert(
+    state.context.activePaperPath === undefined || state.context.activePaperPath === null,
+    'paper context should be cleared'
+  );
 });
 
 TestRunner.test('all six transition rules trigger confirmation', async () => {

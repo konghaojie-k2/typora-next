@@ -178,6 +178,82 @@
   font-size: 12px;
   color: var(--color-text-muted, #9ca3af);
 }
+.paper-reader-welcome-divider {
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--color-text-muted, #9ca3af);
+  font-size: 13px;
+  margin-top: 4px;
+}
+.paper-reader-welcome-divider::before,
+.paper-reader-welcome-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--color-border, #e2e8f0);
+}
+.paper-reader-welcome-btn-secondary {
+  background: var(--color-bg-tertiary, #f1f5f9);
+  color: var(--color-text-primary, #1a1a2e);
+  border: 1px solid var(--color-border, #e2e8f0);
+}
+.paper-reader-welcome-btn-secondary:hover {
+  background: var(--color-bg-secondary, #e2e8f0);
+}
+.paper-reader-url-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+}
+.paper-reader-url-input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border, #e2e8f0);
+  background: var(--color-bg-primary, #fff);
+  color: var(--color-text-primary, #1a1a2e);
+  font-size: 14px;
+}
+.paper-reader-url-input:focus {
+  outline: none;
+  border-color: var(--color-accent, #3b82f6);
+}
+.paper-import-progress {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
+  padding: 32px;
+  color: var(--color-text-secondary, #4a4a68);
+  background: var(--color-bg-primary, #fff);
+}
+.paper-import-spinner {
+  width: 44px; height: 44px;
+  border: 3px solid var(--color-border, #e2e8f0);
+  border-top-color: var(--color-accent, #3b82f6);
+  border-radius: 50%;
+  animation: paper-reader-spin 1s linear infinite;
+}
+.paper-import-status { font-size: 14px; margin: 0; }
+.paper-import-bar {
+  width: 240px;
+  height: 6px;
+  background: var(--color-border, #e2e8f0);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.paper-import-bar-fill {
+  height: 100%;
+  background: var(--color-accent, #3b82f6);
+  transition: width 0.3s ease;
+}
 .paper-reader-loading {
   flex: 1;
   display: flex;
@@ -2777,6 +2853,16 @@ pre.mermaid .download-btn {
   color: #fff;
   white-space: nowrap;
   user-select: none;
+  cursor: pointer;
+  transition: filter 0.15s, transform 0.1s;
+}
+
+.workspace-badge:hover {
+  filter: brightness(1.1);
+}
+
+.workspace-badge:active {
+  transform: scale(0.96);
 }
 
 /* Course mode: purple accent. */

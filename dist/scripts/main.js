@@ -108,6 +108,9 @@ window.agentBridge = {
     settingAiBaseUrl: document.getElementById('settingAiBaseUrl'),
     settingModel: document.getElementById('settingModel'),
     settingApiKey: document.getElementById('settingApiKey'),
+    settingMineruToken: document.getElementById('settingMineruToken'),
+    settingMineruBaseUrl: document.getElementById('settingMineruBaseUrl'),
+    settingMineruModel: document.getElementById('settingMineruModel'),
     settingTheme: document.getElementById('settingTheme'),
     settingCustomCursor: document.getElementById('settingCustomCursor'),
     settingsModalClose: document.getElementById('settingsModalClose'),
@@ -184,6 +187,18 @@ window.agentBridge = {
           { name: 'src', path: '/mock/project/src', is_dir: true, children: null },
           { name: 'main.md', path: '/mock/project/main.md', is_dir: false, children: null }
         ]);
+      case 'import_paper_from_pdf':
+        return Promise.resolve({
+          md_path: '/mock/project/.learning/papers/2026-07/mock-paper.md',
+          md_content: '# Mock Imported Paper\n\nThis was imported from PDF.',
+          title: 'Mock Imported Paper'
+        });
+      case 'import_paper_from_url':
+        return Promise.resolve({
+          md_path: '/mock/project/.learning/papers/2026-07/mock-url-paper.md',
+          md_content: '# Mock URL Paper\n\nThis was imported from URL.',
+          title: 'Mock URL Paper'
+        });
       default:
         return Promise.resolve(null);
     }
@@ -307,6 +322,131 @@ window.agentBridge = {
   window.isPaperReaderActive = function () {
     return AppWorkspace.isIn('paper') && state.tabs.some(t => t.mode === 'paper');
   };
+
+  /**
+   * Import a local PDF file as a paper and open it.
+   */
+  async function openPaperPdf() {
+    if (!window.__TAURI__) {
+      showError('论文导读需要在桌面应用中使用');
+      return;
+    }
+    if (!window.PaperReader || !window.PaperReaderIntegration || !window.PaperImport) {
+      showError('论文导读模块未加载');
+      return;
+    }
+
+    if (!AppWorkspace.isIn('paper')) {
+      const switched = await AppWorkspace.switchTo('paper');
+      if (!switched) return;
+    }
+
+    const container = document.getElementById('markdownBody');
+    window.PaperImport.showProgress(container, 'submit', '正在导入 PDF，请稍候...');
+
+    try {
+      const result = await invoke('import_paper_from_pdf');
+      window.PaperImport.hideProgress(container);
+      if (!result || !result.md_path) {
+        showError('导入失败：未返回文件路径');
+        if (window.PaperReaderIntegration) {
+          window.PaperReaderIntegration.showWelcome(container);
+        }
+        return;
+      }
+      await openImportedPaper(result);
+    } catch (err) {
+      window.PaperImport.hideProgress(container);
+      console.error('Failed to import PDF:', err);
+      showError('PDF 导入失败: ' + err);
+      // Restore welcome screen so the user can retry or pick another source.
+      if (window.PaperReaderIntegration) {
+        window.PaperReaderIntegration.showWelcome(container);
+      }
+    }
+  }
+
+  /**
+   * Import a paper from a URL and open it.
+   */
+  async function openPaperUrl() {
+    if (!window.__TAURI__) {
+      showError('论文导读需要在桌面应用中使用');
+      return;
+    }
+    if (!window.PaperReader || !window.PaperReaderIntegration || !window.PaperImport) {
+      showError('论文导读模块未加载');
+      return;
+    }
+
+    const container = document.getElementById('markdownBody');
+    const urlInput = container ? container.querySelector('#paper-reader-url-input') : null;
+    const url = urlInput ? urlInput.value.trim() : '';
+    if (!url) {
+      showError('请输入论文 URL');
+      return;
+    }
+
+    if (!AppWorkspace.isIn('paper')) {
+      const switched = await AppWorkspace.switchTo('paper');
+      if (!switched) return;
+    }
+
+    window.PaperImport.showProgress(container, 'submit', '正在从 URL 导入论文，请稍候...');
+
+    try {
+      const result = await invoke('import_paper_from_url', { url });
+      window.PaperImport.hideProgress(container);
+      if (!result || !result.md_path) {
+        showError('导入失败：未返回文件路径');
+        if (window.PaperReaderIntegration) {
+          window.PaperReaderIntegration.showWelcome(container);
+        }
+        return;
+      }
+      await openImportedPaper(result);
+    } catch (err) {
+      window.PaperImport.hideProgress(container);
+      console.error('Failed to import paper from URL:', err);
+      showError('URL 导入失败: ' + err);
+      if (window.PaperReaderIntegration) {
+        window.PaperReaderIntegration.showWelcome(container);
+      }
+    }
+  }
+
+  /**
+   * Open an already-imported Markdown paper as a paper tab.
+   */
+  async function openImportedPaper(result) {
+    if (!result || !result.md_path) return;
+
+    const baseDir = result.md_path.replace(/[^\\/]+$/, '');
+    const existingIndex = state.tabs.findIndex(t => t.path === result.md_path);
+    if (existingIndex >= 0) {
+      await switchTab(existingIndex);
+      return;
+    }
+
+    try {
+      showToast('正在生成导读...', 'info', 0);
+      await addTab(result.md_path, result.md_content, baseDir, {
+        mode: 'paper',
+        workspaceContext: {
+          activePaperPath: result.md_path,
+          paperProjectPath: baseDir
+        }
+      });
+      hideToast();
+      invoke('add_recent_file', { path: result.md_path, mode: 'paper' }).then(() => {
+        loadRecentFiles();
+      }).catch(err => console.error('Failed to add recent paper file:', err));
+    } catch (err) {
+      hideToast();
+      console.error('Failed to open imported paper:', err);
+      showError('无法打开导入的论文: ' + err);
+    }
+  }
 
   window.confirmPaperReaderSwitch = function (message) {
     return _showConfirm(message);
@@ -638,8 +778,24 @@ window.agentBridge = {
     if (state.tabs.length === 0) {
       state.activeTab = -1;
       renderTabs();
-      showWelcome();
       unwatchCurrentFile();
+      // When the last tab of a specialized workspace is closed, the user has
+      // already expressed the intent to leave that workspace. Exit silently
+      // without another confirmation dialog.
+      if (AppWorkspace.isIn('course')) {
+        await AppWorkspace.switchTo('normal', { skipConfirm: true });
+      } else if (AppWorkspace.isIn('paper')) {
+        // Stay in the paper workspace and show the welcome screen so the user
+        // can import/open another paper without re-entering the workspace.
+        if (window.PaperReaderIntegration) {
+          window.PaperReaderIntegration.showWelcome(elements.markdownBody);
+        }
+        if (elements.tocTree) {
+          elements.tocTree.innerHTML = '<p class="toc-empty">打开文件以显示目录</p>';
+        }
+      } else {
+        showWelcome();
+      }
     } else {
       // Adjust active tab
       if (index <= state.activeTab) {
@@ -939,6 +1095,10 @@ window.agentBridge = {
     // markdown pipeline. The reader renders into #markdownBody directly.
     if (tab.mode === 'paper' && window.PaperReaderIntegration) {
       await window.PaperReaderIntegration.enhancePaperTab(tab);
+      // Keep the source view in sync so the source toggle still works for papers.
+      if (elements.sourceCode) {
+        elements.sourceCode.textContent = tab.paperContent || tab.content || '';
+      }
       elements.fileTree.querySelectorAll('.file-tree-item').forEach(item => {
         item.classList.toggle('active', item.dataset.path === tab.path);
       });
@@ -1686,7 +1846,7 @@ window.agentBridge = {
       }
 
       const rule = this._getRule(fromId, targetId);
-      if (rule && (rule.confirm || rule.impact)) {
+      if (rule && (rule.confirm || rule.impact) && !options.skipConfirm) {
         const fromSpec = this.registry.get(fromId);
         const payload = {
           from: fromSpec ? fromSpec.displayName : fromId,
@@ -1838,6 +1998,8 @@ window.agentBridge = {
             toolbarRight.insertBefore(badge, toolbarRight.firstChild);
           }
         }
+        badge.title = '点击退出课程模式';
+        badge.onclick = () => AppWorkspace.switchTo('normal');
 
         _updateSocraticButtonState();
       },
@@ -1889,6 +2051,8 @@ window.agentBridge = {
             toolbarRight.insertBefore(badge, toolbarRight.firstChild);
           }
         }
+        badge.title = '点击退出论文导读';
+        badge.onclick = () => AppWorkspace.switchTo('normal');
 
         const ctx = options.context || {};
         AppWorkspace.setContext(ctx);
@@ -4093,6 +4257,15 @@ window.agentBridge = {
         if (config.model !== undefined && elements.settingModel) {
           elements.settingModel.value = config.model || '';
         }
+        if (config.mineru_api_token !== undefined && elements.settingMineruToken) {
+          elements.settingMineruToken.value = config.mineru_api_token || '';
+        }
+        if (config.mineru_base_url !== undefined && elements.settingMineruBaseUrl) {
+          elements.settingMineruBaseUrl.value = config.mineru_base_url || '';
+        }
+        if (config.mineru_model_version !== undefined && elements.settingMineruModel) {
+          elements.settingMineruModel.value = config.mineru_model_version || 'vlm';
+        }
         if (config.theme && elements.settingTheme) {
           elements.settingTheme.value = config.theme;
           applyTheme(config.theme);
@@ -4208,6 +4381,9 @@ window.agentBridge = {
     const aiProvider = elements.settingAiProvider ? elements.settingAiProvider.value : 'anthropic';
     const aiBaseUrl = elements.settingAiBaseUrl ? elements.settingAiBaseUrl.value.trim() : '';
     const model = elements.settingModel ? elements.settingModel.value.trim() : '';
+    const mineruToken = elements.settingMineruToken ? elements.settingMineruToken.value.trim() : '';
+    const mineruBaseUrl = elements.settingMineruBaseUrl ? elements.settingMineruBaseUrl.value.trim() : '';
+    const mineruModel = elements.settingMineruModel ? elements.settingMineruModel.value : 'vlm';
     const theme = elements.settingTheme ? elements.settingTheme.value : '';
     const customCursor = elements.settingCustomCursor ? elements.settingCustomCursor.value : '';
 
@@ -4216,6 +4392,9 @@ window.agentBridge = {
       ai_provider: aiProvider,
       ai_base_url: aiBaseUrl || null,
       model: model || null,
+      mineru_api_token: mineruToken || null,
+      mineru_base_url: mineruBaseUrl || null,
+      mineru_model_version: mineruModel || null,
       theme: theme || null,
       custom_cursor: customCursor || null
     };
@@ -5164,6 +5343,8 @@ window.agentBridge = {
     openFolder,
     openPaperReader,
     openPaperFile,
+    openPaperPdf,
+    openPaperUrl,
     resolveRecentFileRoute,
     loadFolderPath,
     unloadFolder,
@@ -5180,6 +5361,7 @@ window.agentBridge = {
     buildTOC,
     filterFileTree,
     invoke,
+    _showConfirm,
 
     /**
      * Refresh the file tree sidebar from the currently opened folder.

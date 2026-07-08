@@ -10,6 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub mod ai_agent;
+pub mod paper_import;
 
 /// AI provider type
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -40,6 +41,13 @@ pub struct AppConfig {
     pub theme: Option<String>, // "light", "dark", or None for system
     #[serde(default)]
     pub custom_cursor: Option<String>,
+    // MinerU paper import configuration
+    #[serde(default)]
+    pub mineru_api_token: Option<String>,
+    #[serde(default)]
+    pub mineru_base_url: Option<String>,
+    #[serde(default)]
+    pub mineru_model_version: Option<String>,
     // Window state
     #[serde(default)]
     pub window_width: Option<f64>,
@@ -1178,6 +1186,193 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
             Err("用户取消保存".to_string())
         }
     }
+}
+
+// ============================================
+// Paper import: PDF / URL → Markdown
+// ============================================
+
+/// Import a local PDF file as a paper Markdown.
+#[tauri::command]
+async fn import_paper_from_pdf(app_handle: tauri::AppHandle) -> Result<paper_import::PaperImportResult, String> {
+    use tauri_plugin_dialog::DialogExt;
+
+    let file_path = app_handle.dialog()
+        .file()
+        .add_filter("PDF", &["pdf"])
+        .blocking_pick_file();
+
+    let path_ref = match file_path {
+        Some(path) => path.as_path().map(|p| p.to_path_buf()).unwrap_or_default(),
+        None => return Err("No file selected".to_string()),
+    };
+
+    if !path_ref.exists() {
+        return Err("选择的文件不存在".to_string());
+    }
+
+    let bytes = std::fs::read(&path_ref)
+        .map_err(|e| format!("读取 PDF 文件失败: {}", e))?;
+
+    let source_name = path_ref
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("paper.pdf")
+        .to_string();
+
+    let project_dir = path_ref
+        .parent()
+        .map(|p| p.display().to_string());
+
+    import_paper_inner(
+        paper_import::mineru::SubmitTarget::LocalFile { name: source_name.clone(), bytes },
+        &source_name,
+        project_dir.as_deref(),
+        &app_handle,
+    ).await
+}
+
+/// Import a paper from a URL (arXiv or direct PDF link).
+#[tauri::command]
+async fn import_paper_from_url(
+    url: String,
+    app_handle: tauri::AppHandle,
+) -> Result<paper_import::PaperImportResult, String> {
+    let normalized_url = paper_import::arxiv::normalize_paper_url(&url)
+        .map_err(|e| format!("URL 不支持: {}", e))?;
+
+    let source_name = paper_import::arxiv::source_name_from_url(&normalized_url);
+
+    import_paper_inner(
+        paper_import::mineru::SubmitTarget::Url(normalized_url),
+        &source_name,
+        None,
+        &app_handle,
+    ).await
+}
+
+/// Query the status of an in-flight import task.
+///
+/// Currently the import commands block until completion, so this command
+/// mostly exists for future async progress reporting.
+#[tauri::command]
+async fn get_paper_import_status(task_id: String) -> Result<paper_import::ImportStatus, String> {
+    log::info!("[paper_import] get_paper_import_status: {}", task_id);
+    Ok(paper_import::ImportStatus::unknown())
+}
+
+/// Recursively copy the contents of `src` into `dst`, preserving the
+/// directory structure. Overwrites existing files.
+fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst)
+        .map_err(|e| format!("创建目标目录失败: {}", e))?;
+
+    for entry in std::fs::read_dir(src)
+        .map_err(|e| format!("读取源目录失败: {}", e))?
+    {
+        let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
+        let path = entry.path();
+        let target = dst.join(entry.file_name());
+
+        if path.is_dir() {
+            copy_dir_all(&path, &target)?;
+        } else {
+            std::fs::copy(&path, &target)
+                .map_err(|e| format!("复制文件失败 {} -> {}: {}", path.display(), target.display(), e))?;
+        }
+    }
+
+    Ok(())
+}
+
+async fn import_paper_inner(
+    target: paper_import::mineru::SubmitTarget,
+    source_name: &str,
+    project_dir: Option<&str>,
+    app_handle: &tauri::AppHandle,
+) -> Result<paper_import::PaperImportResult, String> {
+    let config = get_config(app_handle.clone())?;
+    let client = paper_import::mineru::MineruClient::from_config(&config)
+        .map_err(|e| format!("配置错误: {}", e))?;
+
+    log::info!("[paper_import] submitting {} to minerU", source_name);
+    let handle = client.submit(target)
+        .map_err(|e| paper_import::user_facing_error("提交 minerU 任务失败", Some(&e)))?;
+
+    log::info!("[paper_import] polling minerU task...");
+    let poll_result = client.poll_until_done(&handle)
+        .map_err(|e| paper_import::user_facing_error("解析失败", Some(&e)))?;
+
+    let zip_url = poll_result.full_zip_url
+        .ok_or_else(|| "minerU 未返回结果下载链接".to_string())?;
+
+    let temp_dir = std::env::temp_dir()
+        .join(format!(
+            "typora-paper-import-{}-{}",
+            std::process::id(),
+            chrono::Local::now().format("%Y%m%d%H%M%S")
+        ));
+
+    let cleanup = |dir: &std::path::Path| {
+        if let Err(e) = std::fs::remove_dir_all(dir) {
+            log::warn!("[paper_import] failed to cleanup temp dir {}: {}", dir.display(), e);
+        }
+    };
+
+    let result = async {
+        std::fs::create_dir_all(&temp_dir)
+            .map_err(|e| format!("创建临时目录失败: {}", e))?;
+
+        let zip_path = temp_dir.join("result.zip");
+        let extract_dir = temp_dir.join("extracted");
+
+        log::info!("[paper_import] downloading result zip...");
+        client.download_zip(&zip_url, &zip_path)
+            .map_err(|e| paper_import::user_facing_error("下载解析结果失败", Some(&e)))?;
+
+        log::info!("[paper_import] extracting full.md...");
+        let md_path_in_zip = paper_import::mineru::MineruClient::extract_full_md(&zip_path, &extract_dir)
+            .map_err(|e| paper_import::user_facing_error("解压解析结果失败", Some(&e)))?;
+
+        let md_content = std::fs::read_to_string(&md_path_in_zip)
+            .map_err(|e| format!("读取解析后的 Markdown 失败: {}", e))?;
+
+        let papers_dir = paper_import::resolve_papers_dir(app_handle, project_dir)?;
+        let saved_path = paper_import::storage::save_paper_md(
+            &papers_dir,
+            None, // TODO: extract title from PDF metadata or first heading
+            source_name,
+            &md_content,
+        )
+        .map_err(|e| format!("保存论文 Markdown 失败: {}", e))?;
+
+        // Copy any extracted assets (e.g. images/) next to the saved markdown so
+        // relative references like ![](images/xxx.jpg) resolve correctly.
+        if let Some(md_parent) = md_path_in_zip.parent() {
+            let images_dir = md_parent.join("images");
+            if images_dir.is_dir() {
+                let target_images_dir = saved_path.parent()
+                    .map(|p| p.join("images"))
+                    .unwrap_or_else(|| papers_dir.join("images"));
+                if let Err(e) = copy_dir_all(&images_dir, &target_images_dir) {
+                    log::warn!("[paper_import] failed to copy images dir: {}", e);
+                } else {
+                    log::info!("[paper_import] copied images to {}", target_images_dir.display());
+                }
+            }
+        }
+
+        log::info!("[paper_import] saved paper to {}", saved_path.display());
+
+        Ok(paper_import::PaperImportResult {
+            md_path: saved_path.display().to_string(),
+            md_content,
+            title: None,
+        })
+    }.await;
+
+    cleanup(&temp_dir);
+    result
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -3874,6 +4069,7 @@ pub fn run() {
             read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
             ai_agent::generate_paper_reader_guide,
             ai_agent::submit_paper_reader_feedback,
+            import_paper_from_pdf, import_paper_from_url, get_paper_import_status,
             create_project_subdir
         ])
         .build(tauri::generate_context!())
