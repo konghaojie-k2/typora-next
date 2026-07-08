@@ -221,7 +221,7 @@
         }
       });
       reader.paperFile = tab.path;
-      reader.render(tab.paperGuide, tab.paperOriginalHtml);
+      await reader.render(tab.paperGuide, tab.paperOriginalHtml);
       tab.paperReader = reader;
 
       // Restore scroll position if we have one saved on the tab.

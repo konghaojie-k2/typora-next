@@ -508,12 +508,12 @@ function loadPaperReaderModule() {
   return require(modPath);
 }
 
-function ensureReaderRendered(ctx) {
+async function ensureReaderRendered(ctx) {
   if (!ctx.reader) {
     const { PaperReader } = loadPaperReaderModule();
     ctx.reader = new PaperReader({ container: ctx.container });
     ctx.reader.paperFile = ctx.paperFile;
-    ctx.reader.render(buildSampleGuide(ctx.paperFile), getFullOriginalHtml());
+    await ctx.reader.render(buildSampleGuide(ctx.paperFile), getFullOriginalHtml());
     ctx.reader._setCurrentSidebarItem(buildSampleGuide(ctx.paperFile).reading_order[0].section_id);
   }
 }
@@ -559,7 +559,7 @@ steps.given('用户已在论文导读模式', async function() {
     this.reader = new PaperReader({ container: this.container });
     this.reader.paperFile = this.paperFile;
     const guide = buildSampleGuide(this.paperFile);
-    this.reader.render(guide, getFullOriginalHtml());
+    await this.reader.render(guide, getFullOriginalHtml());
     this.reader._setCurrentSidebarItem(guide.reading_order[0].section_id);
   }
 });
@@ -580,7 +580,7 @@ steps.given('用户已进入论文导读模式', async function() {
     this.reader = new PaperReader({ container: this.container });
     this.reader.paperFile = this.paperFile;
     const guide = buildSampleGuide(this.paperFile);
-    this.reader.render(guide, getFullOriginalHtml());
+    await this.reader.render(guide, getFullOriginalHtml());
     this.reader._setCurrentSidebarItem(guide.reading_order[0].section_id);
   }
 });
@@ -606,7 +606,7 @@ steps.when('用户进入论文导读模式', async function() {
     this.reader.paperFile = this.paperFile;
   }
   const guide = buildSampleGuide(this.paperFile);
-  this.reader.render(guide, this.originalHtmlWithImages || getFullOriginalHtml());
+  await this.reader.render(guide, this.originalHtmlWithImages || getFullOriginalHtml());
   this.reader._setCurrentSidebarItem(guide.reading_order[0].section_id);
 });
 
@@ -655,8 +655,8 @@ steps.given('缓存文件存在', function() {
   }
 });
 
-steps.given('Abstract 下有一个展开的导读卡', function() {
-  ensureReaderRendered(this);
+steps.given('Abstract 下有一个展开的导读卡', async function() {
+  await ensureReaderRendered(this);
   const cards = this.reader._getGuideCards();
   if (cards.length === 0) throw new Error('No guide cards found');
   this.targetCard = cards[0];
@@ -665,8 +665,8 @@ steps.given('Abstract 下有一个展开的导读卡', function() {
   }
 });
 
-steps.given('Abstract 下有一个折叠的导读卡', function() {
-  ensureReaderRendered(this);
+steps.given('Abstract 下有一个折叠的导读卡', async function() {
+  await ensureReaderRendered(this);
   const cards = this.reader._getGuideCards();
   if (cards.length === 0) throw new Error('No guide cards found');
   this.targetCard = cards[0];
@@ -675,8 +675,8 @@ steps.given('Abstract 下有一个折叠的导读卡', function() {
   }
 });
 
-steps.given('用户已折叠 Abstract 的某张导读卡', function() {
-  ensureReaderRendered(this);
+steps.given('用户已折叠 Abstract 的某张导读卡', async function() {
+  await ensureReaderRendered(this);
   const cards = this.reader._getGuideCards();
   if (cards.length === 0) throw new Error('No guide cards found');
   this.targetCard = cards[0];
@@ -707,7 +707,7 @@ steps.given('反馈表单已打开', function() {
   this.feedbackOverlay = document.getElementById('paper-reader-feedback-overlay');
 });
 
-steps.given('确认对话框已弹出', function() {
+steps.given('确认对话框已弹出', async function() {
   if (!this.paperFile) {
     this.paperDir = createTempPaperDir();
     this.paperFile = createVaePaper(this.paperDir);
@@ -720,7 +720,7 @@ steps.given('确认对话框已弹出', function() {
     this.reader = new PaperReader({ container: this.container });
     this.reader.paperFile = this.paperFile;
     const guide = buildSampleGuide(this.paperFile);
-    this.reader.render(guide, getFullOriginalHtml());
+    await this.reader.render(guide, getFullOriginalHtml());
   }
   this.switchConfirmed = undefined;
 });
@@ -736,7 +736,7 @@ steps.when('用户点击论文导读按钮', async function() {
     const guide = await global.window.__TAURI__.core.invoke('generate_paper_reader_guide', { paperFile: this.paperFile });
     const content = await global.window.__TAURI__.core.invoke('read_text_file', { filePath: this.paperFile });
     const originalHtml = await global.window.__TAURI__.core.invoke('render_markdown', { content });
-    this.reader.render(guide, originalHtml);
+    await this.reader.render(guide, originalHtml);
   } catch (e) {
     this.reader._showError(e.message);
     this.reader._setState('Error');
@@ -752,7 +752,7 @@ steps.when('用户点击工具栏论文导读按钮', async function() {
     const guide = await global.window.__TAURI__.core.invoke('generate_paper_reader_guide', { paperFile: this.paperFile });
     const content = await global.window.__TAURI__.core.invoke('read_text_file', { filePath: this.paperFile });
     const originalHtml = await global.window.__TAURI__.core.invoke('render_markdown', { content });
-    this.reader.render(guide, originalHtml);
+    await this.reader.render(guide, originalHtml);
   } catch (e) {
     this.reader._showError(e.message);
     this.reader._setState('Error');
@@ -772,7 +772,7 @@ steps.when('用户再次选择同一篇 VAE 论文', async function() {
   const before = __paperReaderAgentCallCount;
   const guide = await global.window.__TAURI__.core.invoke('generate_paper_reader_guide', { paperFile: this.paperFile });
   this.agentCallCountDelta = __paperReaderAgentCallCount - before;
-  this.reader.render(guide, '<div></div>');
+  await this.reader.render(guide, '<div></div>');
 });
 
 steps.when('agent 生成导读失败', async function() {
@@ -795,7 +795,7 @@ steps.when('agent 生成导读失败', async function() {
 steps.when('用户点击重试后再次尝试生成', async function() {
   __paperReaderShouldFail = false;
   const guide = await global.window.__TAURI__.core.invoke('generate_paper_reader_guide', { paperFile: this.paperFile });
-  this.reader.render(guide, '<div></div>');
+  await this.reader.render(guide, '<div></div>');
 });
 
 steps.when('用户点击左侧导航中的 Introduction', function() {
@@ -824,13 +824,13 @@ steps.when('用户滚动到 Conclusion 章节', function() {
   fab.classList.add('active');
 });
 
-steps.when('用户滚动到 Method 章节', function() {
-  ensureReaderRendered(this);
+steps.when('用户滚动到 Method 章节', async function() {
+  await ensureReaderRendered(this);
   this.reader._setCurrentSidebarItem('sec_method');
 });
 
-steps.when('用户临时切换到其他标签页再返回', function() {
-  ensureReaderRendered(this);
+steps.when('用户临时切换到其他标签页再返回', async function() {
+  await ensureReaderRendered(this);
   // Simulate tab switch by closing and re-rendering the same paper
   const savedScrollTop = this.reader.elements.main ? this.reader.elements.main.scrollTop : 0;
   this.reader.close();
@@ -838,19 +838,19 @@ steps.when('用户临时切换到其他标签页再返回', function() {
   this.reader = new PaperReader({ container: this.container });
   this.reader.paperFile = this.paperFile;
   const guide = buildSampleGuide(this.paperFile);
-  this.reader.render(guide, getFullOriginalHtml());
+  await this.reader.render(guide, getFullOriginalHtml());
   this.reader.elements.main.scrollTop = savedScrollTop;
   this.reader._setCurrentSidebarItem('sec_method');
 });
 
 steps.when('用户关闭论文导读后重新打开同一篇论文', async function() {
-  ensureReaderRendered(this);
+  await ensureReaderRendered(this);
   this.reader.close();
   const { PaperReader } = loadPaperReaderModule();
   this.reader = new PaperReader({ container: this.container });
   this.reader.paperFile = this.paperFile;
   const guide = await global.window.__TAURI__.core.invoke('generate_paper_reader_guide', { paperFile: this.paperFile });
-  this.reader.render(guide, getFullOriginalHtml());
+  await this.reader.render(guide, getFullOriginalHtml());
 });
 
 steps.when('用户点击完成阅读按钮', function() {

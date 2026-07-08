@@ -1212,6 +1212,32 @@ window.agentBridge = {
     }
   }
 
+  /**
+   * Apply the normal markdown post-processing pipeline to an arbitrary
+   * container. Used by the paper reader so its content gets the same
+   * enhancements (image paths, lightbox, code highlighting, math, mermaid,
+   * GFM alerts, Obsidian syntax, download buttons) as regular tabs.
+   */
+  async function enhanceReaderContent(container, baseDir = '') {
+    if (!container) return;
+
+    // Resolve relative image paths before any other processing touches src.
+    if (baseDir) {
+      resolveImagePaths(baseDir, container);
+    }
+
+    initCodeHighlighting(container);
+    initMathRendering(container);
+    await initMermaid(container);
+    initImageHandling(container);
+    initGFMAlerts(container);
+    initObsidianHighlight(container);
+    initObsidianTags(container);
+    initObsidianCallouts(container);
+    initWikiLinks(container);
+    initDownloadButtons(container);
+  }
+
   // ============================================
   // Exploration Panel (floating, per-file, fully decoupled from Tab mode)
   // ============================================
@@ -2287,10 +2313,10 @@ window.agentBridge = {
   // ============================================
   // Initialization Functions
   // ============================================
-  function initCodeHighlighting() {
+  function initCodeHighlighting(container = elements.markdownBody) {
     if (typeof Prism !== 'undefined') {
       // Process all code blocks
-      const codeBlocks = elements.markdownBody.querySelectorAll('pre code[class*="language-"]');
+      const codeBlocks = container.querySelectorAll('pre code[class*="language-"]');
       codeBlocks.forEach(code => {
         const pre = code.parentElement;
         const language = getLanguageFromClass(code.className);
@@ -2368,9 +2394,9 @@ window.agentBridge = {
     }
   }
 
-  function initMathRendering() {
+  function initMathRendering(container = elements.markdownBody) {
     if (typeof renderMathInElement !== 'undefined') {
-      renderMathInElement(elements.markdownBody, {
+      renderMathInElement(container, {
         delimiters: [
           { left: '$$', right: '$$', display: true },
           { left: '\\[', right: '\\]', display: true },
@@ -2382,7 +2408,7 @@ window.agentBridge = {
     }
   }
 
-  async function initMermaid() {
+  async function initMermaid(container = elements.markdownBody) {
     if (typeof mermaid === 'undefined') return;
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -2393,7 +2419,7 @@ window.agentBridge = {
     });
 
     // Find and validate mermaid blocks
-    const mermaidBlocks = elements.markdownBody.querySelectorAll('.mermaid, pre code.language-mermaid');
+    const mermaidBlocks = container.querySelectorAll('.mermaid, pre code.language-mermaid');
     const canValidate = typeof mermaid.parse === 'function';
     const validBlocks = [];
 
@@ -2628,8 +2654,8 @@ window.agentBridge = {
     }
   }
 
-  function initImageHandling() {
-    const images = elements.markdownBody.querySelectorAll('img');
+  function initImageHandling(container = elements.markdownBody) {
+    const images = container.querySelectorAll('img');
     images.forEach(img => {
       // Error handling - replace broken image with friendly placeholder
       img.addEventListener('error', function() {
@@ -2659,8 +2685,8 @@ window.agentBridge = {
   // ============================================
   // Resolve Image Paths
   // ============================================
-  function resolveImagePaths(baseDir) {
-    const images = elements.markdownBody.querySelectorAll('img');
+  function resolveImagePaths(baseDir, container = elements.markdownBody) {
+    const images = container.querySelectorAll('img');
     const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
 
     images.forEach(img => {
@@ -2715,8 +2741,8 @@ window.agentBridge = {
   // ============================================
   // Task List Interaction
   // ============================================
-  function initTaskListInteraction() {
-    const checkboxes = elements.markdownBody.querySelectorAll('input[type="checkbox"]');
+  function initTaskListInteraction(container = elements.markdownBody) {
+    const checkboxes = container.querySelectorAll('input[type="checkbox"]');
     checkboxes.forEach((cb, index) => {
       cb.addEventListener('change', async () => {
         const tab = state.tabs[state.activeTab];
@@ -2924,8 +2950,8 @@ window.agentBridge = {
   // ============================================
   // GFM Alerts Styling
   // ============================================
-  function initGFMAlerts() {
-    const blockquotes = elements.markdownBody.querySelectorAll('blockquote');
+  function initGFMAlerts(container = elements.markdownBody) {
+    const blockquotes = container.querySelectorAll('blockquote');
 
     blockquotes.forEach(bq => {
       const firstP = bq.querySelector('p');
@@ -2974,11 +3000,11 @@ window.agentBridge = {
   // ============================================
 
   /**
-   * Collect text nodes from markdownBody, skipping code blocks and other protected elements.
+   * Collect text nodes from a container, skipping code blocks and other protected elements.
    */
-  function collectTextNodes(excludeSelector = 'code, pre, .mermaid, a, mark, .obsidian-tag') {
+  function collectTextNodes(container = elements.markdownBody, excludeSelector = 'code, pre, .mermaid, a, mark, .obsidian-tag') {
     const nodes = [];
-    const walker = document.createTreeWalker(elements.markdownBody, NodeFilter.SHOW_TEXT);
+    const walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT);
     while (walker.nextNode()) {
       if (walker.currentNode.parentElement.closest(excludeSelector)) continue;
       nodes.push(walker.currentNode);
@@ -2991,8 +3017,8 @@ window.agentBridge = {
    * @param {RegExp} regex
    * @param {Function} replacer - receives match array, returns HTML string
    */
-  function replaceInTextNodes(regex, replacer) {
-    const nodes = collectTextNodes();
+  function replaceInTextNodes(regex, replacer, container = elements.markdownBody) {
+    const nodes = collectTextNodes(container);
     nodes.forEach(node => {
       const text = node.textContent;
       if (!regex.test(text)) return;
@@ -3008,32 +3034,34 @@ window.agentBridge = {
   /**
    * Obsidian Highlight: ==highlighted text==
    */
-  function initObsidianHighlight() {
+  function initObsidianHighlight(container = elements.markdownBody) {
     replaceInTextNodes(
       /==([^=\s][^=]*|[^=\s])==/g,
-      (m, content) => `<mark class="obsidian-highlight">${escapeHtml(content)}</mark>`
+      (m, content) => `<mark class="obsidian-highlight">${escapeHtml(content)}</mark>`,
+      container
     );
   }
 
   /**
    * Obsidian Tags: #tag-name or #tag/subtag
    */
-  function initObsidianTags() {
+  function initObsidianTags(container = elements.markdownBody) {
     // Match #tag where:
     // - preceded by start of string, whitespace, or non-word char
     // - followed by a letter (not a number, to avoid hex colors)
     // - can contain letters, digits, underscores, hyphens, forward slashes
     replaceInTextNodes(
       /(^|\s|[^\w])#([a-zA-Z][\w\-/]*)/g,
-      (m, prefix, tag) => `${prefix}<span class="obsidian-tag" data-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</span>`
+      (m, prefix, tag) => `${prefix}<span class="obsidian-tag" data-tag="${escapeHtml(tag)}">#${escapeHtml(tag)}</span>`,
+      container
     );
   }
 
   /**
    * Obsidian Callouts: extend GFM alerts with more types and collapsible support.
    */
-  function initObsidianCallouts() {
-    const blockquotes = elements.markdownBody.querySelectorAll('blockquote');
+  function initObsidianCallouts(container = elements.markdownBody) {
+    const blockquotes = container.querySelectorAll('blockquote');
 
     blockquotes.forEach(bq => {
       const firstP = bq.querySelector('p');
@@ -3115,7 +3143,7 @@ window.agentBridge = {
   /**
    * WikiLink: [[File Name]] or [[File Name|Display Text]] or [[File Name#Heading]]
    */
-  function initWikiLinks() {
+  function initWikiLinks(container = elements.markdownBody) {
     // 使用负向后瞻 (?<!!) 确保不匹配 ![[...]] 图片嵌入模式
     replaceInTextNodes(
       /(?<!!)\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g,
@@ -3123,11 +3151,12 @@ window.agentBridge = {
         const linkText = display ? escapeHtml(display.trim()) : escapeHtml(target.trim());
         const linkTarget = target.trim();
         return `<a class="wiki-link" data-target="${escapeHtml(linkTarget)}">${linkText}</a>`;
-      }
+      },
+      container
     );
 
     // Add click handlers
-    elements.markdownBody.querySelectorAll('.wiki-link').forEach(link => {
+    container.querySelectorAll('.wiki-link').forEach(link => {
       link.addEventListener('click', (e) => {
         e.preventDefault();
         const target = link.dataset.target;
@@ -5130,14 +5159,14 @@ window.agentBridge = {
   // Download Buttons for Non-Text Content
   // ============================================
 
-  function initDownloadButtons() {
-    addImageDownloadButtons();
-    addMermaidDownloadButtons();
-    addTableDownloadButtons();
+  function initDownloadButtons(container = elements.markdownBody) {
+    addImageDownloadButtons(container);
+    addMermaidDownloadButtons(container);
+    addTableDownloadButtons(container);
   }
 
-  function addImageDownloadButtons() {
-    const images = elements.markdownBody.querySelectorAll('img');
+  function addImageDownloadButtons(container = elements.markdownBody) {
+    const images = container.querySelectorAll('img');
     images.forEach(img => {
       if (img.closest('a')) return; // Skip images inside links
       if (img.dataset.downloadBtn === 'true') return;
@@ -5160,8 +5189,8 @@ window.agentBridge = {
     });
   }
 
-  function addMermaidDownloadButtons() {
-    const mermaidBlocks = elements.markdownBody.querySelectorAll('pre.mermaid');
+  function addMermaidDownloadButtons(container = elements.markdownBody) {
+    const mermaidBlocks = container.querySelectorAll('pre.mermaid');
     mermaidBlocks.forEach(pre => {
       if (pre.dataset.downloadBtn === 'true') return;
       pre.dataset.downloadBtn = 'true';
@@ -5187,8 +5216,8 @@ window.agentBridge = {
     });
   }
 
-  function addTableDownloadButtons() {
-    const tables = elements.markdownBody.querySelectorAll('table');
+  function addTableDownloadButtons(container = elements.markdownBody) {
+    const tables = container.querySelectorAll('table');
     tables.forEach(table => {
       if (table.dataset.downloadBtn === 'true') return;
       table.dataset.downloadBtn = 'true';
@@ -5362,6 +5391,7 @@ window.agentBridge = {
     filterFileTree,
     invoke,
     _showConfirm,
+    enhanceReaderContent,
 
     /**
      * Refresh the file tree sidebar from the currently opened folder.

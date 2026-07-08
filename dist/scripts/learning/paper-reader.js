@@ -167,7 +167,7 @@
       try {
         const guide = await this._loadGuide(paperFile);
         this.guide = guide;
-        this.render(guide);
+        await this.render(guide);
         this._setState(STATES.READING);
       } catch (e) {
         this._showError(e.message);
@@ -220,7 +220,7 @@
       };
     }
 
-    render(guide, originalHtml) {
+    async render(guide, originalHtml) {
       ensureStyle();
       this.guide = guide;
       this._clear();
@@ -232,7 +232,7 @@
       const sidebar = this._renderSidebar(guide);
       sidebar.id = 'paper-reader-sidebar';
 
-      const main = this._renderMain(guide, originalHtml);
+      const main = await this._renderMain(guide, originalHtml);
       main.id = 'paper-reader-main';
 
       if (this.sidebarContainer) {
@@ -544,7 +544,7 @@
       return sidebar;
     }
 
-    _renderMain(guide, originalHtml) {
+    async _renderMain(guide, originalHtml) {
       const main = document.createElement('main');
       main.className = 'paper-reader-main';
 
@@ -562,7 +562,7 @@
         });
       }
 
-      this._postProcess(main);
+      await this._postProcess(main);
       return main;
     }
 
@@ -736,7 +736,22 @@
       }
     }
 
-    _postProcess(main) {
+    async _postProcess(main) {
+      // Prefer the main app's full markdown enhancement pipeline so the paper
+      // reader gets image lightbox, mermaid, GFM alerts, Obsidian syntax, etc.
+      if (window.TyporaNext && window.TyporaNext.enhanceReaderContent) {
+        const baseDir = this.paperFile
+          ? this.paperFile.replace(/[\\/][^\\/]+$/, '')
+          : '';
+        try {
+          await window.TyporaNext.enhanceReaderContent(main, baseDir);
+          return;
+        } catch (e) {
+          console.warn('PaperReader enhanceReaderContent failed, falling back:', e);
+        }
+      }
+
+      // Fallback for test environments without TyporaNext.
       if (typeof renderMathInElement !== 'undefined') {
         try {
           renderMathInElement(main, {

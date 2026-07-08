@@ -218,14 +218,14 @@ const sampleGuide = {
   summary_check_questions: ['VAE 解决的核心问题是什么？']
 };
 
-TestRunner.test('module loads and exports PaperReader', () => {
+TestRunner.test('module loads and exports PaperReader', async () => {
   installDOM();
   const mod = loadModule();
   TestRunner.assertExists(mod, 'paper-reader.js should load');
   TestRunner.assertExists(mod.PaperReader, 'PaperReader should be exported');
 });
 
-TestRunner.test('PaperReader starts in Idle state', () => {
+TestRunner.test('PaperReader starts in Idle state', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
@@ -246,11 +246,11 @@ TestRunner.test('open() transitions to LoadingGuide then Reading', async () => {
   TestRunner.assertEquals(reader.getState(), 'Reading', 'reading after load');
 });
 
-TestRunner.test('render() creates sidebar and main content', () => {
+TestRunner.test('render() creates sidebar and main content', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const sidebar = document.getElementById('paper-reader-sidebar');
   const main = document.getElementById('paper-reader-main');
@@ -258,11 +258,11 @@ TestRunner.test('render() creates sidebar and main content', () => {
   TestRunner.assertExists(main, 'main content should exist');
 });
 
-TestRunner.test('render() shows at least one guide card', () => {
+TestRunner.test('render() shows at least one guide card', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const cards = reader._getGuideCards();
   TestRunner.assert(Array.isArray(cards), 'cards should be an array');
@@ -280,11 +280,11 @@ TestRunner.test('open() transitions to Error when guide loading fails', async ()
   TestRunner.assertExists(document.getElementById('paper-reader-root'), 'error root rendered');
 });
 
-TestRunner.test('close() returns to Idle and removes DOM', () => {
+TestRunner.test('close() returns to Idle and removes DOM', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
   TestRunner.assertEquals(reader.getState(), 'Reading', 'reading after render');
 
   reader.close();
@@ -292,11 +292,11 @@ TestRunner.test('close() returns to Idle and removes DOM', () => {
   TestRunner.assert(!document.getElementById('paper-reader-root'), 'root element removed');
 });
 
-TestRunner.test('guide card has toggle button that folds and unfolds', () => {
+TestRunner.test('guide card has toggle button that folds and unfolds', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const cards = reader._getGuideCards();
   TestRunner.assert(cards.length > 0, 'has at least one card');
@@ -319,11 +319,11 @@ TestRunner.test('guide card has toggle button that folds and unfolds', () => {
   TestRunner.assertEquals(toggleBtn.textContent, '折叠', 'toggle shows 折叠 after unfold');
 });
 
-TestRunner.test('setCurrentSection highlights matching sidebar item', () => {
+TestRunner.test('setCurrentSection highlights matching sidebar item', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   reader._setCurrentSidebarItem('sec_abstract');
   const items = Array.from(reader.elements.sidebar.querySelectorAll('li'));
@@ -331,11 +331,11 @@ TestRunner.test('setCurrentSection highlights matching sidebar item', () => {
   TestRunner.assert(items.every(li => li.dataset.sectionId !== 'sec_abstract' ? !li.classList.contains('current') : true), 'other items not current');
 });
 
-TestRunner.test('scrollToSection does not crash for missing section', () => {
+TestRunner.test('scrollToSection does not crash for missing section', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   let threw = false;
   try {
@@ -346,11 +346,11 @@ TestRunner.test('scrollToSection does not crash for missing section', () => {
   TestRunner.assert(!threw, 'should not throw for missing section');
 });
 
-TestRunner.test('feedback form opens when clicking FAB', () => {
+TestRunner.test('feedback form opens when clicking FAB', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const fab = document.querySelector('.paper-reader-fab');
   TestRunner.assertExists(fab, 'FAB exists');
@@ -362,11 +362,11 @@ TestRunner.test('feedback form opens when clicking FAB', () => {
   TestRunner.assertEquals(radios.length, 3, 'has 3 suitability options');
 });
 
-TestRunner.test('feedback form validates method_suitability', () => {
+TestRunner.test('feedback form validates method_suitability', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   document.querySelector('.paper-reader-fab').click();
   const overlay = document.getElementById('paper-reader-feedback-overlay');
@@ -381,7 +381,7 @@ TestRunner.test('feedback submit clears validation when option selected', async 
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   document.querySelector('.paper-reader-fab').click();
   const overlay = document.getElementById('paper-reader-feedback-overlay');
@@ -394,12 +394,12 @@ TestRunner.test('feedback submit clears validation when option selected', async 
   TestRunner.assertEquals(error.textContent, '', 'error cleared after selecting option');
 });
 
-TestRunner.test('card order index matches reading order', () => {
+TestRunner.test('card order index matches reading order', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
   reader.paperFile = 'C:/papers/vae.md';
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const cards = reader._getGuideCards();
   TestRunner.assert(cards.length > 0, 'has at least one card');
@@ -413,7 +413,7 @@ TestRunner.test('close button calls onClose directly when no onConfirmClose', as
   const { PaperReader } = loadModule();
   let closed = false;
   const reader = new PaperReader({ container: document.body, onClose: () => { closed = true; } });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const closeBtn = reader.elements.sidebar.querySelector('.paper-reader-sidebar-close');
   TestRunner.assertExists(closeBtn, 'close button exists');
@@ -433,7 +433,7 @@ TestRunner.test('close button confirms before onClose when onConfirmClose return
     onClose: () => { closed = true; },
     onConfirmClose: async () => { confirmed = true; return true; }
   });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const closeBtn = reader.elements.sidebar.querySelector('.paper-reader-sidebar-close');
   const clickFn = (closeBtn._listeners['click'] || [])[0];
@@ -451,7 +451,7 @@ TestRunner.test('close button does not call onClose when onConfirmClose returns 
     onClose: () => { closed = true; },
     onConfirmClose: async () => false
   });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const closeBtn = reader.elements.sidebar.querySelector('.paper-reader-sidebar-close');
   const clickFn = (closeBtn._listeners['click'] || [])[0];
@@ -459,12 +459,12 @@ TestRunner.test('close button does not call onClose when onConfirmClose returns 
   TestRunner.assert(!closed, 'onClose not called when cancelled');
 });
 
-TestRunner.test('feedback form restores saved form state', () => {
+TestRunner.test('feedback form restores saved form state', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
   reader.paperFile = 'C:/papers/vae.md';
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   document.querySelector('.paper-reader-fab').click();
   const overlay = document.getElementById('paper-reader-feedback-overlay');
@@ -494,7 +494,7 @@ TestRunner.test('feedback form restores saved form state', () => {
   TestRunner.assert(radios2[2].checked, 'method suitability restored');
 });
 
-TestRunner.test('local image paths are resolved via convertFileSrc', () => {
+TestRunner.test('local image paths are resolved via convertFileSrc', async () => {
   const { converted } = installDOMWithTauri();
   const { PaperReader } = loadModule();
   const reader = new PaperReader({ container: document.body });
@@ -530,7 +530,7 @@ TestRunner.test('local image paths are resolved via convertFileSrc', () => {
   TestRunner.assert(converted.includes('C:/papers/images/fig2.png'), 'relative images/fig2.png resolved to baseDir');
 });
 
-TestRunner.test('sidebarContainer option hosts sidebar outside the content root', () => {
+TestRunner.test('sidebarContainer option hosts sidebar outside the content root', async () => {
   installDOM();
   const { PaperReader } = loadModule();
   const externalHost = document.createElement('div');
@@ -539,7 +539,7 @@ TestRunner.test('sidebarContainer option hosts sidebar outside the content root'
     container: document.body,
     sidebarContainer: externalHost
   });
-  reader.render(sampleGuide);
+  await reader.render(sampleGuide);
 
   const sidebar = document.getElementById('paper-reader-sidebar');
   const main = document.getElementById('paper-reader-main');
