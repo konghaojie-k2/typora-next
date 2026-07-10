@@ -169,6 +169,32 @@ async fn open_file(path: PathBuf) -> Result<FileResult, String> {
     })
 }
 
+/// Read the bundled demo file from resources
+#[tauri::command]
+async fn get_demo_file(app: tauri::AppHandle) -> Result<FileResult, String> {
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+
+    // Tauri 2 places resources under resource_dir/<relative-path from src-tauri/>
+    // For "../samples/full.md", the file ends up at resource_dir/samples/full.md
+    let demo_path = resource_dir.join("samples").join("full.md");
+
+    if !demo_path.exists() {
+        return Err(format!(
+            "Demo file not found at: {} (resource dir: {})",
+            demo_path.display(),
+            resource_dir.display()
+        ));
+    }
+
+    let content = fs::read_to_string(&demo_path)
+        .map_err(|e| format!("Failed to read demo file: {}", e))?;
+    Ok(FileResult {
+        path: demo_path.to_string_lossy().to_string(),
+        content,
+        base_dir: String::new(),
+    })
+}
+
 /// Pure decision: should we request OS-level user attention for an externally
 /// opened file? Returns true when the window is not focused.
 ///
@@ -4070,7 +4096,8 @@ pub fn run() {
             ai_agent::generate_paper_reader_guide,
             ai_agent::submit_paper_reader_feedback,
             import_paper_from_pdf, import_paper_from_url, get_paper_import_status,
-            create_project_subdir
+            create_project_subdir,
+            get_demo_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

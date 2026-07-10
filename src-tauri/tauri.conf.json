@@ -43,7 +43,8 @@
       "icons/md-file-256.png",
       "../agent-bridge.js",
       "../package.json",
-      "skills/"
+      "skills/",
+      "../samples/full.md"
     ],
     "fileAssociations": [
       {
