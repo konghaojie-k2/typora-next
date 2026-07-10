@@ -815,6 +815,145 @@ main {
   background: var(--color-bg-tertiary);
 }
 
+/* Custom toolbar tooltip — replaces native title to avoid browser delay */
+.toolbar-tooltip {
+  position: fixed;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 4px 8px;
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity var(--transition-fast), transform var(--transition-fast);
+  z-index: 9999;
+  box-shadow: var(--shadow-md);
+}
+
+.toolbar-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Onboarding guide: spotlight + card */
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: none;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.onboarding-overlay::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+}
+
+.onboarding-spotlight {
+  position: absolute;
+  border-radius: var(--radius-md);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.5);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.onboarding-card {
+  position: absolute;
+  z-index: 2;
+  min-width: 240px;
+  max-width: 320px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  padding: var(--spacing-md);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-text-primary);
+}
+
+/* Welcome dialog — centered, larger */
+.onboarding-card-welcome {
+  max-width: 380px;
+  text-align: center;
+}
+
+.onboarding-card-welcome .onboarding-card-desc {
+  font-size: var(--font-size-base);
+  margin-bottom: var(--spacing-md);
+}
+
+.onboarding-card-welcome .onboarding-card-actions {
+  justify-content: center;
+  gap: var(--spacing-md);
+}
+
+.onboarding-card-welcome .onboarding-btn-next {
+  padding: 8px 20px;
+  font-size: var(--font-size-sm);
+}
+
+.onboarding-card-title {
+  margin: 0 0 var(--spacing-xs);
+  font-size: var(--font-size-base);
+  font-weight: 600;
+}
+
+.onboarding-card-desc {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--font-size-sm);
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+}
+
+.onboarding-card-progress {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-muted);
+  margin-bottom: var(--spacing-sm);
+}
+
+.onboarding-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--spacing-sm);
+}
+
+.onboarding-btn {
+  padding: 6px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.onboarding-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.onboarding-btn-next {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: #fff;
+}
+
+.onboarding-btn-next:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+}
+
+.onboarding-btn-prev {
+  margin-right: auto;
+}
+
 /* Agent SDK Status Indicator */
 .agent-status-chip {
   display: inline-flex;

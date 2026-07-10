@@ -118,6 +118,7 @@ window.agentBridge = {
     settingsSave: document.getElementById('settingsSave'),
     settingsTest: document.getElementById('settingsTest'),
     testResult: document.getElementById('testResult'),
+    restartOnboardingBtn: document.getElementById('restartOnboardingBtn'),
     recentFilesSection: document.getElementById('recentFilesSection'),
     recentFilesList: document.getElementById('recentFilesList'),
     clearRecentFiles: document.getElementById('clearRecentFiles'),
@@ -4220,6 +4221,14 @@ window.agentBridge = {
     if (elements.settingsTest) {
       elements.settingsTest.addEventListener('click', testLLMConfig);
     }
+    if (elements.restartOnboardingBtn) {
+      elements.restartOnboardingBtn.addEventListener('click', () => {
+        if (onboardingManager) {
+          onboardingManager.restart();
+          closeSettings();
+        }
+      });
+    }
     if (elements.settingsModal) {
       elements.settingsModal.addEventListener('click', (e) => {
         if (e.target === elements.settingsModal) closeSettings();
@@ -5392,6 +5401,7 @@ window.agentBridge = {
     invoke,
     _showConfirm,
     enhanceReaderContent,
+    initToolbarTooltips,
 
     /**
      * Refresh the file tree sidebar from the currently opened folder.
@@ -5408,5 +5418,117 @@ window.agentBridge = {
       }
     }
   };
+
+  // ============================================
+  // Toolbar tooltips: custom fast-reveal tooltips
+  // ============================================
+  function initToolbarTooltips(options = {}) {
+    const delay = options.delay ?? 150;
+
+    // Avoid duplicate tooltip containers
+    let tooltip = document.querySelector('.toolbar-tooltip');
+    if (!tooltip) {
+      tooltip = document.createElement('div');
+      tooltip.className = 'toolbar-tooltip';
+      tooltip.setAttribute('role', 'tooltip');
+      document.body.appendChild(tooltip);
+    }
+
+    let showTimeout = null;
+    let activeButton = null;
+
+    function positionTooltip(button) {
+      const rect = button.getBoundingClientRect();
+      const tooltipRect = tooltip.getBoundingClientRect();
+      const top = rect.bottom + 6;
+      let left = rect.left + rect.width / 2 - tooltipRect.width / 2;
+      if (left < 8) left = 8;
+      if (left + tooltipRect.width > window.innerWidth - 8) {
+        left = window.innerWidth - tooltipRect.width - 8;
+      }
+      tooltip.style.top = `${top}px`;
+      tooltip.style.left = `${left}px`;
+    }
+
+    function showTooltip(button) {
+      const text = button.getAttribute('data-tooltip');
+      if (!text) return;
+      tooltip.textContent = text;
+      tooltip.classList.add('visible');
+      positionTooltip(button);
+      activeButton = button;
+    }
+
+    function hideTooltip() {
+      tooltip.classList.remove('visible');
+      activeButton = null;
+    }
+
+    function scheduleShow(button) {
+      clearTimeout(showTimeout);
+      activeButton = button;
+      showTimeout = setTimeout(() => showTooltip(button), delay);
+    }
+
+    function cancelShow() {
+      clearTimeout(showTimeout);
+      showTimeout = null;
+      hideTooltip();
+    }
+
+    document.querySelectorAll('.btn-icon[data-tooltip], .agent-status-chip[data-tooltip], .sidebar-toggle[data-tooltip], .file-tree-btn[data-tooltip]').forEach(button => {
+      button.removeAttribute('title');
+      button.addEventListener('mouseenter', () => scheduleShow(button));
+      button.addEventListener('mouseleave', cancelShow);
+      button.addEventListener('focus', () => scheduleShow(button));
+      button.addEventListener('blur', cancelShow);
+    });
+
+    window.addEventListener('resize', () => {
+      if (activeButton) positionTooltip(activeButton);
+    });
+
+    return { tooltip, hideTooltip, cancelShow };
+  }
+
+  initToolbarTooltips();
+
+  // ============================================
+  // First-time onboarding guide
+  // ============================================
+  let onboardingManager = null;
+  function initOnboarding() {
+    if (!window.OnboardingManager) return;
+
+    async function openDemoFile() {
+      if (!window.__TAURI__) return;
+      try {
+        // First try: bundled resource (release builds)
+        const result = await invoke('get_demo_file');
+        if (result && result.content) {
+          addTab(result.path, result.content, result.base_dir || '');
+          return;
+        }
+      } catch (err) {
+        // Fallback: development path
+        try {
+          const devPath = 'C:/CODE/typora-next/samples/full.md';
+          const result = await invoke('open_file', { path: devPath });
+          if (result && result.content) {
+            addTab(result.path, result.content, result.base_dir || '');
+          }
+        } catch (err2) {
+          console.warn('[Onboarding] Demo file not found (bundled or dev):', err, err2);
+        }
+      }
+    }
+
+    onboardingManager = window.OnboardingManager.create({
+      onOpenDemo: openDemoFile
+    });
+    const { didShow } = onboardingManager.start();
+  }
+
+  initOnboarding();
 
 })();

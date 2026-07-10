@@ -176,8 +176,30 @@ async function runAcceptanceTests() {
   totalPassed += pb5Result.passed;
   totalFailed += pb5Result.failed;
 
+  // Sprint 10: Toolbar tooltip quick reveal (UX improvement)
+  console.log(`\n${YELLOW}▶ Sprint 10: Toolbar Tooltip Quick Reveal${RESET}`);
+  const toolbarTooltipSteps = require('./sprint10_toolbar_tooltip.steps');
+  const toolbarTooltipResult = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'toolbar_tooltip.feature'),
+    toolbarTooltipSteps
+  );
+  totalPassed += toolbarTooltipResult.passed;
+  totalFailed += toolbarTooltipResult.failed;
+
+  // Sprint 10: Onboarding guide for first-time users
+  console.log(`\n${YELLOW}▶ Sprint 10: First-time Onboarding Guide${RESET}`);
+  const onboardingSteps = require('./sprint10_onboarding.steps');
+  const onboardingResult = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'onboarding.feature'),
+    onboardingSteps
+  );
+  totalPassed += onboardingResult.passed;
+  totalFailed += onboardingResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
+  if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});
+  if (onboardingSteps._cleanup) onboardingSteps._cleanup.call({});
 
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);

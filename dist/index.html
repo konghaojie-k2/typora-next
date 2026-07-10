@@ -22,7 +22,7 @@
       <div class="sidebar-tabs">
         <button class="sidebar-tab active" data-tab="files" id="tabFiles">文件</button>
         <button class="sidebar-tab" data-tab="toc" id="tabToc">目录</button>
-        <button class="sidebar-toggle" id="sidebarToggle" title="折叠侧边栏 (Ctrl+T)">
+        <button class="sidebar-toggle" id="sidebarToggle" data-tooltip="折叠侧边栏 (Ctrl+T)">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M3 12h18M3 6h18M3 18h18"/>
           </svg>
@@ -39,7 +39,7 @@
           <div class="recent-files-list" id="recentFilesList"></div>
         </div>
         <div class="file-tree-toolbar">
-          <button class="file-tree-btn" id="openFolderBtn" title="Open Folder (Ctrl+Shift+O)">
+          <button class="file-tree-btn" id="openFolderBtn" data-tooltip="Open Folder (Ctrl+Shift+O)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
@@ -70,18 +70,18 @@
       <!-- Toolbar -->
       <header class="toolbar">
         <div class="toolbar-left">
-          <button class="btn-icon" id="openFileBtn" title="Open File (Ctrl+O)">
+          <button class="btn-icon" id="openFileBtn" data-tooltip="Open File (Ctrl+O)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
               <polyline points="13 2 13 9 20 9"/>
             </svg>
           </button>
-          <button class="btn-icon" id="openFolderToolbarBtn" title="Open Folder (Ctrl+Shift+O)">
+          <button class="btn-icon" id="openFolderToolbarBtn" data-tooltip="Open Folder (Ctrl+Shift+O)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </button>
-          <button class="btn-icon" id="newLearningProjectBtn" title="课程模式">
+          <button class="btn-icon" id="newLearningProjectBtn" data-tooltip="课程模式">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2L2 7l10 5 10-5-10-5z"/>
               <path d="M2 17l10 5 10-5"/>
@@ -89,7 +89,7 @@
             </svg>
           </button>
           <!-- Sprint 10: 论文导读 -->
-          <button class="btn-icon" id="paperReaderBtn" title="论文导读">
+          <button class="btn-icon" id="paperReaderBtn" data-tooltip="论文导读">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
@@ -97,30 +97,30 @@
           </button>
           <!-- Sprint 8a: 立即 Socratic 复习（绕过阈值，方便验收） -->
           <!-- Hidden by default; shown only in learning mode when triggered or dev flag on -->
-          <button class="btn-icon" id="openSocraticBtn" title="Socratic 复习（需 dev flag）" style="display:none;">
+          <button class="btn-icon" id="openSocraticBtn" data-tooltip="Socratic 复习（需 dev flag）" style="display:none;">
             <span style="font-size:18px;">🏛️</span>
           </button>
-          <div class="agent-status-chip status-idle" id="agentStatusChip" title="Claude Code Agent 状态">
+          <div class="agent-status-chip status-idle" id="agentStatusChip" data-tooltip="Claude Code Agent 状态">
             <span class="agent-status-dot"></span>
             <span class="agent-status-text">检测中…</span>
           </div>
         </div>
         <div class="toolbar-right">
-          <button class="btn-icon" id="translateBtn" title="翻译">
+          <button class="btn-icon" id="translateBtn" data-tooltip="翻译">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"/>
               <line x1="2" y1="12" x2="22" y2="12"/>
               <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
             </svg>
           </button>
-          <button class="btn-icon" id="slidesBtn" title="幻灯片模式">
+          <button class="btn-icon" id="slidesBtn" data-tooltip="幻灯片模式">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
               <line x1="8" y1="21" x2="16" y2="21"/>
               <line x1="12" y1="17" x2="12" y2="21"/>
             </svg>
           </button>
-          <button class="btn-icon" id="exportWordBtn" title="导出 Word">
+          <button class="btn-icon" id="exportWordBtn" data-tooltip="导出 Word">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
@@ -129,27 +129,27 @@
               <polyline points="10 9 9 9 8 9"/>
             </svg>
           </button>
-          <button class="btn-icon" id="exportPdfBtn" title="导出 PDF (Ctrl+P)">
+          <button class="btn-icon" id="exportPdfBtn" data-tooltip="导出 PDF (Ctrl+P)">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
           </button>
-          <button class="btn-icon" id="shareBtn" title="分享打包">
+          <button class="btn-icon" id="shareBtn" data-tooltip="分享打包">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
               <polyline points="16 6 12 2 8 6"/>
               <line x1="12" y1="2" x2="12" y2="15"/>
             </svg>
           </button>
-          <button class="btn-icon" id="settingsBtn" title="设置">
+          <button class="btn-icon" id="settingsBtn" data-tooltip="设置">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
           </button>
-          <button class="btn-icon" id="themeToggle" title="切换主题 (Ctrl+Shift+L)">
+          <button class="btn-icon" id="themeToggle" data-tooltip="切换主题 (Ctrl+Shift+L)">
             <svg id="themeIconLight" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="5"/>
               <line x1="12" y1="1" x2="12" y2="3"/>
@@ -295,6 +295,11 @@
             <option value="wand">魔法棒</option>
           </select>
           <span class="setting-hint">选择自定义鼠标指针样式</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label">新手指引</label>
+          <button class="modal-btn modal-btn-secondary" id="restartOnboardingBtn" type="button">重新显示引导</button>
+          <span class="setting-hint">再次显示工具栏功能介绍</span>
         </div>
       </div>
       <div class="modal-footer">
@@ -451,6 +456,7 @@
   <script src="scripts/learning/paper-reader.js"></script>
   <script src="scripts/learning/paper-reader-integration.js"></script>
   <script src="scripts/learning/paper-import.js"></script>
+  <script src="scripts/onboarding.js"></script>
   <script src="scripts/main.js"></script>
   <script>
     // Learning mode: toolbar button opens hub (project list)

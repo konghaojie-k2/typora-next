@@ -67,6 +67,7 @@ function buildMockDOM() {
 
       setAttribute(k, v) { el._attrs[k] = String(v); },
       getAttribute(k) { return el._attrs[k] || null; },
+      removeAttribute(k) { delete el._attrs[k]; },
 
       appendChild(c) {
         if (c._parent) c._parent.removeChild(c);
