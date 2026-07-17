@@ -21,14 +21,16 @@ pub fn normalize_paper_url(url: &str) -> Result<String, String> {
     }
 
     // arXiv abstract page.
-    let abs_re = Regex::new(r"https?://arxiv\.org/abs/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
+    let abs_re =
+        Regex::new(r"https?://arxiv\.org/abs/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
     if let Some(caps) = abs_re.captures(trimmed) {
         let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         return Ok(format!("https://arxiv.org/pdf/{}.pdf", id));
     }
 
     // arXiv PDF page (may lack .pdf suffix).
-    let pdf_re = Regex::new(r"https?://arxiv\.org/pdf/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
+    let pdf_re =
+        Regex::new(r"https?://arxiv\.org/pdf/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
     if let Some(caps) = pdf_re.captures(trimmed) {
         let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         return Ok(format!("https://arxiv.org/pdf/{}.pdf", id));

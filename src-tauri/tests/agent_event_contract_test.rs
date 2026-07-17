@@ -110,9 +110,7 @@ fn test_agent_event_status_shape() {
 
 #[test]
 fn test_agent_event_complete_shape() {
-    let event = AgentEvent::Complete {
-        total_generated: 3,
-    };
+    let event = AgentEvent::Complete { total_generated: 3 };
     let value = serde_json::to_value(&event).unwrap();
     assert_eq!(value["type"], "complete");
     assert_eq!(value["data"]["total_generated"], 3);
@@ -158,12 +156,14 @@ fn test_all_variant_types_are_strings_and_data_is_object() {
         assert!(
             value["type"].is_string(),
             "Event type must be a string, got: {:?} for {:?}",
-            value["type"], event
+            value["type"],
+            event
         );
         assert!(
             value["data"].is_object(),
             "Event data must be an object, got: {:?} for {:?}",
-            value["data"], event
+            value["data"],
+            event
         );
     }
 }

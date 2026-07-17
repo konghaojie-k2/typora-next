@@ -1,6 +1,9 @@
+[workspace]
+members = [".", "crates/docx-export"]
+
 [package]
 name = "app"
-version = "0.1.2"
+version = "0.2.0"
 description = "A Tauri App"
 authors = ["you"]
 license = ""
@@ -47,3 +50,12 @@ walkdir = "2"
 
 # Base64 encoding for file downloads
 base64 = "0.22"
+
+# DOCX export with native OMML math equations
+docx-export = { path = "crates/docx-export" }
+
+# SVG rasterization for Mermaid diagrams in Word export
+resvg = "0.44"
+usvg = "0.44"
+fontdb = "0.22"
+tiny-skia = { version = "0.11", features = ["png"] }

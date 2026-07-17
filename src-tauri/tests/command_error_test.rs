@@ -31,7 +31,9 @@ pub struct QuizAnswerRecord {
 // Copied validation logic from src/lib.rs
 // ============================================
 
-fn validate_outline_chapters(outline: &serde_json::Value) -> Result<&Vec<serde_json::Value>, String> {
+fn validate_outline_chapters(
+    outline: &serde_json::Value,
+) -> Result<&Vec<serde_json::Value>, String> {
     outline["chapters"]
         .as_array()
         .ok_or_else(|| "outline.chapters must be an array".to_string())
@@ -52,7 +54,9 @@ fn truncate_text_for_explain(text: &str) -> String {
 }
 
 fn read_quiz_history_sync(project_path: &str) -> Result<serde_json::Value, String> {
-    let path = std::path::PathBuf::from(project_path).join(".learning").join("quiz-history.json");
+    let path = std::path::PathBuf::from(project_path)
+        .join(".learning")
+        .join("quiz-history.json");
     if !path.exists() {
         return Ok(json!({ "version": "1.0", "entries": [] }));
     }
@@ -123,8 +127,14 @@ fn create_learning_project_sync(
 fn test_ai_provider_debug_format_is_stable() {
     // Sprint 3 finding: ai_agent.rs used format!("{:?}", p).to_lowercase()
     // to build the provider string. If the enum is renamed, this breaks.
-    assert_eq!(build_ai_provider_string(Some(&AiProvider::Anthropic)), "anthropic");
-    assert_eq!(build_ai_provider_string(Some(&AiProvider::Openai)), "openai");
+    assert_eq!(
+        build_ai_provider_string(Some(&AiProvider::Anthropic)),
+        "anthropic"
+    );
+    assert_eq!(
+        build_ai_provider_string(Some(&AiProvider::Openai)),
+        "openai"
+    );
     assert_eq!(build_ai_provider_string(None), "anthropic");
 }
 
@@ -206,8 +216,7 @@ fn test_create_learning_project_does_not_overwrite_existing() {
     let tmp = std::env::temp_dir().join("typora_test_no_overwrite");
     let _ = std::fs::remove_dir_all(&tmp);
     std::fs::create_dir_all(&tmp.join(".learning")).unwrap();
-    std::fs::write(&tmp.join(".learning").join("project.json"), "{}")
-        .unwrap();
+    std::fs::write(&tmp.join(".learning").join("project.json"), "{}").unwrap();
 
     let outline = json!({ "chapters": [] });
     let result = create_learning_project_sync(tmp.to_str().unwrap(), &outline, None);

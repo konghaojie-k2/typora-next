@@ -49,3 +49,7 @@ agent-bridge.log
 
 # Icon design workspace files (last seen: icon-designs-v2.html, icon-preview.html)
 icon-*.html
+
+# Local cargo home cache
+.cargo-home/
+test_class_pad*.html

@@ -1,4 +1,4 @@
-use app_lib::ai_agent::{ExplainV2Response, parse_explain_response};
+use app_lib::ai_agent::{parse_explain_response, ExplainV2Response};
 
 // ============================================
 // ExplainV2Response serde parsing (agent-bridge path)

@@ -40,12 +40,27 @@ fn build_extra_question(idx: usize, concept: &str, explanation: &str) -> QuizQue
     QuizQuestion {
         id: format!("extra_{}", idx + 1),
         qtype: "single".to_string(),
-        question: format!("你在本章中询问过「{}」的含义。以下哪项描述最准确？", concept),
+        question: format!(
+            "你在本章中询问过「{}」的含义。以下哪项描述最准确？",
+            concept
+        ),
         options: vec![
-            QuizOption { label: "A".to_string(), text: summary },
-            QuizOption { label: "B".to_string(), text: "这是一种数据压缩算法".to_string() },
-            QuizOption { label: "C".to_string(), text: "这是数据库查询优化技术".to_string() },
-            QuizOption { label: "D".to_string(), text: "这是前端 UI 渲染框架".to_string() },
+            QuizOption {
+                label: "A".to_string(),
+                text: summary,
+            },
+            QuizOption {
+                label: "B".to_string(),
+                text: "这是一种数据压缩算法".to_string(),
+            },
+            QuizOption {
+                label: "C".to_string(),
+                text: "这是数据库查询优化技术".to_string(),
+            },
+            QuizOption {
+                label: "D".to_string(),
+                text: "这是前端 UI 渲染框架".to_string(),
+            },
         ],
         correct: Value::String("A".to_string()),
         weak_concepts: vec![concept.to_string()],
@@ -82,8 +97,14 @@ fn test_extra_question_option_a_has_explanation() {
 fn test_extra_question_truncates_long_explanation() {
     let long = "x".repeat(200);
     let q = build_extra_question(0, "位置编码", &long);
-    assert!(q.options[0].text.ends_with("..."), "超过 100 字符应截断并加省略号");
-    assert!(q.options[0].text.len() <= 110, "截断后长度应 <= 100 + 3 省略号 + 边际");
+    assert!(
+        q.options[0].text.ends_with("..."),
+        "超过 100 字符应截断并加省略号"
+    );
+    assert!(
+        q.options[0].text.len() <= 110,
+        "截断后长度应 <= 100 + 3 省略号 + 边际"
+    );
 }
 
 #[test]

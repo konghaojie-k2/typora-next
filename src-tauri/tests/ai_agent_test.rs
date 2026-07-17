@@ -39,11 +39,12 @@ impl AgentProcess {
 
 fn extract_json(text: &str) -> serde_json::Value {
     // Try code block first
-    let code_block = text.split("```json").nth(1)
+    let code_block = text
+        .split("```json")
+        .nth(1)
         .and_then(|s| s.split("```").next());
     if let Some(json_str) = code_block {
-        return serde_json::from_str(json_str.trim())
-            .expect("Invalid JSON in code block");
+        return serde_json::from_str(json_str.trim()).expect("Invalid JSON in code block");
     }
     // Try to find JSON object in text using regex-like approach
     if let Some(start) = text.find('{') {
@@ -73,7 +74,10 @@ fn extract_json(text: &str) -> serde_json::Value {
 
 fn generate_filename(index: usize, title: &str) -> String {
     let safe = title
-        .replace(|c: char| !c.is_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&c), "-")
+        .replace(
+            |c: char| !c.is_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&c),
+            "-",
+        )
         .replace("---", "-")
         .replace("--", "-")
         .trim_matches('-')
@@ -144,6 +148,9 @@ fn test_extract_json_malformed() {
 #[test]
 fn test_generate_filename() {
     assert_eq!(generate_filename(0, "注意力机制"), "00-注意力机制.md");
-    assert_eq!(generate_filename(5, "Self-Attention 详解！"), "05-Self-Attention-详解.md");
+    assert_eq!(
+        generate_filename(5, "Self-Attention 详解！"),
+        "05-Self-Attention-详解.md"
+    );
     assert_eq!(generate_filename(1, ""), "01-.md");
 }

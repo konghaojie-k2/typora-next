@@ -1,16 +1,19 @@
+use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+use regex::Regex;
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
-use std::sync::Mutex;
-use regex::Regex;
 use std::io::Write;
-use serde::{Deserialize, Serialize};
+use std::path::{PathBuf};
+use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
-use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 pub mod ai_agent;
 pub mod paper_import;
+
+pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
 
 /// AI provider type
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
@@ -72,7 +75,6 @@ pub struct AppConfig {
 pub struct AppState {
     watcher: Mutex<Option<RecommendedWatcher>>,
     watched_path: Mutex<Option<String>>,
-    md2docx_pid: Mutex<Option<u32>>,
     /// Serialize access to .learning/project.json to prevent read-modify-write races
     /// between concurrent commands (e.g. persist_quiz_result vs persist_chapter_file).
     project_json_lock: Mutex<()>,
@@ -81,25 +83,12 @@ pub struct AppState {
     generation_in_progress: Mutex<bool>,
 }
 
-/// Kill all existing md2docx_service processes (Windows only)
-#[cfg(windows)]
-fn kill_md2docx_service_processes() {
-    let mut cmd = std::process::Command::new("taskkill");
-    cmd.args(["/F", "/IM", "md2docx_service-x86_64-pc-windows-gnu.exe"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x08000000;
-    cmd.creation_flags(CREATE_NO_WINDOW);
-    let _ = cmd.status();
-}
-
 /// File result containing path and content
 #[derive(Debug, Serialize, Deserialize)]
 pub struct FileResult {
     path: String,
     content: String,
-    base_dir: String,  // Directory of the file, for resolving relative paths
+    base_dir: String, // Directory of the file, for resolving relative paths
 }
 
 /// Table of Contents item
@@ -124,7 +113,8 @@ pub struct DirEntry {
 async fn open_file_dialog(app: tauri::AppHandle) -> Result<FileResult, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let file_path = app.dialog()
+    let file_path = app
+        .dialog()
         .file()
         .add_filter("Markdown", &["md", "markdown"])
         .blocking_pick_file();
@@ -133,11 +123,12 @@ async fn open_file_dialog(app: tauri::AppHandle) -> Result<FileResult, String> {
         Some(path) => {
             let path_ref = path.as_path().unwrap_or(&std::path::Path::new(""));
             let path_str = path_ref.display().to_string();
-            let base_dir = path_ref.parent()
+            let base_dir = path_ref
+                .parent()
                 .map(|p| p.display().to_string())
                 .unwrap_or_default();
-            let content = fs::read_to_string(path_ref)
-                .map_err(|e| format!("Failed to read file: {}", e))?;
+            let content =
+                fs::read_to_string(path_ref).map_err(|e| format!("Failed to read file: {}", e))?;
             Ok(FileResult {
                 path: path_str,
                 content,
@@ -155,10 +146,10 @@ async fn open_file(path: PathBuf) -> Result<FileResult, String> {
         return Err(format!("File not found: {}", path.display()));
     }
 
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read file: {}", e))?;
 
-    let base_dir = path.parent()
+    let base_dir = path
+        .parent()
         .map(|p| p.display().to_string())
         .unwrap_or_default();
 
@@ -186,8 +177,8 @@ async fn get_demo_file(app: tauri::AppHandle) -> Result<FileResult, String> {
         ));
     }
 
-    let content = fs::read_to_string(&demo_path)
-        .map_err(|e| format!("Failed to read demo file: {}", e))?;
+    let content =
+        fs::read_to_string(&demo_path).map_err(|e| format!("Failed to read demo file: {}", e))?;
     Ok(FileResult {
         path: demo_path.to_string_lossy().to_string(),
         content,
@@ -218,8 +209,7 @@ async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String
     let focused = window.is_focused().unwrap_or(false);
     if should_request_attention(focused) {
         use tauri::UserAttentionType;
-        let _ = window
-            .request_user_attention(Some(UserAttentionType::Informational));
+        let _ = window.request_user_attention(Some(UserAttentionType::Informational));
     }
     Ok(())
 }
@@ -266,7 +256,9 @@ fn render_frontmatter_card(yaml: &str) -> String {
             }
         }
     }
-    let title_html = title.map_or(String::new(), |t| format!("<div class=\"frontmatter-title\">{}</div>", escape_html(&t)));
+    let title_html = title.map_or(String::new(), |t| {
+        format!("<div class=\"frontmatter-title\">{}</div>", escape_html(&t))
+    });
     format!(
         "<div class=\"frontmatter-card\">{}<div class=\"frontmatter-body\">{}</div></div>",
         title_html, rows
@@ -274,162 +266,8 @@ fn render_frontmatter_card(yaml: &str) -> String {
 }
 
 // ============================================================================
-// Math Preprocessing - Protect math blocks from markdown parsing
+// Math Post-processing - Restore math blocks as KaTeX markup
 // ============================================================================
-
-/// Math expression types
-#[derive(Debug, Clone, PartialEq)]
-enum MathBlock {
-    Inline(String),
-    Block(String),
-}
-
-/// Extract math blocks from text, returning positions and content
-///
-/// Handles both inline ($...$) and block ($$...$$) math expressions.
-/// Block math takes priority (detected first) to avoid partial matches.
-fn extract_math_blocks(text: &str) -> Vec<(usize, usize, MathBlock)> {
-    let mut results = Vec::new();
-    let chars: Vec<char> = text.chars().collect();
-    let len = chars.len();
-    let mut i = 0;
-
-    while i < len {
-        // Check for $$ (block math) first
-        if i + 1 < len && chars[i] == '$' && chars[i + 1] == '$' {
-            let start = i;
-            i += 2; // Skip opening $$
-
-            // Skip leading whitespace/newline after $$
-            while i < len && (chars[i] == ' ' || chars[i] == '\n') {
-                i += 1;
-            }
-
-            let content_start = i;
-
-            // Find closing $$
-            while i + 1 < len {
-                if chars[i] == '$' && chars[i + 1] == '$' {
-                    // Check if it's not escaped
-                    let mut backslash_count = 0;
-                    let mut j = i - 1;
-                    while j > content_start && chars[j] == '\\' {
-                        backslash_count += 1;
-                        j -= 1;
-                    }
-                    if backslash_count % 2 == 0 {
-                        // Found closing $$ - use byte positions for slicing
-                        let byte_content_start = text.char_indices().nth(content_start).map(|(b, _)| b).unwrap_or(0);
-                        let byte_end = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(text.len());
-                        let content = text[byte_content_start..byte_end].to_string();
-                        let content = content.trim_end().to_string();
-                        results.push((start, i + 2, MathBlock::Block(content)));
-                        i += 2;
-                        break;
-                    }
-                }
-                i += 1;
-            }
-
-            if i >= len {
-                i = start + 2;
-            }
-        }
-        // Check for single $ (inline math)
-        else if chars[i] == '$' {
-            let start = i;
-            i += 1;
-
-            // Check if $ is followed by space (not inline math)
-            if i < len && (chars[i] == ' ' || chars[i] == '\n') {
-                i = start + 1;
-                continue;
-            }
-
-            let content_start = i;
-
-            // Find closing $
-            while i < len {
-                if chars[i] == '$' {
-                    // Check if it's not escaped
-                    let mut backslash_count = 0;
-                    let mut j = i - 1;
-                    while j > content_start && chars[j] == '\\' {
-                        backslash_count += 1;
-                        j -= 1;
-                    }
-                    if backslash_count % 2 == 0 {
-                        // Use byte positions for slicing
-                        let byte_content_start = text.char_indices().nth(content_start).map(|(b, _)| b).unwrap_or(0);
-                        let byte_end = text.char_indices().nth(i).map(|(b, _)| b).unwrap_or(text.len());
-                        let content = &text[byte_content_start..byte_end];
-                        if !content.is_empty() && !content.contains('\n') {
-                            results.push((start, i + 1, MathBlock::Inline(content.to_string())));
-                            i += 1;
-                            break;
-                        }
-                    }
-                }
-                i += 1;
-            }
-
-            if i >= len {
-                i = start + 1;
-            }
-        } else {
-            i += 1;
-        }
-    }
-
-    results
-}
-
-/// Pre-process text to protect math blocks from markdown parsing
-///
-/// Returns (protected_text, math_blocks) where math_blocks is a vector
-/// of (placeholder, original_content, is_block) tuples.
-///
-/// Uses safe placeholder %%MATH_BLOCK_N%% to avoid DOM truncation issues.
-fn preprocess_math(text: &str) -> (String, Vec<(String, String, bool)>) {
-    let math_blocks = extract_math_blocks(text);
-
-    if math_blocks.is_empty() {
-        return (text.to_string(), Vec::new());
-    }
-
-    // Build replacement map
-    let mut replacements: Vec<(usize, usize, String, String, bool)> = Vec::new();
-
-    for (idx, (start, end, block)) in math_blocks.into_iter().enumerate() {
-        let (content, is_block) = match block {
-            MathBlock::Inline(c) => (c, false),
-            MathBlock::Block(c) => (c, true),
-        };
-        // Use safe placeholder (not control characters)
-        let placeholder = format!("%%MATH_BLOCK_{}%%", idx);
-        replacements.push((start, end, placeholder, content, is_block));
-    }
-
-    // Sort by position (descending) to replace from end to start
-    replacements.sort_by(|a, b| b.0.cmp(&a.0));
-
-    // Build new string with placeholders
-    let mut result = text.to_string();
-    let mut stored_blocks = Vec::new();
-
-    for (char_start, char_end, placeholder, content, is_block) in replacements {
-        // Convert char positions to byte positions
-        let byte_start = result.char_indices().nth(char_start).map(|(b, _)| b).unwrap_or(0);
-        let byte_end = result.char_indices().nth(char_end).map(|(b, _)| b).unwrap_or(result.len());
-
-        let before = &result[..byte_start];
-        let after = &result[byte_end..];
-        stored_blocks.push((placeholder.clone(), content, is_block));
-        result = format!("{}{}{}", before, placeholder, after);
-    }
-
-    (result, stored_blocks)
-}
 
 /// Post-process HTML to restore math blocks as KaTeX markup
 fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> String {
@@ -444,17 +282,11 @@ fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> Strin
 
         if *is_block {
             // Block math: wrap in div with KaTeX class
-            let replacement = format!(
-                "<div class=\"math-block\">$${}$$</div>",
-                escaped_content
-            );
+            let replacement = format!("<div class=\"math-block\">$${}$$</div>", escaped_content);
             result = result.replace(placeholder, &replacement);
         } else {
             // Inline math: wrap in span with KaTeX class
-            let replacement = format!(
-                "<span class=\"math-inline\">${}$</span>",
-                escaped_content
-            );
+            let replacement = format!("<span class=\"math-inline\">${}$</span>", escaped_content);
             result = result.replace(placeholder, &replacement);
         }
     }
@@ -473,7 +305,7 @@ fn escape_html(text: &str) -> String {
 /// Simple markdown to HTML renderer (body content only)
 /// Now includes math preprocessing to protect LaTeX from markdown parsing
 fn render_markdown_body(text: &str) -> String {
-    use pulldown_cmark::{Parser, Options, Event, Tag, TagEnd, html::push_html};
+    use pulldown_cmark::{html::push_html, Event, Options, Parser, Tag, TagEnd};
 
     let (frontmatter, body) = extract_frontmatter(text);
 
@@ -484,9 +316,17 @@ fn render_markdown_body(text: &str) -> String {
     #[cfg(debug_assertions)]
     {
         if !math_blocks.is_empty() {
-            println!("[DEBUG render_markdown_body] Found {} math blocks", math_blocks.len());
+            println!(
+                "[DEBUG render_markdown_body] Found {} math blocks",
+                math_blocks.len()
+            );
             for (placeholder, content, is_block) in &math_blocks {
-                println!("[DEBUG] {} {}: {}", if *is_block { "Block" } else { "Inline" }, placeholder, content);
+                println!(
+                    "[DEBUG] {} {}: {}",
+                    if *is_block { "Block" } else { "Inline" },
+                    placeholder,
+                    content
+                );
             }
         }
     }
@@ -550,9 +390,18 @@ fn render_markdown_body(text: &str) -> String {
     html = postprocess_mermaid(&html);
 
     // Remove disabled attribute from task list checkboxes for interactivity
-    html = html.replace("<input disabled=\"\" type=\"checkbox\"", "<input type=\"checkbox\"");
-    html = html.replace("<input disabled type=\"checkbox\"", "<input type=\"checkbox\"");
-    html = html.replace("<input disabled=\"true\" type=\"checkbox\"", "<input type=\"checkbox\"");
+    html = html.replace(
+        "<input disabled=\"\" type=\"checkbox\"",
+        "<input type=\"checkbox\"",
+    );
+    html = html.replace(
+        "<input disabled type=\"checkbox\"",
+        "<input type=\"checkbox\"",
+    );
+    html = html.replace(
+        "<input disabled=\"true\" type=\"checkbox\"",
+        "<input type=\"checkbox\"",
+    );
 
     if let Some(fm) = frontmatter {
         let card = render_frontmatter_card(&fm);
@@ -654,8 +503,7 @@ async fn create_project_subdir(parent_dir: String, slug: String) -> Result<Strin
         candidate = parent.join(format!("{}-{}", base, suffix));
     }
 
-    std::fs::create_dir_all(&candidate)
-        .map_err(|e| format!("创建项目目录失败: {}", e))?;
+    std::fs::create_dir_all(&candidate).map_err(|e| format!("创建项目目录失败: {}", e))?;
 
     Ok(candidate.display().to_string())
 }
@@ -671,8 +519,8 @@ fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
         return Err(format!("Not a directory: {}", path));
     }
 
-    let entries = read_dir_recursive(&path_buf)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries =
+        read_dir_recursive(&path_buf).map_err(|e| format!("Failed to read directory: {}", e))?;
 
     Ok(entries)
 }
@@ -813,7 +661,11 @@ fn generate_slug(text: &str) -> String {
 
 /// Start watching a file for external changes
 #[tauri::command]
-fn watch_file(path: String, app: tauri::AppHandle, state: tauri::State<AppState>) -> Result<(), String> {
+fn watch_file(
+    path: String,
+    app: tauri::AppHandle,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
     // Stop any existing watcher first
     {
         let mut watcher_guard = state.watcher.lock().map_err(|e| e.to_string())?;
@@ -826,20 +678,19 @@ fn watch_file(path: String, app: tauri::AppHandle, state: tauri::State<AppState>
     let path_for_event = path.clone();
 
     let watcher = RecommendedWatcher::new(
-        move |res: Result<notify::Event, notify::Error>| {
-            match res {
-                Ok(event) => {
-                    if matches!(event.kind, EventKind::Modify(_)) {
-                        let _ = app_clone.emit("file-changed", path_for_event.clone());
-                    }
+        move |res: Result<notify::Event, notify::Error>| match res {
+            Ok(event) => {
+                if matches!(event.kind, EventKind::Modify(_)) {
+                    let _ = app_clone.emit("file-changed", path_for_event.clone());
                 }
-                Err(e) => {
-                    eprintln!("Watch error: {:?}", e);
-                }
+            }
+            Err(e) => {
+                eprintln!("Watch error: {:?}", e);
             }
         },
         Config::default(),
-    ).map_err(|e| format!("Failed to create watcher: {}", e))?;
+    )
+    .map_err(|e| format!("Failed to create watcher: {}", e))?;
 
     let mut watcher_guard = state.watcher.lock().map_err(|e| e.to_string())?;
     let mut path_guard = state.watched_path.lock().map_err(|e| e.to_string())?;
@@ -867,7 +718,9 @@ fn unwatch_file(state: tauri::State<AppState>) -> Result<(), String> {
 
 /// Get the config file path
 fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
-    let config_dir = app.path().app_config_dir()
+    let config_dir = app
+        .path()
+        .app_config_dir()
         .map_err(|e| format!("Failed to get config dir: {}", e))?;
     std::fs::create_dir_all(&config_dir)
         .map_err(|e| format!("Failed to create config dir: {}", e))?;
@@ -881,10 +734,9 @@ fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
     if !path.exists() {
         return Ok(AppConfig::default());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config: {}", e))?;
-    let config: AppConfig = serde_json::from_str(&content)
-        .map_err(|e| format!("Failed to parse config: {}", e))?;
+    let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
+    let config: AppConfig =
+        serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
     Ok(config)
 }
 
@@ -894,27 +746,29 @@ fn set_config(config: AppConfig, app: tauri::AppHandle) -> Result<(), String> {
     let path = config_path(&app)?;
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    fs::write(&path, content)
-        .map_err(|e| format!("Failed to write config: {}", e))?;
+    fs::write(&path, content).map_err(|e| format!("Failed to write config: {}", e))?;
     Ok(())
 }
 
 /// Test LLM configuration by making a simple API call
 #[tauri::command]
 async fn test_llm_config(config: AppConfig) -> Result<(), String> {
-    let api_key = config.api_key
+    let api_key = config
+        .api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key")?;
 
     let provider = config.ai_provider.unwrap_or_default();
-    let base_url = config.ai_base_url
+    let base_url = config
+        .ai_base_url
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
             AiProvider::Openai => "https://api.openai.com".to_string(),
         });
 
-    let model = config.model
+    let model = config
+        .model
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
@@ -938,7 +792,8 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
                 .send_json(req)
                 .map_err(|e| format!("API 请求失败: {}", e))?;
 
-            let _json: serde_json::Value = resp.into_json()
+            let _json: serde_json::Value = resp
+                .into_json()
                 .map_err(|e| format!("解析响应失败: {}", e))?;
         }
         AiProvider::Openai => {
@@ -954,7 +809,8 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
                 .send_json(req)
                 .map_err(|e| format!("API 请求失败: {}", e))?;
 
-            let _json: serde_json::Value = resp.into_json()
+            let _json: serde_json::Value = resp
+                .into_json()
                 .map_err(|e| format!("解析响应失败: {}", e))?;
         }
     };
@@ -975,95 +831,152 @@ fn show_in_folder(path: String) -> Result<(), String> {
     let os = std::env::consts::OS;
 
     let result = match os {
-        "windows" => {
-            std::process::Command::new("explorer")
-                .args(["/select,", &path])
-                .spawn()
-        }
-        "macos" => {
-            std::process::Command::new("open")
-                .args(["-R", &path])
-                .spawn()
-        }
+        "windows" => std::process::Command::new("explorer")
+            .args(["/select,", &path])
+            .spawn(),
+        "macos" => std::process::Command::new("open")
+            .args(["-R", &path])
+            .spawn(),
         _ => {
             // Linux and others: open the parent directory
-            let dir = path_buf.parent()
+            let dir = path_buf
+                .parent()
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|| path.clone());
-            std::process::Command::new("xdg-open")
-                .arg(&dir)
-                .spawn()
+            std::process::Command::new("xdg-open").arg(&dir).spawn()
         }
     };
 
-    result.map(|_| ()).map_err(|e| format!("无法打开文件夹: {}", e))
-}
-
-/// Resolve Obsidian WikiLink image path (mirrors frontend initObsidianEmbeds logic)
-fn resolve_wikilink_path(target: &str, base_dir: &str) -> Option<PathBuf> {
-    let base_normalized = base_dir.replace("\\", "/");
-    let base_parts: Vec<&str> = base_normalized.split('/').filter(|s| !s.is_empty()).collect();
-    let target_normalized = target.replace("\\", "/");
-    let target_parts: Vec<&str> = target_normalized.split('/').filter(|s| !s.is_empty()).collect();
-
-    if target_parts.is_empty() {
-        return None;
-    }
-
-    for i in (0..base_parts.len()).rev() {
-        if base_parts[i] == target_parts[0] {
-            let mut match_len = 0;
-            for j in 0..target_parts.len() {
-                if i + j < base_parts.len() && base_parts[i + j] == target_parts[j] {
-                    match_len += 1;
-                } else {
-                    break;
-                }
-            }
-            if match_len > 0 {
-                let vault_root = base_parts[..i].join("/");
-                return Some(PathBuf::from(format!("{}/{}", vault_root, target)));
-            }
-        }
-    }
-
-    Some(PathBuf::from(base_dir).join(target))
+    result
+        .map(|_| ())
+        .map_err(|e| format!("无法打开文件夹: {}", e))
 }
 
 /// Compute a relative path for an image within the share bundle
 fn compute_share_relative_path(source: &std::path::Path, base_dir: &str, md_dir: &str) -> String {
     let source_str = source.to_string_lossy().replace("\\", "/");
-    let base_str = base_dir.replace("\\", "/").trim_end_matches('/').to_string();
+    let base_str = base_dir
+        .replace("\\", "/")
+        .trim_end_matches('/')
+        .to_string();
     let md_dir_str = md_dir.replace("\\", "/").trim_end_matches('/').to_string();
 
     if !base_str.is_empty() && source_str.starts_with(&base_str) {
-        source_str[base_str.len()..].trim_start_matches('/').to_string()
+        source_str[base_str.len()..]
+            .trim_start_matches('/')
+            .to_string()
     } else if !md_dir_str.is_empty() && source_str.starts_with(&md_dir_str) {
-        source_str[md_dir_str.len()..].trim_start_matches('/').to_string()
+        source_str[md_dir_str.len()..]
+            .trim_start_matches('/')
+            .to_string()
     } else {
-        source.file_name()
+        source
+            .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "image".to_string())
     }
 }
 
-/// Export markdown to Word document via md2docx_service
+/// SVG payload for a pre-rendered Mermaid diagram sent by the frontend.
+#[derive(Debug, Deserialize)]
+struct MermaidSvgInfo {
+    svg: String,
+    width: u32,
+    height: u32,
+}
+
+fn system_font_db() -> Arc<fontdb::Database> {
+    static DB: OnceLock<Arc<fontdb::Database>> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        Arc::new(db)
+    })
+    .clone()
+}
+
+/// Render an SVG string to a high-resolution PNG byte vector.
+fn render_svg_to_png(svg: &str, logical_width: u32) -> Result<Vec<u8>, String> {
+    const RENDER_SCALE: f32 = 3.0;
+
+    let mut opts = usvg::Options::default();
+    opts.fontdb = system_font_db();
+    // Fallback font family when the SVG references an unavailable font.
+    opts.font_family = "Arial".to_string();
+
+    let tree = usvg::Tree::from_str(svg, &opts)
+        .map_err(|e| format!("SVG parse failed: {}", e))?;
+
+    let original_width = tree.size().width();
+    let original_height = tree.size().height();
+    if original_width <= 0.0 || original_height <= 0.0 {
+        return Err("SVG has zero size".to_string());
+    }
+
+    let target_width = ((logical_width.max(1) as f32) * RENDER_SCALE).round() as u32;
+    let target_height =
+        ((target_width as f32) * original_height / original_width).round() as u32;
+
+    let mut pixmap = tiny_skia::Pixmap::new(target_width, target_height.max(1))
+        .ok_or("Cannot create pixmap")?;
+    // Render onto a transparent background so the image blends with the Word page
+    // instead of carrying a white rectangle around the diagram.
+    pixmap.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 0));
+
+    // Scale the tree so the diagram actually fills the high-res pixmap. An
+    // identity transform draws at the SVG's intrinsic 1× size in the corner,
+    // leaving the diagram occupying only 1/RENDER_SCALE of the image.
+    let scale = target_width as f32 / original_width;
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    pixmap
+        .encode_png()
+        .map_err(|e| format!("PNG encode failed: {}", e))
+}
+
+/// Export markdown to Word document using the cross-platform Rust converter.
 #[tauri::command]
-async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle) -> Result<String, String> {
-    let resp = ureq::post("http://127.0.0.1:6007/convert")
-        .set("Content-Type", "text/plain; charset=utf-8")
-        .send_string(&markdown)
-        .map_err(|e| format!("md2docx_service 请求失败: {}", e))?;
+async fn export_word(
+    markdown: String,
+    file_name: String,
+    file_path: String,
+    mermaid_images: Option<HashMap<String, MermaidSvgInfo>>,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
+    let base_dir = std::path::Path::new(&file_path)
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        });
 
-    let mut bytes = Vec::new();
-    resp.into_reader()
-        .read_to_end(&mut bytes)
-        .map_err(|e| format!("读取响应失败: {}", e))?;
+    let mermaid_bytes: HashMap<String, docx_export::MermaidImage> = mermaid_images
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(source, info)| {
+            let bytes = render_svg_to_png(&info.svg, info.width).ok()?;
+            Some((
+                source,
+                docx_export::MermaidImage {
+                    bytes,
+                    width_px: info.width,
+                    height_px: info.height,
+                },
+            ))
+        })
+        .collect();
 
-    let default_name = file_name.replace(".md", ".docx").replace(".markdown", ".docx");
+    let bytes = docx_export::markdown_to_docx_with_mermaid(&markdown, &base_dir, &mermaid_bytes)
+        .map_err(|e| format!("DOCX 生成失败: {}", e))?;
+
+    let default_name = file_name
+        .replace(".md", ".docx")
+        .replace(".markdown", ".docx");
 
     use tauri_plugin_dialog::DialogExt;
-    let file_path = app.dialog()
+    let file_path = app
+        .dialog()
         .file()
         .add_filter("Word Document", &["docx"])
         .set_file_name(&default_name)
@@ -1072,8 +985,7 @@ async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle)
     match file_path {
         Some(path) => {
             let path_ref = path.as_path().unwrap_or(std::path::Path::new(""));
-            std::fs::write(path_ref, &bytes)
-                .map_err(|e| format!("写入文件失败: {}", e))?;
+            std::fs::write(path_ref, &bytes).map_err(|e| format!("写入文件失败: {}", e))?;
             Ok(path_ref.display().to_string())
         }
         None => Err("用户取消了保存".to_string()),
@@ -1082,12 +994,19 @@ async fn export_word(markdown: String, file_name: String, app: tauri::AppHandle)
 
 /// Share a markdown document with its embedded local images as a ZIP archive
 #[tauri::command]
-async fn share_document(content: String, file_path: String, base_dir: String, app: tauri::AppHandle) -> Result<String, String> {
+async fn share_document(
+    content: String,
+    file_path: String,
+    base_dir: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let md_path = PathBuf::from(&file_path);
-    let md_name = md_path.file_name()
+    let md_name = md_path
+        .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "document.md".to_string());
-    let md_dir = md_path.parent()
+    let md_dir = md_path
+        .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| base_dir.clone());
 
@@ -1145,7 +1064,7 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
     let mut rewritten = content.clone();
     for (original, _, dest_rel) in &image_refs {
         if original.starts_with("![[") {
-            let target = &original[3..original.len()-2];
+            let target = &original[3..original.len() - 2];
             let name = PathBuf::from(target)
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
@@ -1154,7 +1073,11 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
             rewritten = rewritten.replace(original, &replacement);
         } else {
             let alt_end = original.find("](").unwrap_or(0);
-            let alt = if alt_end > 2 { &original[2..alt_end] } else { "" };
+            let alt = if alt_end > 2 {
+                &original[2..alt_end]
+            } else {
+                ""
+            };
             let replacement = format!("![{}]({})", alt, dest_rel);
             rewritten = rewritten.replace(original, &replacement);
         }
@@ -1165,7 +1088,10 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
     fs::write(&md_dest, rewritten).map_err(|e| format!("写入文件失败: {}", e))?;
 
     // Create zip archive
-    let zip_name = format!("{}.zip", md_name.replace(".md", "").replace(".markdown", ""));
+    let zip_name = format!(
+        "{}.zip",
+        md_name.replace(".md", "").replace(".markdown", "")
+    );
     let zip_path = temp_dir.join(&zip_name);
     let zip_file = fs::File::create(&zip_path).map_err(|e| format!("创建zip文件失败: {}", e))?;
     let mut zip = zip::ZipWriter::new(zip_file);
@@ -1179,22 +1105,27 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
         if path == temp_dir || path == zip_path {
             continue;
         }
-        let name = path.strip_prefix(&temp_dir)
+        let name = path
+            .strip_prefix(&temp_dir)
             .map_err(|e| format!("路径处理失败: {}", e))?
             .to_string_lossy();
         if path.is_file() {
-            zip.start_file(name, options).map_err(|e| format!("添加文件到zip失败: {}", e))?;
+            zip.start_file(name, options)
+                .map_err(|e| format!("添加文件到zip失败: {}", e))?;
             let mut file = fs::File::open(path).map_err(|e| format!("打开文件失败: {}", e))?;
             let mut buffer = Vec::new();
-            file.read_to_end(&mut buffer).map_err(|e| format!("读取文件失败: {}", e))?;
-            zip.write_all(&buffer).map_err(|e| format!("写入zip失败: {}", e))?;
+            file.read_to_end(&mut buffer)
+                .map_err(|e| format!("读取文件失败: {}", e))?;
+            zip.write_all(&buffer)
+                .map_err(|e| format!("写入zip失败: {}", e))?;
         }
     }
     zip.finish().map_err(|e| format!("完成zip失败: {}", e))?;
 
     // Show save dialog
     use tauri_plugin_dialog::DialogExt;
-    let save_path = app.dialog()
+    let save_path = app
+        .dialog()
         .file()
         .add_filter("ZIP 文件", &["zip"])
         .set_file_name(&zip_name)
@@ -1220,10 +1151,13 @@ async fn share_document(content: String, file_path: String, base_dir: String, ap
 
 /// Import a local PDF file as a paper Markdown.
 #[tauri::command]
-async fn import_paper_from_pdf(app_handle: tauri::AppHandle) -> Result<paper_import::PaperImportResult, String> {
+async fn import_paper_from_pdf(
+    app_handle: tauri::AppHandle,
+) -> Result<paper_import::PaperImportResult, String> {
     use tauri_plugin_dialog::DialogExt;
 
-    let file_path = app_handle.dialog()
+    let file_path = app_handle
+        .dialog()
         .file()
         .add_filter("PDF", &["pdf"])
         .blocking_pick_file();
@@ -1237,8 +1171,7 @@ async fn import_paper_from_pdf(app_handle: tauri::AppHandle) -> Result<paper_imp
         return Err("选择的文件不存在".to_string());
     }
 
-    let bytes = std::fs::read(&path_ref)
-        .map_err(|e| format!("读取 PDF 文件失败: {}", e))?;
+    let bytes = std::fs::read(&path_ref).map_err(|e| format!("读取 PDF 文件失败: {}", e))?;
 
     let source_name = path_ref
         .file_name()
@@ -1246,16 +1179,18 @@ async fn import_paper_from_pdf(app_handle: tauri::AppHandle) -> Result<paper_imp
         .unwrap_or("paper.pdf")
         .to_string();
 
-    let project_dir = path_ref
-        .parent()
-        .map(|p| p.display().to_string());
+    let project_dir = path_ref.parent().map(|p| p.display().to_string());
 
     import_paper_inner(
-        paper_import::mineru::SubmitTarget::LocalFile { name: source_name.clone(), bytes },
+        paper_import::mineru::SubmitTarget::LocalFile {
+            name: source_name.clone(),
+            bytes,
+        },
         &source_name,
         project_dir.as_deref(),
         &app_handle,
-    ).await
+    )
+    .await
 }
 
 /// Import a paper from a URL (arXiv or direct PDF link).
@@ -1264,8 +1199,8 @@ async fn import_paper_from_url(
     url: String,
     app_handle: tauri::AppHandle,
 ) -> Result<paper_import::PaperImportResult, String> {
-    let normalized_url = paper_import::arxiv::normalize_paper_url(&url)
-        .map_err(|e| format!("URL 不支持: {}", e))?;
+    let normalized_url =
+        paper_import::arxiv::normalize_paper_url(&url).map_err(|e| format!("URL 不支持: {}", e))?;
 
     let source_name = paper_import::arxiv::source_name_from_url(&normalized_url);
 
@@ -1274,7 +1209,8 @@ async fn import_paper_from_url(
         &source_name,
         None,
         &app_handle,
-    ).await
+    )
+    .await
 }
 
 /// Query the status of an in-flight import task.
@@ -1290,12 +1226,9 @@ async fn get_paper_import_status(task_id: String) -> Result<paper_import::Import
 /// Recursively copy the contents of `src` into `dst`, preserving the
 /// directory structure. Overwrites existing files.
 fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst)
-        .map_err(|e| format!("创建目标目录失败: {}", e))?;
+    std::fs::create_dir_all(dst).map_err(|e| format!("创建目标目录失败: {}", e))?;
 
-    for entry in std::fs::read_dir(src)
-        .map_err(|e| format!("读取源目录失败: {}", e))?
-    {
+    for entry in std::fs::read_dir(src).map_err(|e| format!("读取源目录失败: {}", e))? {
         let entry = entry.map_err(|e| format!("读取目录项失败: {}", e))?;
         let path = entry.path();
         let target = dst.join(entry.file_name());
@@ -1303,8 +1236,14 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Stri
         if path.is_dir() {
             copy_dir_all(&path, &target)?;
         } else {
-            std::fs::copy(&path, &target)
-                .map_err(|e| format!("复制文件失败 {} -> {}: {}", path.display(), target.display(), e))?;
+            std::fs::copy(&path, &target).map_err(|e| {
+                format!(
+                    "复制文件失败 {} -> {}: {}",
+                    path.display(),
+                    target.display(),
+                    e
+                )
+            })?;
         }
     }
 
@@ -1322,43 +1261,50 @@ async fn import_paper_inner(
         .map_err(|e| format!("配置错误: {}", e))?;
 
     log::info!("[paper_import] submitting {} to minerU", source_name);
-    let handle = client.submit(target)
+    let handle = client
+        .submit(target)
         .map_err(|e| paper_import::user_facing_error("提交 minerU 任务失败", Some(&e)))?;
 
     log::info!("[paper_import] polling minerU task...");
-    let poll_result = client.poll_until_done(&handle)
+    let poll_result = client
+        .poll_until_done(&handle)
         .map_err(|e| paper_import::user_facing_error("解析失败", Some(&e)))?;
 
-    let zip_url = poll_result.full_zip_url
+    let zip_url = poll_result
+        .full_zip_url
         .ok_or_else(|| "minerU 未返回结果下载链接".to_string())?;
 
-    let temp_dir = std::env::temp_dir()
-        .join(format!(
-            "typora-paper-import-{}-{}",
-            std::process::id(),
-            chrono::Local::now().format("%Y%m%d%H%M%S")
-        ));
+    let temp_dir = std::env::temp_dir().join(format!(
+        "typora-paper-import-{}-{}",
+        std::process::id(),
+        chrono::Local::now().format("%Y%m%d%H%M%S")
+    ));
 
     let cleanup = |dir: &std::path::Path| {
         if let Err(e) = std::fs::remove_dir_all(dir) {
-            log::warn!("[paper_import] failed to cleanup temp dir {}: {}", dir.display(), e);
+            log::warn!(
+                "[paper_import] failed to cleanup temp dir {}: {}",
+                dir.display(),
+                e
+            );
         }
     };
 
     let result = async {
-        std::fs::create_dir_all(&temp_dir)
-            .map_err(|e| format!("创建临时目录失败: {}", e))?;
+        std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建临时目录失败: {}", e))?;
 
         let zip_path = temp_dir.join("result.zip");
         let extract_dir = temp_dir.join("extracted");
 
         log::info!("[paper_import] downloading result zip...");
-        client.download_zip(&zip_url, &zip_path)
+        client
+            .download_zip(&zip_url, &zip_path)
             .map_err(|e| paper_import::user_facing_error("下载解析结果失败", Some(&e)))?;
 
         log::info!("[paper_import] extracting full.md...");
-        let md_path_in_zip = paper_import::mineru::MineruClient::extract_full_md(&zip_path, &extract_dir)
-            .map_err(|e| paper_import::user_facing_error("解压解析结果失败", Some(&e)))?;
+        let md_path_in_zip =
+            paper_import::mineru::MineruClient::extract_full_md(&zip_path, &extract_dir)
+                .map_err(|e| paper_import::user_facing_error("解压解析结果失败", Some(&e)))?;
 
         let md_content = std::fs::read_to_string(&md_path_in_zip)
             .map_err(|e| format!("读取解析后的 Markdown 失败: {}", e))?;
@@ -1377,13 +1323,17 @@ async fn import_paper_inner(
         if let Some(md_parent) = md_path_in_zip.parent() {
             let images_dir = md_parent.join("images");
             if images_dir.is_dir() {
-                let target_images_dir = saved_path.parent()
+                let target_images_dir = saved_path
+                    .parent()
                     .map(|p| p.join("images"))
                     .unwrap_or_else(|| papers_dir.join("images"));
                 if let Err(e) = copy_dir_all(&images_dir, &target_images_dir) {
                     log::warn!("[paper_import] failed to copy images dir: {}", e);
                 } else {
-                    log::info!("[paper_import] copied images to {}", target_images_dir.display());
+                    log::info!(
+                        "[paper_import] copied images to {}",
+                        target_images_dir.display()
+                    );
                 }
             }
         }
@@ -1395,7 +1345,8 @@ async fn import_paper_inner(
             md_content,
             title: None,
         })
-    }.await;
+    }
+    .await;
 
     cleanup(&temp_dir);
     result
@@ -1415,7 +1366,9 @@ fn default_recent_mode() -> String {
 /// Get list of recently opened files
 #[tauri::command]
 async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<RecentFileEntry>, String> {
-    let config_dir = app.path().app_config_dir()
+    let config_dir = app
+        .path()
+        .app_config_dir()
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
 
@@ -1423,18 +1376,25 @@ async fn get_recent_files(app: tauri::AppHandle) -> Result<Vec<RecentFileEntry>,
         return Ok(Vec::new());
     }
 
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("读取最近文件列表失败: {}", e))?;
+    let content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("读取最近文件列表失败: {}", e))?;
 
     // Try new format first, fall back to legacy flat string array.
-    let mut entries: Vec<RecentFileEntry> = match serde_json::from_str::<Vec<RecentFileEntry>>(&content) {
-        Ok(entries) => entries,
-        Err(_) => {
-            let legacy: Vec<String> = serde_json::from_str(&content)
-                .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
-            legacy.into_iter().map(|path| RecentFileEntry { path, mode: "normal".to_string() }).collect()
-        }
-    };
+    let mut entries: Vec<RecentFileEntry> =
+        match serde_json::from_str::<Vec<RecentFileEntry>>(&content) {
+            Ok(entries) => entries,
+            Err(_) => {
+                let legacy: Vec<String> = serde_json::from_str(&content)
+                    .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
+                legacy
+                    .into_iter()
+                    .map(|path| RecentFileEntry {
+                        path,
+                        mode: "normal".to_string(),
+                    })
+                    .collect()
+            }
+        };
 
     // Infer mode for legacy/normal entries that point to learning projects.
     for entry in entries.iter_mut() {
@@ -1475,8 +1435,14 @@ fn is_learning_project(path: &str) -> bool {
 
 /// Add a file to recent files list
 #[tauri::command]
-async fn add_recent_file(path: String, mode: Option<String>, app: tauri::AppHandle) -> Result<(), String> {
-    let config_dir = app.path().app_config_dir()
+async fn add_recent_file(
+    path: String,
+    mode: Option<String>,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    let config_dir = app
+        .path()
+        .app_config_dir()
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
 
@@ -1488,7 +1454,13 @@ async fn add_recent_file(path: String, mode: Option<String>, app: tauri::AppHand
             Err(_) => {
                 let legacy: Vec<String> = serde_json::from_str(&content)
                     .map_err(|e| format!("解析最近文件列表失败: {}", e))?;
-                legacy.into_iter().map(|path| RecentFileEntry { path, mode: "normal".to_string() }).collect()
+                legacy
+                    .into_iter()
+                    .map(|path| RecentFileEntry {
+                        path,
+                        mode: "normal".to_string(),
+                    })
+                    .collect()
             }
         }
     } else {
@@ -1515,8 +1487,7 @@ async fn add_recent_file(path: String, mode: Option<String>, app: tauri::AppHand
     let json = serde_json::to_string_pretty(&entries)
         .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
 
-    std::fs::write(&file_path, json)
-        .map_err(|e| format!("保存最近文件列表失败: {}", e))?;
+    std::fs::write(&file_path, json).map_err(|e| format!("保存最近文件列表失败: {}", e))?;
 
     Ok(())
 }
@@ -1524,7 +1495,9 @@ async fn add_recent_file(path: String, mode: Option<String>, app: tauri::AppHand
 /// Clear recent files list
 #[tauri::command]
 async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
-    let config_dir = app.path().app_config_dir()
+    let config_dir = app
+        .path()
+        .app_config_dir()
         .map_err(|e| format!("无法获取配置目录: {}", e))?;
     let file_path = config_dir.join("recent_files.json");
 
@@ -1532,8 +1505,7 @@ async fn clear_recent_files(app: tauri::AppHandle) -> Result<(), String> {
     let json = serde_json::to_string_pretty(&files)
         .map_err(|e| format!("序列化最近文件列表失败: {}", e))?;
 
-    std::fs::write(&file_path, json)
-        .map_err(|e| format!("保存最近文件列表失败: {}", e))?;
+    std::fs::write(&file_path, json).map_err(|e| format!("保存最近文件列表失败: {}", e))?;
 
     Ok(())
 }
@@ -1547,12 +1519,10 @@ async fn write_file(path: String, content: String, encoding: Option<String>) -> 
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(&content)
                 .map_err(|e| format!("Failed to decode base64: {}", e))?;
-            fs::write(&path, bytes)
-                .map_err(|e| format!("Failed to write file: {}", e))?;
+            fs::write(&path, bytes).map_err(|e| format!("Failed to write file: {}", e))?;
         }
         _ => {
-            fs::write(&path, content)
-                .map_err(|e| format!("Failed to write file: {}", e))?;
+            fs::write(&path, content).map_err(|e| format!("Failed to write file: {}", e))?;
         }
     }
     Ok(())
@@ -1561,7 +1531,10 @@ async fn write_file(path: String, content: String, encoding: Option<String>) -> 
 /// Simple file-based logger for slides debugging
 fn log_to_file(msg: &str) {
     if let Ok(exe) = std::env::current_exe() {
-        let log_path = exe.parent().unwrap_or(std::path::Path::new(".")).join("slides_debug.log");
+        let log_path = exe
+            .parent()
+            .unwrap_or(std::path::Path::new("."))
+            .join("slides_debug.log");
         let line = format!("{}\n", msg);
         let _ = std::fs::OpenOptions::new()
             .create(true)
@@ -1574,7 +1547,10 @@ fn log_to_file(msg: &str) {
 /// Open a new window for slide presentation
 #[tauri::command]
 fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), String> {
-    log_to_file(&format!("[SLIDES] open_slides_window called, content len={}", content.len()));
+    log_to_file(&format!(
+        "[SLIDES] open_slides_window called, content len={}",
+        content.len()
+    ));
 
     // Serialize content as JSON string to safely inject into JS
     let json_content = serde_json::to_string(&content)
@@ -1586,7 +1562,8 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
     if let Some(window) = app.get_webview_window("slides") {
         log_to_file("[SLIDES] existing window found, updating content");
         let _ = window.eval(&script);
-        let _ = window.eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
+        let _ = window
+            .eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
         window.set_focus().map_err(|e| e.to_string())?;
         return Ok(());
     }
@@ -1594,21 +1571,26 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
     log_to_file("[SLIDES] creating new window");
 
     // Try to find the correct resource path
-    let resource_dir = app.path().resource_dir()
+    let resource_dir = app
+        .path()
+        .resource_dir()
         .map_err(|e| format!("Failed to get resource dir: {}", e))?;
     log_to_file(&format!("[SLIDES] resource_dir={:?}", resource_dir));
 
     // Try multiple possible paths (cargo build --release puts exe in target/release/)
     let possible_paths = [
-        resource_dir.join("../../../dist/slides.html"),  // from src-tauri/target/release/
-        resource_dir.join("../../dist/slides.html"),      // from target/release/
-        resource_dir.join("dist/slides.html"),            // from project root
+        resource_dir.join("../../../dist/slides.html"), // from src-tauri/target/release/
+        resource_dir.join("../../dist/slides.html"),    // from target/release/
+        resource_dir.join("dist/slides.html"),          // from project root
     ];
-    let slides_path = possible_paths.iter().find(|path| {
-        let clean = path.to_string_lossy().replace("\\\\?\\", "");
-        log_to_file(&format!("[SLIDES] trying path={}", clean));
-        path.exists()
-    }).map(|p| p.to_string_lossy().replace("\\\\?\\", ""));
+    let slides_path = possible_paths
+        .iter()
+        .find(|path| {
+            let clean = path.to_string_lossy().replace("\\\\?\\", "");
+            log_to_file(&format!("[SLIDES] trying path={}", clean));
+            path.exists()
+        })
+        .map(|p| p.to_string_lossy().replace("\\\\?\\", ""));
 
     if let Some(ref p) = slides_path {
         log_to_file(&format!("[SLIDES] found slides.html at {}", p));
@@ -1619,20 +1601,21 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
     // DEBUG: try index.html first to isolate the issue
     let test_url = "index.html";
     log_to_file(&format!("[SLIDES] using WebviewUrl::App({})", test_url));
-    let builder = tauri::WebviewWindowBuilder::new(
-        &app,
-        "slides",
-        tauri::WebviewUrl::App(test_url.into())
-    )
-    .title("幻灯片放映")
-    .inner_size(1280.0, 720.0)
-    .min_inner_size(800.0, 600.0);
+    let builder =
+        tauri::WebviewWindowBuilder::new(&app, "slides", tauri::WebviewUrl::App(test_url.into()))
+            .title("幻灯片放映")
+            .inner_size(1280.0, 720.0)
+            .min_inner_size(800.0, 600.0);
 
     log_to_file("[SLIDES] calling build()...");
-    let window = builder.build()
+    let window = builder
+        .build()
         .map_err(|e| format!("无法创建幻灯片窗口: {}", e))?;
 
-    log_to_file(&format!("[SLIDES] window created OK, label={}", window.label()));
+    log_to_file(&format!(
+        "[SLIDES] window created OK, label={}",
+        window.label()
+    ));
 
     // Inject content via eval after a short delay (avoid initialization_script crash)
     let window_clone = window.clone();
@@ -1640,7 +1623,8 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(500));
         let _ = window_clone.eval(&script_clone);
-        let _ = window_clone.eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
+        let _ = window_clone
+            .eval("if (typeof window.__reloadSlides === 'function') { window.__reloadSlides(); }");
     });
 
     Ok(())
@@ -1650,19 +1634,22 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
 #[tauri::command]
 async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
     let config = get_config(app)?;
-    let api_key = config.api_key
+    let api_key = config
+        .api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key，请在设置中配置")?;
 
     let provider = config.ai_provider.unwrap_or_default();
-    let base_url = config.ai_base_url
+    let base_url = config
+        .ai_base_url
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
             AiProvider::Openai => "https://api.openai.com".to_string(),
         });
 
-    let model = config.model
+    let model = config
+        .model
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
@@ -1707,14 +1694,16 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
         }
     };
 
-    let json: serde_json::Value = response.into_json()
+    let json: serde_json::Value = response
+        .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let fixed_code = if is_anthropic {
         json["content"][0]["text"].as_str()
     } else {
         json["choices"][0]["message"]["content"].as_str()
-    }.ok_or("响应中没有内容")?;
+    }
+    .ok_or("响应中没有内容")?;
 
     // Clean up markdown code fences if present
     let cleaned = fixed_code
@@ -1774,8 +1763,8 @@ fn save_translation_cache(
         let _ = fs::create_dir_all(parent);
     }
     let value = serde_json::Value::Object(cache.clone());
-    let content = serde_json::to_string_pretty(&value)
-        .map_err(|e| format!("序列化翻译缓存失败: {}", e))?;
+    let content =
+        serde_json::to_string_pretty(&value).map_err(|e| format!("序列化翻译缓存失败: {}", e))?;
     fs::write(&path, content).map_err(|e| format!("写入翻译缓存失败: {}", e))
 }
 
@@ -1821,26 +1810,31 @@ async fn translate_text(
     }
 
     let config = get_config(app.clone())?;
-    let api_key = config.api_key
+    let api_key = config
+        .api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key，请在设置中配置")?;
 
     let provider = config.ai_provider.unwrap_or_default();
-    let base_url = config.ai_base_url
+    let base_url = config
+        .ai_base_url
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
             AiProvider::Openai => "https://api.openai.com".to_string(),
         });
 
-    let model = config.model
+    let model = config
+        .model
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| match provider {
             AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
             AiProvider::Openai => "gpt-4o-mini".to_string(),
         });
 
-    let joined_texts = uncached_texts.iter().enumerate()
+    let joined_texts = uncached_texts
+        .iter()
+        .enumerate()
         .map(|(i, text)| format!("段落 {}:\n{}", i + 1, text))
         .collect::<Vec<_>>()
         .join("\n\n");
@@ -1882,14 +1876,16 @@ async fn translate_text(
         }
     };
 
-    let json: serde_json::Value = response.into_json()
+    let json: serde_json::Value = response
+        .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let content = if is_anthropic {
         json["content"][0]["text"].as_str()
     } else {
         json["choices"][0]["message"]["content"].as_str()
-    }.ok_or("响应中没有内容")?;
+    }
+    .ok_or("响应中没有内容")?;
 
     let api_translations: Vec<String> = content
         .split("---TRANSLATION---")
@@ -1965,18 +1961,30 @@ fn annotations_file_path(app: &tauri::AppHandle, file_path: &str) -> Result<Path
         hasher.finish()
     });
     let path = dir.join(format!("{}.json", file_hash));
-    println!("[DEBUG annotations_file_path] input='{}' hash='{}' path='{}'", file_path, file_hash, path.display());
+    println!(
+        "[DEBUG annotations_file_path] input='{}' hash='{}' path='{}'",
+        file_path,
+        file_hash,
+        path.display()
+    );
     Ok(path)
 }
 
 fn load_annotations(app: &tauri::AppHandle, file_path: &str) -> Result<Vec<Annotation>, String> {
     let path = annotations_file_path(app, file_path)?;
     if !path.exists() {
-        println!("[DEBUG load_annotations] file not exists, returning empty. path='{}'", path.display());
+        println!(
+            "[DEBUG load_annotations] file not exists, returning empty. path='{}'",
+            path.display()
+        );
         return Ok(Vec::new());
     }
     let content = fs::read_to_string(&path).map_err(|e| format!("读取批注失败: {}", e))?;
-    println!("[DEBUG load_annotations] raw content length={}, path='{}'", content.len(), path.display());
+    println!(
+        "[DEBUG load_annotations] raw content length={}, path='{}'",
+        content.len(),
+        path.display()
+    );
     let value: serde_json::Value =
         serde_json::from_str(&content).map_err(|e| format!("解析批注失败: {}", e))?;
     match value.get("annotations") {
@@ -1985,15 +1993,21 @@ fn load_annotations(app: &tauri::AppHandle, file_path: &str) -> Result<Vec<Annot
                 .map_err(|e| format!("解析批注数组失败: {}", e))?;
             println!("[DEBUG load_annotations] loaded {} annotations", anns.len());
             for (i, ann) in anns.iter().enumerate() {
-                println!("[DEBUG load_annotations] #{} id='{}' text_len={} text_hash='{}' note_len={}",
-                         i, ann.id, ann.text.len(), ann.text_hash, ann.note.len());
+                println!(
+                    "[DEBUG load_annotations] #{} id='{}' text_len={} text_hash='{}' note_len={}",
+                    i,
+                    ann.id,
+                    ann.text.len(),
+                    ann.text_hash,
+                    ann.note.len()
+                );
             }
             Ok(anns)
         }
         None => {
             println!("[DEBUG load_annotations] no 'annotations' key found");
             Ok(Vec::new())
-        },
+        }
     }
 }
 
@@ -2006,7 +2020,11 @@ fn save_annotations_file(
     let value = serde_json::json!({ "annotations": annotations });
     let content =
         serde_json::to_string_pretty(&value).map_err(|e| format!("序列化批注失败: {}", e))?;
-    println!("[DEBUG save_annotations_file] writing {} annotations to '{}'", annotations.len(), path.display());
+    println!(
+        "[DEBUG save_annotations_file] writing {} annotations to '{}'",
+        annotations.len(),
+        path.display()
+    );
     fs::write(&path, content).map_err(|e| format!("写入批注失败: {}", e))?;
     println!("[DEBUG save_annotations_file] write ok");
     Ok(())
@@ -2020,7 +2038,10 @@ async fn get_annotations(
     println!("[DEBUG get_annotations] file_path='{}'", file_path);
     let result = load_annotations(&app, &file_path);
     match &result {
-        Ok(anns) => println!("[DEBUG get_annotations] returning {} annotations", anns.len()),
+        Ok(anns) => println!(
+            "[DEBUG get_annotations] returning {} annotations",
+            anns.len()
+        ),
         Err(e) => println!("[DEBUG get_annotations] error: {}", e),
     }
     result
@@ -2032,9 +2053,17 @@ async fn add_annotation(
     mut annotation: Annotation,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    println!("[DEBUG add_annotation] file_path='{}' id='{}' text_len={}", file_path, annotation.id, annotation.text.len());
+    println!(
+        "[DEBUG add_annotation] file_path='{}' id='{}' text_len={}",
+        file_path,
+        annotation.id,
+        annotation.text.len()
+    );
     annotation.text_hash = text_hash(&annotation.text);
-    println!("[DEBUG add_annotation] computed text_hash='{}'", annotation.text_hash);
+    println!(
+        "[DEBUG add_annotation] computed text_hash='{}'",
+        annotation.text_hash
+    );
     let mut annotations = load_annotations(&app, &file_path)?;
     annotations.push(annotation);
     save_annotations_file(&app, &file_path, &annotations)
@@ -2074,12 +2103,24 @@ async fn update_annotation(
     note: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<(), String> {
-    println!("[DEBUG update_annotation] id='{}' color={:?} style={:?} note_len={:?}", id, color, style, note.as_ref().map(|n| n.len()));
+    println!(
+        "[DEBUG update_annotation] id='{}' color={:?} style={:?} note_len={:?}",
+        id,
+        color,
+        style,
+        note.as_ref().map(|n| n.len())
+    );
     let mut annotations = load_annotations(&app, &file_path)?;
     if let Some(ann) = annotations.iter_mut().find(|a| a.id == id) {
-        if let Some(c) = color { ann.color = c; }
-        if let Some(s) = style { ann.style = s; }
-        if let Some(n) = note { ann.note = n; }
+        if let Some(c) = color {
+            ann.color = c;
+        }
+        if let Some(s) = style {
+            ann.style = s;
+        }
+        if let Some(n) = note {
+            ann.note = n;
+        }
     }
     save_annotations_file(&app, &file_path, &annotations)
 }
@@ -2165,19 +2206,28 @@ async fn setup_project_with_session(
     log::info!("[setup_project_with_session] project_path={}", project_path);
 
     // Emit status before any work so the UI shows progress immediately.
-    let _ = app_handle.emit("session-init-status", serde_json::json!({
-        "step": "creating_project",
-        "message": "正在创建项目文件夹...",
-    }));
+    let _ = app_handle.emit(
+        "session-init-status",
+        serde_json::json!({
+            "step": "creating_project",
+            "message": "正在创建项目文件夹...",
+        }),
+    );
 
     // Step 1: create folder + project.json
     let json_path_str = create_learning_project(project_path.clone(), outline, goal)?;
-    log::info!("[setup_project_with_session] project.json created at {}", json_path_str);
+    log::info!(
+        "[setup_project_with_session] project.json created at {}",
+        json_path_str
+    );
 
-    let _ = app_handle.emit("session-init-status", serde_json::json!({
-        "step": "copying_skills",
-        "message": "正在加载技能模板...",
-    }));
+    let _ = app_handle.emit(
+        "session-init-status",
+        serde_json::json!({
+            "step": "copying_skills",
+            "message": "正在加载技能模板...",
+        }),
+    );
 
     // Step 2: copy bundled skills into the project's .claude/skills/ so
     // the agent SDK discovers them on first invocation.
@@ -2187,10 +2237,13 @@ async fn setup_project_with_session(
         log::warn!("[setup_project_with_session] skills copy failed: {}", e);
     }
 
-    let _ = app_handle.emit("session-init-status", serde_json::json!({
-        "step": "initializing_agent",
-        "message": "正在调用 AI API 初始化项目...",
-    }));
+    let _ = app_handle.emit(
+        "session-init-status",
+        serde_json::json!({
+            "step": "initializing_agent",
+            "message": "正在调用 AI API 初始化项目...",
+        }),
+    );
 
     // Step 3: initialize agent session (synchronous ureq-like via cmd.output())
     let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
@@ -2210,16 +2263,23 @@ async fn setup_project_with_session(
     });
     if let Err(e) = std::fs::write(
         &session_path,
-        serde_json::to_string_pretty(&session_json).map_err(|e| format!("serialize session.json: {}", e))?,
+        serde_json::to_string_pretty(&session_json)
+            .map_err(|e| format!("serialize session.json: {}", e))?,
     ) {
         // Non-fatal: host can still use session_id in-memory for this session
-        log::warn!("[setup_project_with_session] failed to write agent-session.json: {}", e);
+        log::warn!(
+            "[setup_project_with_session] failed to write agent-session.json: {}",
+            e
+        );
     }
 
-    let _ = app_handle.emit("session-init-status", serde_json::json!({
-        "step": "agent_ready",
-        "message": "Agent 就绪，开始生成章节...",
-    }));
+    let _ = app_handle.emit(
+        "session-init-status",
+        serde_json::json!({
+            "step": "agent_ready",
+            "message": "Agent 就绪，开始生成章节...",
+        }),
+    );
 
     Ok(session_id)
 }
@@ -2258,14 +2318,15 @@ async fn persist_quiz_result(
     // Load *.concepts.json for this chapter to get id ↔ name mapping
     // (chapter.concepts.json is the source of truth for concept identities)
     let chapter_md_stem = chapter_basename.trim_end_matches(".md");
-    let concepts_json_path = std::path::PathBuf::from(&project_path)
-        .join(format!("{}.concepts.json", chapter_md_stem));
+    let concepts_json_path =
+        std::path::PathBuf::from(&project_path).join(format!("{}.concepts.json", chapter_md_stem));
     let id_by_name: std::collections::HashMap<String, String> = if concepts_json_path.exists() {
         let content = std::fs::read_to_string(&concepts_json_path)
             .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
         let parsed: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
-        parsed.get("concepts")
+        parsed
+            .get("concepts")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -2293,8 +2354,7 @@ async fn persist_quiz_result(
     let mut project: serde_json::Value = if project_json_path.exists() {
         let content = std::fs::read_to_string(&project_json_path)
             .map_err(|e| format!("读取 project.json 失败: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("解析 project.json 失败: {}", e))?
+        serde_json::from_str(&content).map_err(|e| format!("解析 project.json 失败: {}", e))?
     } else {
         serde_json::json!({
             "name": "Learning Project",
@@ -2331,37 +2391,50 @@ async fn persist_quiz_result(
     }
 
     // Write chapter_status entry
-    if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
+    if let Some(status_map) = project
+        .get_mut("chapters_status")
+        .and_then(|v| v.as_object_mut())
+    {
         status_map.insert(chapter_basename.clone(), serde_json::json!("completed"));
     }
     // Strip chapter.concepts down to {id, name} only (no status, no updated_at)
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
         for ch in chapters.iter_mut() {
             if let Some(concepts_arr) = ch.get_mut("concepts").and_then(|v| v.as_array_mut()) {
-                let cleaned: Vec<serde_json::Value> = concepts_arr.iter().map(|item| {
-                    if let Some(s) = item.as_str() {
-                        // Legacy: string entry — convert to {id, name}
-                        let id = id_by_name.get(s).cloned().unwrap_or_else(|| s.to_string());
-                        serde_json::json!({"id": id, "name": s})
-                    } else if let Some(obj) = item.as_object() {
-                        // Object entry — keep only id and name
-                        let id = obj.get("id").and_then(|v| v.as_str())
-                            .map(|s| s.to_string())
-                            .or_else(|| {
-                                let name = obj.get("name").and_then(|v| v.as_str())?;
-                                id_by_name.get(name).cloned()
-                            })
-                            .unwrap_or_else(|| {
-                                obj.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string()
-                            });
-                        let name = obj.get("name").and_then(|v| v.as_str())
-                            .unwrap_or(&id)
-                            .to_string();
-                        serde_json::json!({"id": id, "name": name})
-                    } else {
-                        serde_json::json!({})
-                    }
-                }).collect();
+                let cleaned: Vec<serde_json::Value> = concepts_arr
+                    .iter()
+                    .map(|item| {
+                        if let Some(s) = item.as_str() {
+                            // Legacy: string entry — convert to {id, name}
+                            let id = id_by_name.get(s).cloned().unwrap_or_else(|| s.to_string());
+                            serde_json::json!({"id": id, "name": s})
+                        } else if let Some(obj) = item.as_object() {
+                            // Object entry — keep only id and name
+                            let id = obj
+                                .get("id")
+                                .and_then(|v| v.as_str())
+                                .map(|s| s.to_string())
+                                .or_else(|| {
+                                    let name = obj.get("name").and_then(|v| v.as_str())?;
+                                    id_by_name.get(name).cloned()
+                                })
+                                .unwrap_or_else(|| {
+                                    obj.get("name")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("")
+                                        .to_string()
+                                });
+                            let name = obj
+                                .get("name")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(&id)
+                                .to_string();
+                            serde_json::json!({"id": id, "name": name})
+                        } else {
+                            serde_json::json!({})
+                        }
+                    })
+                    .collect();
                 *concepts_arr = cleaned;
             }
         }
@@ -2390,7 +2463,8 @@ async fn persist_quiz_result(
             .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
         let parsed: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
-        parsed.get("concepts")
+        parsed
+            .get("concepts")
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
@@ -2409,10 +2483,18 @@ async fn persist_quiz_result(
         let mut graph: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| format!("解析 knowledge-graph.json 失败: {}", e))?;
 
-        let non_weak_status = if rating == "mastered" { "mastered" } else { "learning" };
+        let non_weak_status = if rating == "mastered" {
+            "mastered"
+        } else {
+            "learning"
+        };
         if let Some(nodes) = graph.get_mut("nodes").and_then(|v| v.as_array_mut()) {
             for node in nodes.iter_mut() {
-                let id = node.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let id = node
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 if !chapter_node_ids.contains(&id) {
                     continue;
                 }
@@ -2441,24 +2523,28 @@ async fn persist_quiz_result(
     let mut history: serde_json::Value = if history_path.exists() {
         let content = std::fs::read_to_string(&history_path)
             .map_err(|e| format!("读取 quiz-history.json 失败: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({ "version": "1.0", "entries": [] })
-        })
+        serde_json::from_str(&content)
+            .unwrap_or_else(|_| serde_json::json!({ "version": "1.0", "entries": [] }))
     } else {
         serde_json::json!({ "version": "1.0", "entries": [] })
     };
 
-    let entries = history.get_mut("entries").and_then(|v| v.as_array_mut())
+    let entries = history
+        .get_mut("entries")
+        .and_then(|v| v.as_array_mut())
         .ok_or("quiz-history.json entries 字段必须是数组")?;
 
-    let answer_json: Vec<serde_json::Value> = answers.into_iter().map(|a| {
-        serde_json::json!({
-            "question_id": a.question_id,
-            "qtype": a.qtype,
-            "user_answer": a.user_answer,
-            "is_correct": a.is_correct,
+    let answer_json: Vec<serde_json::Value> = answers
+        .into_iter()
+        .map(|a| {
+            serde_json::json!({
+                "question_id": a.question_id,
+                "qtype": a.qtype,
+                "user_answer": a.user_answer,
+                "is_correct": a.is_correct,
+            })
         })
-    }).collect();
+        .collect();
 
     entries.push(serde_json::json!({
         "chapter_file": chapter_basename,
@@ -2480,7 +2566,9 @@ async fn persist_quiz_result(
 /// Read quiz history for a project
 #[tauri::command]
 async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, String> {
-    let path = std::path::PathBuf::from(&project_path).join(".learning").join("quiz-history.json");
+    let path = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("quiz-history.json");
     if !path.exists() {
         return Ok(serde_json::json!({ "version": "1.0", "entries": [] }));
     }
@@ -2494,8 +2582,8 @@ async fn read_quiz_history(project_path: String) -> Result<serde_json::Value, St
 /// Read any text file by absolute path (used by review-scheduler.js and other modules)
 #[tauri::command]
 async fn read_text_file(file_path: String) -> Result<String, String> {
-    let content = std::fs::read_to_string(&file_path)
-        .map_err(|e| format!("读取文件失败: {}", e))?;
+    let content =
+        std::fs::read_to_string(&file_path).map_err(|e| format!("读取文件失败: {}", e))?;
     Ok(content)
 }
 
@@ -2526,8 +2614,8 @@ async fn persist_chapter_file(
 
     let content = std::fs::read_to_string(&project_json_path)
         .map_err(|e| format!("读取 project.json 失败: {}", e))?;
-    let mut project: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
+    let mut project: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 project.json 失败: {}", e))?;
 
     // Backfill chapters[index].file
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
@@ -2542,7 +2630,10 @@ async fn persist_chapter_file(
     if project.get("chapters_status").is_none() {
         project["chapters_status"] = serde_json::json!({});
     }
-    if let Some(status_map) = project.get_mut("chapters_status").and_then(|v| v.as_object_mut()) {
+    if let Some(status_map) = project
+        .get_mut("chapters_status")
+        .and_then(|v| v.as_object_mut())
+    {
         let current = status_map
             .get(&file_basename)
             .and_then(|v| v.as_str())
@@ -2596,14 +2687,15 @@ async fn generate_review_content(
 
     // Read chapter's concepts.json
     let chapter_stem = chapter_file.trim_end_matches(".md");
-    let concepts_json_path = std::path::PathBuf::from(&project_path)
-        .join(format!("{}.concepts.json", chapter_stem));
+    let concepts_json_path =
+        std::path::PathBuf::from(&project_path).join(format!("{}.concepts.json", chapter_stem));
     let concepts: Vec<serde_json::Value> = if concepts_json_path.exists() {
         let content = std::fs::read_to_string(&concepts_json_path)
             .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
         let parsed: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
-        parsed.get("concepts")
+        parsed
+            .get("concepts")
             .and_then(|v| v.as_array())
             .cloned()
             .unwrap_or_default()
@@ -2616,9 +2708,8 @@ async fn generate_review_content(
     let mut cards: serde_json::Value = if cards_path.exists() {
         let content = std::fs::read_to_string(&cards_path)
             .map_err(|e| format!("读取 review-cards.json 失败: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({ "version": "1.0", "cards": {} })
-        })
+        serde_json::from_str(&content)
+            .unwrap_or_else(|_| serde_json::json!({ "version": "1.0", "cards": {} }))
     } else {
         serde_json::json!({ "version": "1.0", "cards": {} })
     };
@@ -2629,11 +2720,13 @@ async fn generate_review_content(
     }
 
     // Filter to only concepts that don't already have a card (idempotent)
-    let existing_card_ids: std::collections::HashSet<String> = cards["cards"].as_object()
+    let existing_card_ids: std::collections::HashSet<String> = cards["cards"]
+        .as_object()
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default();
 
-    let new_concepts: Vec<serde_json::Value> = concepts.into_iter()
+    let new_concepts: Vec<serde_json::Value> = concepts
+        .into_iter()
         .filter(|c| {
             let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
             !existing_card_ids.contains(cid)
@@ -2641,7 +2734,9 @@ async fn generate_review_content(
         .collect();
 
     if new_concepts.is_empty() {
-        return Ok(serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }));
+        return Ok(
+            serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }),
+        );
     }
 
     let now = now_local_string();
@@ -2658,7 +2753,8 @@ async fn generate_review_content(
         weak_concepts.clone(),
         app_handle,
         None,
-    ).await;
+    )
+    .await;
 
     let weak_set: std::collections::HashSet<String> = weak_concepts.into_iter().collect();
     let mut added_count = 0u32;
@@ -2667,15 +2763,27 @@ async fn generate_review_content(
         Ok(agent_cards) => {
             // Agent succeeded — merge returned cards into review-cards.json
             if let Some(returned_cards) = agent_cards.get("cards").and_then(|v| v.as_object()) {
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
                 for (cid, card_value) in returned_cards {
                     if !cards_obj.contains_key(cid) {
                         let mut card = card_value.clone();
                         // Ensure metadata fields are set
-                        if card.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                        if card
+                            .get("source_chapter")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .is_empty()
+                        {
                             card["source_chapter"] = serde_json::json!(chapter_basename);
                         }
-                        if card.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                        if card
+                            .get("generated_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .is_empty()
+                        {
                             card["generated_at"] = serde_json::json!(now);
                         }
                         if card.get("from_weak").is_none() {
@@ -2689,11 +2797,25 @@ async fn generate_review_content(
 
             // Fill any concepts the agent skipped with stub content
             for c in &new_concepts {
-                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if cid.is_empty() { continue; }
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
-                if cards_obj.contains_key(&cid) { continue; }
-                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let cid = c
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if cid.is_empty() {
+                    continue;
+                }
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) {
+                    continue;
+                }
+                let cname = c
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&cid)
+                    .to_string();
                 let is_weak = weak_set.contains(&cid);
                 cards_obj.insert(cid.clone(), serde_json::json!({
                     "concept_name": cname,
@@ -2712,12 +2834,26 @@ async fn generate_review_content(
             log::warn!("[PB1] Agent review generation failed, using stub: {}", e);
             // Fall back to stub: write hardcoded content
             for c in &new_concepts {
-                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if cid.is_empty() { continue; }
-                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
+                let cid = c
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if cid.is_empty() {
+                    continue;
+                }
+                let cname = c
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&cid)
+                    .to_string();
                 let is_weak = weak_set.contains(&cid);
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
-                if cards_obj.contains_key(&cid) { continue; }
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) {
+                    continue;
+                }
                 cards_obj.insert(cid.clone(), serde_json::json!({
                     "concept_name": cname,
                     "source_chapter": chapter_basename,
@@ -2758,8 +2894,11 @@ async fn generate_review_content_batch(
     concepts: Vec<serde_json::Value>,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    log::info!("[PB1-Batch] generate_review_content_batch START: project={}, concepts={}",
-        project_path, concepts.len());
+    log::info!(
+        "[PB1-Batch] generate_review_content_batch START: project={}, concepts={}",
+        project_path,
+        concepts.len()
+    );
 
     if concepts.is_empty() {
         return Ok(serde_json::json!({ "success": true, "cards_count": 0 }));
@@ -2776,9 +2915,8 @@ async fn generate_review_content_batch(
     let mut cards: serde_json::Value = if cards_path.exists() {
         let content = std::fs::read_to_string(&cards_path)
             .map_err(|e| format!("读取 review-cards.json 失败: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({ "version": "1.0", "cards": {} })
-        })
+        serde_json::from_str(&content)
+            .unwrap_or_else(|_| serde_json::json!({ "version": "1.0", "cards": {} }))
     } else {
         serde_json::json!({ "version": "1.0", "cards": {} })
     };
@@ -2788,11 +2926,13 @@ async fn generate_review_content_batch(
     }
 
     // Filter to concepts that don't already have a card
-    let existing_ids: std::collections::HashSet<String> = cards["cards"].as_object()
+    let existing_ids: std::collections::HashSet<String> = cards["cards"]
+        .as_object()
         .map(|o| o.keys().cloned().collect())
         .unwrap_or_default();
 
-    let new_concepts: Vec<serde_json::Value> = concepts.into_iter()
+    let new_concepts: Vec<serde_json::Value> = concepts
+        .into_iter()
         .filter(|c| {
             let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("");
             !cid.is_empty() && !existing_ids.contains(cid)
@@ -2800,7 +2940,9 @@ async fn generate_review_content_batch(
         .collect();
 
     if new_concepts.is_empty() {
-        return Ok(serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }));
+        return Ok(
+            serde_json::json!({ "success": true, "cards_count": 0, "note": "all concepts already have cards" }),
+        );
     }
 
     // Call agent-bridge review-gen-batch
@@ -2809,7 +2951,8 @@ async fn generate_review_content_batch(
         new_concepts.clone(),
         app_handle,
         None,
-    ).await;
+    )
+    .await;
 
     let now = now_local_string();
     let mut added_count = 0u32;
@@ -2817,11 +2960,18 @@ async fn generate_review_content_batch(
     match agent_result {
         Ok(agent_cards) => {
             if let Some(returned_cards) = agent_cards.get("cards").and_then(|v| v.as_object()) {
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
                 for (cid, card_value) in returned_cards {
                     if !cards_obj.contains_key(cid) {
                         let mut card = card_value.clone();
-                        if card.get("generated_at").and_then(|v| v.as_str()).unwrap_or("").is_empty() {
+                        if card
+                            .get("generated_at")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .is_empty()
+                        {
                             card["generated_at"] = serde_json::json!(now);
                         }
                         cards_obj.insert(cid.clone(), card);
@@ -2832,12 +2982,30 @@ async fn generate_review_content_batch(
 
             // Fill any concepts the agent skipped with stub content
             for c in &new_concepts {
-                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if cid.is_empty() { continue; }
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
-                if cards_obj.contains_key(&cid) { continue; }
-                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
-                let source = c.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let cid = c
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if cid.is_empty() {
+                    continue;
+                }
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) {
+                    continue;
+                }
+                let cname = c
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&cid)
+                    .to_string();
+                let source = c
+                    .get("source_chapter")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 cards_obj.insert(cid.clone(), serde_json::json!({
                     "concept_name": cname,
                     "source_chapter": source,
@@ -2860,14 +3028,35 @@ async fn generate_review_content_batch(
             }
         }
         Err(e) => {
-            log::warn!("[PB1-Batch] Agent review generation failed, using stub: {}", e);
+            log::warn!(
+                "[PB1-Batch] Agent review generation failed, using stub: {}",
+                e
+            );
             for c in &new_concepts {
-                let cid = c.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                if cid.is_empty() { continue; }
-                let cards_obj = cards["cards"].as_object_mut().ok_or("cards is not object")?;
-                if cards_obj.contains_key(&cid) { continue; }
-                let cname = c.get("name").and_then(|v| v.as_str()).unwrap_or(&cid).to_string();
-                let source = c.get("source_chapter").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                let cid = c
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if cid.is_empty() {
+                    continue;
+                }
+                let cards_obj = cards["cards"]
+                    .as_object_mut()
+                    .ok_or("cards is not object")?;
+                if cards_obj.contains_key(&cid) {
+                    continue;
+                }
+                let cname = c
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&cid)
+                    .to_string();
+                let source = c
+                    .get("source_chapter")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
                 cards_obj.insert(cid.clone(), serde_json::json!({
                     "concept_name": cname,
                     "source_chapter": source,
@@ -2903,7 +3092,9 @@ async fn generate_review_content_batch(
 /// Scans project.json for completed chapters, then checks review-cards.json
 /// for each concept. Returns the list of missing concepts grouped by chapter.
 #[tauri::command]
-async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_json::Value>, String> {
+async fn check_missing_review_cards(
+    project_path: String,
+) -> Result<Vec<serde_json::Value>, String> {
     let learning_dir = std::path::PathBuf::from(&project_path).join(".learning");
     let project_json_path = learning_dir.join("project.json");
     if !project_json_path.exists() {
@@ -2912,19 +3103,24 @@ async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_js
 
     let content = std::fs::read_to_string(&project_json_path)
         .map_err(|e| format!("读取 project.json 失败: {}", e))?;
-    let project: serde_json::Value = serde_json::from_str(&content)
-        .map_err(|e| format!("解析 project.json 失败: {}", e))?;
+    let project: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("解析 project.json 失败: {}", e))?;
 
     // Read existing review-cards.json
     let cards_path = learning_dir.join("review-cards.json");
     let existing_ids: std::collections::HashSet<String> = if cards_path.exists() {
         if let Ok(c) = std::fs::read_to_string(&cards_path) {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&c) {
-                v.get("cards").and_then(|o| o.as_object())
+                v.get("cards")
+                    .and_then(|o| o.as_object())
                     .map(|o| o.keys().cloned().collect())
                     .unwrap_or_default()
-            } else { std::collections::HashSet::new() }
-        } else { std::collections::HashSet::new() }
+            } else {
+                std::collections::HashSet::new()
+            }
+        } else {
+            std::collections::HashSet::new()
+        }
     } else {
         std::collections::HashSet::new()
     };
@@ -2940,7 +3136,9 @@ async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_js
     if let Some(chapters) = project.get("chapters").and_then(|v| v.as_array()) {
         for ch in chapters {
             let ch_file = ch.get("file").and_then(|v| v.as_str()).unwrap_or("");
-            if ch_file.is_empty() { continue; }
+            if ch_file.is_empty() {
+                continue;
+            }
 
             // Skip if chapter is not completed
             let is_completed = status_map
@@ -2948,13 +3146,17 @@ async fn check_missing_review_cards(project_path: String) -> Result<Vec<serde_js
                 .and_then(|v| v.as_str())
                 .map(|s| s == "completed")
                 .unwrap_or(false);
-            if !is_completed { continue; }
+            if !is_completed {
+                continue;
+            }
 
             // Check each concept
             let mut missing_concepts: Vec<String> = vec![];
             if let Some(concepts) = ch.get("concepts").and_then(|v| v.as_array()) {
                 for c in concepts {
-                    let cid = c.get("id").and_then(|v| v.as_str())
+                    let cid = c
+                        .get("id")
+                        .and_then(|v| v.as_str())
                         .or_else(|| c.as_str())
                         .unwrap_or("");
                     if !cid.is_empty() && !existing_ids.contains(cid) {
@@ -3009,7 +3211,9 @@ mod explanation_persistence {
     }
 
     pub fn get_explanations_dir(project_path: &str) -> PathBuf {
-        PathBuf::from(project_path).join(".learning").join("explanations")
+        PathBuf::from(project_path)
+            .join(".learning")
+            .join("explanations")
     }
 
     /// Strip the .md (or any) extension to get the chapter stem used as the per-chapter directory name.
@@ -3062,9 +3266,8 @@ mod explanation_persistence {
         if new_dir.exists() {
             let has_any = std::fs::read_dir(&new_dir)
                 .map(|rd| {
-                    rd.filter_map(|e| e.ok()).any(|e| {
-                        e.path().extension().and_then(|s| s.to_str()) == Some("json")
-                    })
+                    rd.filter_map(|e| e.ok())
+                        .any(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
                 })
                 .unwrap_or(false);
             if has_any {
@@ -3085,8 +3288,7 @@ mod explanation_persistence {
             let cue_path = get_explanation_cue_path(project_path, chapter, &conv.id);
             let json = serde_json::to_string_pretty(conv)
                 .map_err(|e| format!("序列化 cue 失败: {}", e))?;
-            std::fs::write(&cue_path, json)
-                .map_err(|e| format!("写入 cue 文件失败: {}", e))?;
+            std::fs::write(&cue_path, json).map_err(|e| format!("写入 cue 文件失败: {}", e))?;
         }
 
         let _ = std::fs::remove_file(&old_path);
@@ -3095,7 +3297,11 @@ mod explanation_persistence {
 
     /// Save a single cue. Writes to `{chapter_stem}/{cue_id}.json`. Evicts oldest cues if over MAX.
     /// Also invalidates the per-cue extras file (the cue's quiz is now stale).
-    pub fn save(project_path: &str, chapter: &str, conversation: ExplanationConversation) -> Result<(), String> {
+    pub fn save(
+        project_path: &str,
+        chapter: &str,
+        conversation: ExplanationConversation,
+    ) -> Result<(), String> {
         let chapter_dir = get_explanations_chapter_dir(project_path, chapter);
         std::fs::create_dir_all(&chapter_dir)
             .map_err(|e| format!("创建 explanations 章节目录失败: {}", e))?;
@@ -3103,8 +3309,7 @@ mod explanation_persistence {
         let cue_path = get_explanation_cue_path(project_path, chapter, &conversation.id);
         let json = serde_json::to_string_pretty(&conversation)
             .map_err(|e| format!("序列化 cue 失败: {}", e))?;
-        std::fs::write(&cue_path, json)
-            .map_err(|e| format!("写入 cue 文件失败: {}", e))?;
+        std::fs::write(&cue_path, json).map_err(|e| format!("写入 cue 文件失败: {}", e))?;
 
         evict_oldest_if_over_limit(project_path, chapter)?;
 
@@ -3120,7 +3325,10 @@ mod explanation_persistence {
     fn evict_oldest_if_over_limit(project_path: &str, chapter: &str) -> Result<(), String> {
         let chapter_dir = get_explanations_chapter_dir(project_path, chapter);
         let entries = match std::fs::read_dir(&chapter_dir) {
-            Ok(rd) => rd.filter_map(|e| e.ok()).map(|e| e.path()).collect::<Vec<_>>(),
+            Ok(rd) => rd
+                .filter_map(|e| e.ok())
+                .map(|e| e.path())
+                .collect::<Vec<_>>(),
             Err(_) => return Ok(()),
         };
         let cue_files: Vec<PathBuf> = entries
@@ -3180,8 +3388,8 @@ mod explanation_persistence {
             if path.extension().and_then(|s| s.to_str()) != Some("json") {
                 continue;
             }
-            let content = std::fs::read_to_string(&path)
-                .map_err(|e| format!("读取 cue 文件失败: {}", e))?;
+            let content =
+                std::fs::read_to_string(&path).map_err(|e| format!("读取 cue 文件失败: {}", e))?;
             if let Ok(conv) = serde_json::from_str::<ExplanationConversation>(&content) {
                 conversations.push(conv);
             }
@@ -3198,8 +3406,7 @@ mod explanation_persistence {
     pub fn remove(project_path: &str, chapter: &str, conversation_id: &str) -> Result<(), String> {
         let cue_path = get_explanation_cue_path(project_path, chapter, conversation_id);
         if cue_path.exists() {
-            std::fs::remove_file(&cue_path)
-                .map_err(|e| format!("删除 cue 文件失败: {}", e))?;
+            std::fs::remove_file(&cue_path).map_err(|e| format!("删除 cue 文件失败: {}", e))?;
         }
         let extras_path = get_extra_cue_path(project_path, chapter, conversation_id);
         if extras_path.exists() {
@@ -3234,28 +3441,35 @@ mod exploration_persistence {
 }
 
 #[tauri::command]
-async fn read_exploration_session(file_name: String, app: tauri::AppHandle) -> Result<String, String> {
+async fn read_exploration_session(
+    file_name: String,
+    app: tauri::AppHandle,
+) -> Result<String, String> {
     let path = exploration_persistence::session_file_path(&app, &file_name)?;
     if !path.exists() {
         return Ok(String::new());
     }
-    std::fs::read_to_string(&path)
-        .map_err(|e| format!("读取探索会话失败: {}", e))
+    std::fs::read_to_string(&path).map_err(|e| format!("读取探索会话失败: {}", e))
 }
 
 #[tauri::command]
-async fn write_exploration_session(file_name: String, content: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn write_exploration_session(
+    file_name: String,
+    content: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let path = exploration_persistence::session_file_path(&app, &file_name)?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("写入探索会话失败: {}", e))
+    std::fs::write(&path, content).map_err(|e| format!("写入探索会话失败: {}", e))
 }
 
 #[tauri::command]
-async fn delete_exploration_session(file_name: String, app: tauri::AppHandle) -> Result<(), String> {
+async fn delete_exploration_session(
+    file_name: String,
+    app: tauri::AppHandle,
+) -> Result<(), String> {
     let path = exploration_persistence::session_file_path(&app, &file_name)?;
     if path.exists() {
-        std::fs::remove_file(&path)
-            .map_err(|e| format!("删除探索会话失败: {}", e))?;
+        std::fs::remove_file(&path).map_err(|e| format!("删除探索会话失败: {}", e))?;
     }
     Ok(())
 }
@@ -3283,7 +3497,9 @@ struct ReviewSchedule {
 }
 
 fn read_review_schedule(project_path: &str) -> Result<ReviewSchedule, String> {
-    let path = std::path::PathBuf::from(project_path).join(".learning").join("review-schedule.json");
+    let path = std::path::PathBuf::from(project_path)
+        .join(".learning")
+        .join("review-schedule.json");
     if !path.exists() {
         return Ok(ReviewSchedule {
             version: "1.0".to_string(),
@@ -3304,8 +3520,7 @@ fn write_review_schedule(project_path: &str, schedule: &ReviewSchedule) -> Resul
     let path = learning_dir.join("review-schedule.json");
     let json = serde_json::to_string_pretty(schedule)
         .map_err(|e| format!("序列化 review-schedule.json 失败: {}", e))?;
-    std::fs::write(&path, json)
-        .map_err(|e| format!("写入 review-schedule.json 失败: {}", e))?;
+    std::fs::write(&path, json).map_err(|e| format!("写入 review-schedule.json 失败: {}", e))?;
     Ok(())
 }
 
@@ -3317,7 +3532,9 @@ fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
     let mut year = 1970i32;
     loop {
         let yd = if is_leap_year(year) { 366 } else { 365 };
-        if days < yd { break; }
+        if days < yd {
+            break;
+        }
         days -= yd;
         year += 1;
     }
@@ -3341,7 +3558,9 @@ fn is_leap_year(year: i32) -> bool {
 
 fn add_days_to_string(date_str: &str, days: i32) -> String {
     // Parse "YYYY-MM-DD HH:MM:SS"
-    let parts: Vec<&str> = date_str.split(|c| c == '-' || c == ' ' || c == ':').collect();
+    let parts: Vec<&str> = date_str
+        .split(|c| c == '-' || c == ' ' || c == ':')
+        .collect();
     if parts.len() != 6 {
         return now_local_string();
     }
@@ -3365,7 +3584,11 @@ fn ymd_to_days(year: i32, month: u32, day: u32) -> i64 {
     }
     let md = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     for m in 1..month {
-        let d = if m == 2 && is_leap_year(year) { 29 } else { md[(m - 1) as usize] };
+        let d = if m == 2 && is_leap_year(year) {
+            29
+        } else {
+            md[(m - 1) as usize]
+        };
         days += d as i64;
     }
     days += (day - 1) as i64;
@@ -3409,7 +3632,8 @@ async fn get_review_items(project_path: String) -> Result<Vec<ReviewItem>, Strin
     let schedule = read_review_schedule(&project_path)?;
 
     // Filter due items
-    let due_items: Vec<ReviewItem> = schedule.items
+    let due_items: Vec<ReviewItem> = schedule
+        .items
         .into_iter()
         .filter(|item| item.status == "due" || is_due(&item.next_review_at))
         .collect();
@@ -3427,21 +3651,24 @@ async fn init_review_schedule(
     weak_concepts: Vec<String>,
 ) -> Result<serde_json::Value, String> {
     let chapter_stem = chapter_file.trim_end_matches(".md");
-    let concepts_json_path = std::path::PathBuf::from(&project_path)
-        .join(format!("{}.concepts.json", chapter_stem));
+    let concepts_json_path =
+        std::path::PathBuf::from(&project_path).join(format!("{}.concepts.json", chapter_stem));
     let concepts: Vec<(String, String)> = if concepts_json_path.exists() {
         let content = std::fs::read_to_string(&concepts_json_path)
             .map_err(|e| format!("读取 concepts.json 失败: {}", e))?;
         let parsed: serde_json::Value = serde_json::from_str(&content)
             .map_err(|e| format!("解析 concepts.json 失败: {}", e))?;
-        parsed.get("concepts")
+        parsed
+            .get("concepts")
             .and_then(|v| v.as_array())
             .map(|arr| {
-                arr.iter().filter_map(|c| {
-                    let id = c.get("id").and_then(|v| v.as_str())?;
-                    let name = c.get("name").and_then(|v| v.as_str())?;
-                    Some((id.to_string(), name.to_string()))
-                }).collect()
+                arr.iter()
+                    .filter_map(|c| {
+                        let id = c.get("id").and_then(|v| v.as_str())?;
+                        let name = c.get("name").and_then(|v| v.as_str())?;
+                        Some((id.to_string(), name.to_string()))
+                    })
+                    .collect()
             })
             .unwrap_or_default()
     } else {
@@ -3449,7 +3676,9 @@ async fn init_review_schedule(
     };
 
     if concepts.is_empty() {
-        return Ok(serde_json::json!({ "success": true, "items_added": 0, "note": "no concepts found" }));
+        return Ok(
+            serde_json::json!({ "success": true, "items_added": 0, "note": "no concepts found" }),
+        );
     }
 
     let mut schedule = read_review_schedule(&project_path)?;
@@ -3501,7 +3730,13 @@ async fn submit_review_result(
     // 1. Update review-schedule.json
     let mut schedule = read_review_schedule(&project_path)?;
     let interval = compute_next_interval(
-        schedule.items.iter().find(|i| i.concept == concept_id).map(|i| i.review_count).unwrap_or(0) + 1,
+        schedule
+            .items
+            .iter()
+            .find(|i| i.concept == concept_id)
+            .map(|i| i.review_count)
+            .unwrap_or(0)
+            + 1,
         &rating,
     );
     if let Some(item) = schedule.items.iter_mut().find(|i| i.concept == concept_id) {
@@ -3518,14 +3753,15 @@ async fn submit_review_result(
     let mut history: serde_json::Value = if history_path.exists() {
         let content = std::fs::read_to_string(&history_path)
             .map_err(|e| format!("读取 review-history.json 失败: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| {
-            serde_json::json!({ "version": "1.0", "entries": [] })
-        })
+        serde_json::from_str(&content)
+            .unwrap_or_else(|_| serde_json::json!({ "version": "1.0", "entries": [] }))
     } else {
         serde_json::json!({ "version": "1.0", "entries": [] })
     };
 
-    let entries = history.get_mut("entries").and_then(|v| v.as_array_mut())
+    let entries = history
+        .get_mut("entries")
+        .and_then(|v| v.as_array_mut())
         .ok_or("review-history.json entries 字段必须是数组")?;
     entries.push(serde_json::json!({
         "concept_id": concept_id,
@@ -3655,11 +3891,13 @@ async fn check_graph_freshness(project_path: String) -> Result<bool, String> {
         Ok(m) => m,
         Err(_) => return Ok(true),
     };
-    let graph_mtime = graph_meta.modified().unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    let graph_mtime = graph_meta
+        .modified()
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
 
     // Scan for *.concepts.json files newer than graph
-    for entry in std::fs::read_dir(&project_dir)
-        .map_err(|e| format!("读取项目目录失败: {}", e))? {
+    for entry in std::fs::read_dir(&project_dir).map_err(|e| format!("读取项目目录失败: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("目录条目错误: {}", e))?;
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -3691,7 +3929,8 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
     std::fs::create_dir_all(&learning_dir)
         .map_err(|e| format!("创建 .learning 目录失败: {}", e))?;
     let graph_path = learning_dir.join("knowledge-graph.json");
-    let mut existing_status: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let mut existing_status: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     if graph_path.exists() {
         if let Ok(content) = std::fs::read_to_string(&graph_path) {
             if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -3699,7 +3938,7 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
                     for n in arr {
                         if let (Some(id), Some(status)) = (
                             n.get("id").and_then(|v| v.as_str()),
-                            n.get("node_status").and_then(|v| v.as_str())
+                            n.get("node_status").and_then(|v| v.as_str()),
                         ) {
                             existing_status.insert(id.to_string(), status.to_string());
                         }
@@ -3710,8 +3949,8 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
     }
 
     // Scan for *.concepts.json files
-    for entry in std::fs::read_dir(&project_dir)
-        .map_err(|e| format!("读取项目目录失败: {}", e))? {
+    for entry in std::fs::read_dir(&project_dir).map_err(|e| format!("读取项目目录失败: {}", e))?
+    {
         let entry = entry.map_err(|e| format!("目录条目错误: {}", e))?;
         let path = entry.path();
         if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
@@ -3722,14 +3961,16 @@ async fn build_knowledge_graph(project_path: String) -> Result<(), String> {
                     .map_err(|e| format!("解析 {} 失败: {}", name, e))?;
 
                 // Extract chapter number from filename
-                let chapter = path.file_stem()
+                let chapter = path
+                    .file_stem()
                     .and_then(|s| s.to_str())
                     .map(|s| s.replace(".concepts", ""))
                     .unwrap_or_default();
 
                 for concept in chapter_concepts.concepts {
                     if seen_ids.insert(concept.id.clone()) {
-                        let status = existing_status.get(&concept.id)
+                        let status = existing_status
+                            .get(&concept.id)
                             .cloned()
                             .unwrap_or_else(default_node_status);
                         nodes.push(KnowledgeNode {
@@ -3794,7 +4035,7 @@ struct SocraticCluster {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct SocraticChatMessage {
-    role: String,    // "user" | "tutor"
+    role: String, // "user" | "tutor"
     content: String,
 }
 
@@ -3854,7 +4095,8 @@ fn select_socratic_cluster_pure(
     }
 
     // Find anchor = highest-degree node
-    let anchor = nodes.iter()
+    let anchor = nodes
+        .iter()
         .max_by_key(|n| degree.get(&n.id).copied().unwrap_or(0))
         .map(|n| n.id.clone())
         .unwrap_or_default();
@@ -3868,19 +4110,27 @@ fn select_socratic_cluster_pure(
         let mut next_frontier = vec![];
         for node in &frontier {
             for e in edges {
-                let neighbor = if &e.from == node { Some(&e.to) }
-                              else if &e.to == node { Some(&e.from) }
-                              else { None };
+                let neighbor = if &e.from == node {
+                    Some(&e.to)
+                } else if &e.to == node {
+                    Some(&e.from)
+                } else {
+                    None
+                };
                 if let Some(nb) = neighbor {
                     if !visited.contains(nb) {
                         visited.insert(nb.clone());
                         cluster.push(nb.clone());
                         next_frontier.push(nb.clone());
-                        if cluster.len() >= target_size { break; }
+                        if cluster.len() >= target_size {
+                            break;
+                        }
                     }
                 }
             }
-            if cluster.len() >= target_size { break; }
+            if cluster.len() >= target_size {
+                break;
+            }
         }
         frontier = next_frontier;
     }
@@ -3922,7 +4172,8 @@ async fn socratic_select_cluster(project_path: String) -> Result<SocraticCluster
 
     let cluster_ids = select_socratic_cluster_pure(&kg.nodes, &kg.edges, 4, 0.5);
 
-    let concept_refs: Vec<SocraticConceptRef> = cluster_ids.iter()
+    let concept_refs: Vec<SocraticConceptRef> = cluster_ids
+        .iter()
         .filter_map(|id| kg.nodes.iter().find(|n| &n.id == id).cloned())
         .map(|n| SocraticConceptRef {
             id: n.id,
@@ -3931,9 +4182,15 @@ async fn socratic_select_cluster(project_path: String) -> Result<SocraticCluster
         })
         .collect();
 
-    let cluster_edges: Vec<SocraticEdgeRef> = kg.edges.iter()
+    let cluster_edges: Vec<SocraticEdgeRef> = kg
+        .edges
+        .iter()
         .filter(|e| cluster_ids.contains(&e.from) && cluster_ids.contains(&e.to))
-        .map(|e| SocraticEdgeRef { from: e.from.clone(), to: e.to.clone(), weight: 1.0 })
+        .map(|e| SocraticEdgeRef {
+            from: e.from.clone(),
+            to: e.to.clone(),
+            weight: 1.0,
+        })
         .collect();
 
     Ok(SocraticCluster {
@@ -3955,8 +4212,7 @@ async fn socratic_load_state(project_path: String) -> Result<SocraticStateData, 
 
     let content = std::fs::read_to_string(&state_path)
         .map_err(|e| format!("读取 socratic-state.json 失败: {}", e))?;
-    serde_json::from_str(&content)
-        .map_err(|e| format!("解析 socratic-state.json 失败: {}", e))
+    serde_json::from_str(&content).map_err(|e| format!("解析 socratic-state.json 失败: {}", e))
 }
 
 #[tauri::command]
@@ -3973,7 +4229,10 @@ async fn socratic_save_state(project_path: String, state: SocraticStateData) -> 
 }
 
 #[tauri::command]
-async fn socratic_save_session(project_path: String, session: SocraticSessionData) -> Result<String, String> {
+async fn socratic_save_session(
+    project_path: String,
+    session: SocraticSessionData,
+) -> Result<String, String> {
     let sessions_dir = std::path::PathBuf::from(&project_path)
         .join(".learning")
         .join("socratic-sessions");
@@ -3984,8 +4243,7 @@ async fn socratic_save_session(project_path: String, session: SocraticSessionDat
     let file_path = sessions_dir.join(format!("{}.json", ts));
     let json = serde_json::to_string_pretty(&session)
         .map_err(|e| format!("序列化 session 失败: {}", e))?;
-    std::fs::write(&file_path, json)
-        .map_err(|e| format!("写入 session 文件失败: {}", e))?;
+    std::fs::write(&file_path, json).map_err(|e| format!("写入 session 文件失败: {}", e))?;
     Ok(file_path.display().to_string())
 }
 
@@ -4007,7 +4265,6 @@ pub fn run() {
         .manage(AppState {
             watcher: Mutex::new(None),
             watched_path: Mutex::new(None),
-            md2docx_pid: Mutex::new(None),
             project_json_lock: Mutex::new(()),
             generation_in_progress: Mutex::new(false),
         })
@@ -4023,36 +4280,6 @@ pub fn run() {
             if cfg!(debug_assertions) {
                 let window = app.get_webview_window("main").unwrap();
                 window.open_devtools();
-            }
-
-            // Start md2docx_service for Word export (Windows only)
-            #[cfg(windows)]
-            {
-                let state: tauri::State<AppState> = app.state();
-                let possible_paths = [
-                    app.path().resource_dir().ok().map(|p| p.join("bin/md2docx_service-x86_64-pc-windows-gnu.exe")),
-                    std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.join("md2docx_service-x86_64-pc-windows-gnu.exe"))),
-                ];
-
-                for path_opt in &possible_paths {
-                    if let Some(path) = path_opt {
-                        if path.exists() {
-                            let mut cmd = std::process::Command::new(&path);
-                            cmd.stdout(std::process::Stdio::null())
-                                .stderr(std::process::Stdio::null());
-                            use std::os::windows::process::CommandExt;
-                            const CREATE_NO_WINDOW: u32 = 0x08000000;
-                            cmd.creation_flags(CREATE_NO_WINDOW);
-                            if let Ok(child) = cmd.spawn() {
-                                let pid = child.id();
-                                let mut pid_guard = state.md2docx_pid.lock().unwrap();
-                                *pid_guard = Some(pid);
-                                println!("[DEBUG] Started md2docx_service with PID: {}", pid);
-                            }
-                            break;
-                        }
-                    }
-                }
             }
 
             // Check command line arguments for .md file path (file association)
@@ -4076,57 +4303,102 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            open_file_dialog, open_file, render_markdown, get_toc,
+            open_file_dialog,
+            open_file,
+            render_markdown,
+            get_toc,
             notify_external_file_opened,
-            open_folder_dialog, list_directory, watch_file, unwatch_file,
-            fix_mermaid, translate_text, get_config, set_config, test_llm_config, export_word,
-            get_recent_files, add_recent_file, clear_recent_files, write_file,
-            open_slides_window, get_platform, show_in_folder, share_document,
-            get_annotations, add_annotation, delete_annotation, update_annotation_note, update_annotation,
-            ai_agent::plan_course, ai_agent::plan_course_llm, ai_agent::generate_chapters, ai_agent::abort_generation, ai_agent::is_agent_running,
-            ai_agent::generate_chapter_quiz, ai_agent::evaluate_quiz, ai_agent::explain_selection, ai_agent::check_agent_sdk,
-            ai_agent::ensure_extra_questions, ai_agent::load_extra_questions,
-            create_learning_project, setup_project_with_session, persist_quiz_result, read_quiz_history, read_text_file, persist_chapter_file,
-            exit_app, hide_main_window,
-            ai_agent::persist_explanation, ai_agent::load_chapter_explanations, ai_agent::delete_explanation,
-            get_review_items, update_review_schedule, postpone_review_item, build_knowledge_graph, check_graph_freshness,
-            generate_review_content, generate_review_content_batch, init_review_schedule, submit_review_result, check_missing_review_cards,
-            socratic_select_cluster, socratic_load_state, socratic_save_state, socratic_save_session, ai_agent::socratic_chat,
-            read_exploration_session, write_exploration_session, delete_exploration_session, ai_agent::explore_chat,
+            open_folder_dialog,
+            list_directory,
+            watch_file,
+            unwatch_file,
+            fix_mermaid,
+            translate_text,
+            get_config,
+            set_config,
+            test_llm_config,
+            export_word,
+            get_recent_files,
+            add_recent_file,
+            clear_recent_files,
+            write_file,
+            open_slides_window,
+            get_platform,
+            show_in_folder,
+            share_document,
+            get_annotations,
+            add_annotation,
+            delete_annotation,
+            update_annotation_note,
+            update_annotation,
+            ai_agent::plan_course,
+            ai_agent::plan_course_llm,
+            ai_agent::generate_chapters,
+            ai_agent::abort_generation,
+            ai_agent::is_agent_running,
+            ai_agent::generate_chapter_quiz,
+            ai_agent::evaluate_quiz,
+            ai_agent::explain_selection,
+            ai_agent::check_agent_sdk,
+            ai_agent::ensure_extra_questions,
+            ai_agent::load_extra_questions,
+            create_learning_project,
+            setup_project_with_session,
+            persist_quiz_result,
+            read_quiz_history,
+            read_text_file,
+            persist_chapter_file,
+            exit_app,
+            hide_main_window,
+            ai_agent::persist_explanation,
+            ai_agent::load_chapter_explanations,
+            ai_agent::delete_explanation,
+            get_review_items,
+            update_review_schedule,
+            postpone_review_item,
+            build_knowledge_graph,
+            check_graph_freshness,
+            generate_review_content,
+            generate_review_content_batch,
+            init_review_schedule,
+            submit_review_result,
+            check_missing_review_cards,
+            socratic_select_cluster,
+            socratic_load_state,
+            socratic_save_state,
+            socratic_save_session,
+            ai_agent::socratic_chat,
+            read_exploration_session,
+            write_exploration_session,
+            delete_exploration_session,
+            ai_agent::explore_chat,
             ai_agent::generate_paper_reader_guide,
             ai_agent::submit_paper_reader_feedback,
-            import_paper_from_pdf, import_paper_from_url, get_paper_import_status,
+            import_paper_from_pdf,
+            import_paper_from_url,
+            get_paper_import_status,
             create_project_subdir,
             get_demo_file
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app_handle, event| {
-            match event {
-                tauri::RunEvent::Exit => {
-                    #[cfg(windows)]
-                    {
-                        println!("[DEBUG] Killing all md2docx_service processes on exit");
-                        kill_md2docx_service_processes();
-                    }
+        .run(|app_handle, event| match event {
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } if label == "main" => {
+                let state = app_handle.state::<AppState>();
+                let generation_running = state
+                    .generation_in_progress
+                    .lock()
+                    .map(|g| *g)
+                    .unwrap_or(false);
+                if generation_running {
+                    api.prevent_close();
+                    let _ = app_handle.emit("generation-close-requested", ());
                 }
-                tauri::RunEvent::WindowEvent {
-                    label,
-                    event: tauri::WindowEvent::CloseRequested { api, .. },
-                    ..
-                } if label == "main" => {
-                    let state = app_handle.state::<AppState>();
-                    let generation_running = state
-                        .generation_in_progress
-                        .lock()
-                        .map(|g| *g)
-                        .unwrap_or(false);
-                    if generation_running {
-                        api.prevent_close();
-                        let _ = app_handle.emit("generation-close-requested", ());
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         });
 }

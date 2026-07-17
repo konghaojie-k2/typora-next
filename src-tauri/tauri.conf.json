@@ -39,7 +39,6 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "bin/md2docx_service-x86_64-pc-windows-gnu.exe",
       "icons/md-file-256.png",
       "../agent-bridge.js",
       "../package.json",
@@ -54,6 +53,9 @@
         "role": "Editor"
       }
     ],
+    "macos": {
+      "minimumSystemVersion": "10.13"
+    },
     "android": {
       "debugApplicationIdSuffix": ".debug"
     }

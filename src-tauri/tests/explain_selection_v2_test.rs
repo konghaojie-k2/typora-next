@@ -26,7 +26,11 @@ struct ExplainV2Response {
 // Mirrored pure functions (must stay in sync with ai_agent.rs)
 // ============================================
 
-fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Option<&[QAItem]>) -> String {
+fn build_explain_prompt(
+    text: &str,
+    context: Option<&str>,
+    previous_qa: Option<&[QAItem]>,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(ctx) = context {
@@ -51,7 +55,8 @@ fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Option<&
     parts.push("同时给出3-4个用户可能想追问的问题（作为JSON数组）。".to_string());
     parts.push(String::new());
     parts.push("返回格式（合法JSON）：".to_string());
-    parts.push("{\"explanation\": \"...\", \"suggestedQuestions\": [\"...\", \"...\"]}".to_string());
+    parts
+        .push("{\"explanation\": \"...\", \"suggestedQuestions\": [\"...\", \"...\"]}".to_string());
     parts.push(String::new());
 
     let truncated = if text.chars().count() > 197 {
@@ -68,7 +73,8 @@ fn parse_explain_response(raw: &str) -> ExplainV2Response {
     // Strip markdown code block wrappers if present
     let cleaned = raw.trim();
     let cleaned = if cleaned.starts_with("```") {
-        cleaned.lines()
+        cleaned
+            .lines()
             .skip(1)
             .take_while(|l| !l.trim_start().starts_with("```"))
             .collect::<Vec<_>>()
@@ -121,22 +127,32 @@ fn parse_explain_response(raw: &str) -> ExplainV2Response {
 fn test_build_prompt_with_context() {
     let prompt = build_explain_prompt("位置编码", Some("第五章 位置编码"), None);
     assert!(prompt.contains("位置编码"), "prompt 应包含选中文字");
-    assert!(prompt.contains("第五章 位置编码"), "prompt 应包含章节上下文");
+    assert!(
+        prompt.contains("第五章 位置编码"),
+        "prompt 应包含章节上下文"
+    );
     assert!(prompt.contains("合法JSON"), "prompt 应要求返回 JSON");
 }
 
 #[test]
 fn test_build_prompt_with_previous_qa() {
-    let qa = vec![
-        QAItem {
-            q: "位置编码是什么".to_string(),
-            a: "给每个 token 加位置向量".to_string(),
-        },
-    ];
+    let qa = vec![QAItem {
+        q: "位置编码是什么".to_string(),
+        a: "给每个 token 加位置向量".to_string(),
+    }];
     let prompt = build_explain_prompt("和词嵌入区别？", Some("第五章"), Some(&qa));
-    assert!(prompt.contains("之前的对话"), "prompt 应包含 previousQA 标题");
-    assert!(prompt.contains("位置编码是什么"), "prompt 应包含 previousQA 的 q");
-    assert!(prompt.contains("给每个 token 加位置向量"), "prompt 应包含 previousQA 的 a");
+    assert!(
+        prompt.contains("之前的对话"),
+        "prompt 应包含 previousQA 标题"
+    );
+    assert!(
+        prompt.contains("位置编码是什么"),
+        "prompt 应包含 previousQA 的 q"
+    );
+    assert!(
+        prompt.contains("给每个 token 加位置向量"),
+        "prompt 应包含 previousQA 的 a"
+    );
     assert!(prompt.contains("和词嵌入区别？"), "prompt 应包含当前追问");
 }
 
@@ -152,7 +168,10 @@ fn test_truncate_text_over_200() {
     let long = "x".repeat(300);
     let prompt = build_explain_prompt(&long, None, None);
     let concept_line = prompt.lines().last().unwrap();
-    assert!(concept_line.len() <= 210, "概念行应截断到 200 字以内 + 前缀");
+    assert!(
+        concept_line.len() <= 210,
+        "概念行应截断到 200 字以内 + 前缀"
+    );
 }
 
 #[test]
@@ -168,8 +187,15 @@ fn test_parse_legal_json() {
 fn test_parse_non_json_fallback() {
     let raw = "This is not JSON, just plain text explanation.";
     let resp = parse_explain_response(raw);
-    assert_eq!(resp.explanation, "This is not JSON, just plain text explanation.");
-    assert_eq!(resp.suggested_questions.len(), 4, "降级后应有 4 个硬编码追问");
+    assert_eq!(
+        resp.explanation,
+        "This is not JSON, just plain text explanation."
+    );
+    assert_eq!(
+        resp.suggested_questions.len(),
+        4,
+        "降级后应有 4 个硬编码追问"
+    );
 }
 
 #[test]
@@ -177,5 +203,8 @@ fn test_parse_missing_suggested_questions() {
     let raw = r#"{"explanation": "位置编码给每个 token 加位置向量..."}"#;
     let resp = parse_explain_response(raw);
     assert!(!resp.explanation.is_empty());
-    assert!(resp.suggested_questions.is_empty(), "缺 suggestedQuestions 时应为空数组");
+    assert!(
+        resp.suggested_questions.is_empty(),
+        "缺 suggestedQuestions 时应为空数组"
+    );
 }

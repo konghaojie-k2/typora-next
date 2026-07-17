@@ -3755,6 +3755,312 @@ window.agentBridge = {
   // ============================================
   // Word Export
   // ============================================
+
+  function dedentMermaidSource(text) {
+    const lines = text.split('\n');
+    const indents = lines
+      .filter((line) => line.trim().length > 0)
+      .map((line) => (line.match(/^[ \t]*/) || [''])[0].length);
+    if (!indents.length) return text.trim();
+    const minIndent = Math.min(...indents);
+    return lines.map((line) => line.slice(minIndent)).join('\n');
+  }
+
+  function findMermaidBlocks(markdown) {
+    // Match fenced code blocks with language `mermaid` or `mmd`, ignoring case
+    // and tolerating trailing info on the opening fence (e.g. ```mermaid align=center).
+    // Supports both ``` and ~~~ fences, leading indentation up to 3 spaces, and
+    // normalizes CRLF/CR line endings. Content is dedented to match how
+    // pulldown-cmark reports fenced code block text.
+    const fenceRegex = /^[ \t]{0,3}(?:```|~~~)[ \t]*(?:mermaid|mmd)(?:[ \t]+[^\n]*)?[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]{0,3}(?:```|~~~)[ \t]*$/gim;
+    const blocks = [];
+    let match;
+    while ((match = fenceRegex.exec(markdown)) !== null) {
+      const normalized = match[1]
+        .replace(/\r\n/g, '\n')
+        .replace(/\r/g, '\n');
+      blocks.push(dedentMermaidSource(normalized).trim());
+    }
+    return blocks;
+  }
+
+  function parseSvgIntrinsicSize(svg) {
+    const widthMatch = svg.match(/<svg[^>]*\swidth="([^"]+)"/i);
+    const heightMatch = svg.match(/<svg[^>]*\sheight="([^"]+)"/i);
+    const viewBoxMatch = svg.match(/<svg[^>]*\sviewBox="([^"]+)"/i);
+
+    function parsePx(value) {
+      if (!value) return 0;
+      const num = parseFloat(value);
+      if (!Number.isFinite(num) || num <= 0) return 0;
+      // Ignore percentage-based sizes; fall back to viewBox for those.
+      if (value.trim().endsWith('%')) return 0;
+      return num;
+    }
+
+    let width = parsePx(widthMatch ? widthMatch[1] : '');
+    let height = parsePx(heightMatch ? heightMatch[1] : '');
+
+    if ((!width || !height) && viewBoxMatch) {
+      const parts = viewBoxMatch[1].trim().split(/\s+/).map(parseFloat);
+      if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
+        if (!width) width = parts[2];
+        if (!height) height = parts[3];
+      }
+    }
+
+    return { width, height };
+  }
+
+  async function tightenSvgViewBox(svg) {
+    // Mermaid's default SVGs carry a lot of empty padding around the diagram.
+    // Use a canvas to find the actual rendered pixel bounds, then update the
+    // SVG viewBox/width/height to match. Callers should pass the SVG through
+    // convertForeignObjectsToText first: class/state diagrams may still carry
+    // foreignObject labels, which taint the canvas and skip the crop.
+    const intrinsic = parseSvgIntrinsicSize(svg);
+    const origW = intrinsic.width || 0;
+    const origH = intrinsic.height || 0;
+    if (!origW || !origH) return svg;
+
+    const SCALE = 2;
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+
+    try {
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+        img.src = url;
+      });
+
+      const canvasW = Math.max(1, Math.round(origW * SCALE));
+      const canvasH = Math.max(1, Math.round(origH * SCALE));
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasW;
+      canvas.height = canvasH;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.clearRect(0, 0, canvasW, canvasH);
+
+      let data;
+      try {
+        ctx.drawImage(img, 0, 0, canvasW, canvasH);
+        data = ctx.getImageData(0, 0, canvasW, canvasH).data;
+      } catch (e) {
+        // SVGs containing <foreignObject> (e.g. class/state diagrams with
+        // htmlLabels) taint the canvas in some WebViews. Fall back to the
+        // original SVG without cropping.
+        console.warn('[tightenSvgViewBox] canvas tainted or unreadable, skipping crop:', e.message);
+        return svg;
+      }
+
+      let minX = canvasW;
+      let minY = canvasH;
+      let maxX = -1;
+      let maxY = -1;
+      for (let y = 0; y < canvasH; y++) {
+        const row = y * canvasW;
+        for (let x = 0; x < canvasW; x++) {
+          if (data[(row + x) * 4 + 3] > 12) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < 0) return svg;
+
+      const pad = 3 * SCALE;
+      minX = Math.max(0, minX - pad);
+      minY = Math.max(0, minY - pad);
+      maxX = Math.min(canvasW - 1, maxX + pad);
+      maxY = Math.min(canvasH - 1, maxY + pad);
+
+      const vbMatch = svg.match(/<svg[^>]*\sviewBox="([^"]+)"/i);
+      let vx = 0;
+      let vy = 0;
+      let vw = origW;
+      let vh = origH;
+      if (vbMatch) {
+        const p = vbMatch[1].trim().split(/\s+/).map(parseFloat);
+        if (p.length === 4) {
+          vx = p[0];
+          vy = p[1];
+          vw = p[2];
+          vh = p[3];
+        }
+      }
+
+      const sx = vw / origW;
+      const sy = vh / origH;
+      const nx = vx + (minX / SCALE) * sx;
+      const ny = vy + (minY / SCALE) * sy;
+      const nw = ((maxX - minX + 1) / SCALE) * sx;
+      const nh = ((maxY - minY + 1) / SCALE) * sy;
+
+      function setAttr(str, name, val) {
+        const re = new RegExp(`(<svg[^>]*)\\s${name}="[^"]*"`, 'i');
+        if (re.test(str)) {
+          return str.replace(re, `$1 ${name}="${val}"`);
+        }
+        return str.replace(/<svg/i, `<svg ${name}="${val}"`);
+      }
+
+      let out = setAttr(svg, 'viewBox', `${nx.toFixed(2)} ${ny.toFixed(2)} ${nw.toFixed(2)} ${nh.toFixed(2)}`);
+      out = setAttr(out, 'width', nw.toFixed(2));
+      out = setAttr(out, 'height', nh.toFixed(2));
+      return out;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // Mermaid's class/state renderers put labels in <foreignObject> HTML even
+  // with htmlLabels:false (the class renderer reads flowchart.htmlLabels, and
+  // the safeClassConfig fallback leaves it at the default `true`). resvg (and
+  // the crop canvas) cannot handle foreignObject: text is silently dropped in
+  // the exported PNG. Convert each foreignObject into plain SVG
+  // <text>/<tspan>. Positions come from real layout measurements of the
+  // offscreen-rendered SVG (getBoundingClientRect), so nested transforms,
+  // missing x/y attributes and multi-line blocks all land correctly.
+  function convertForeignObjectsToText(svg) {
+    if (!svg.includes('foreignObject')) return svg;
+
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const host = document.createElement('div');
+    host.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden;';
+    host.innerHTML = svg;
+    document.body.appendChild(host);
+
+    try {
+      const svgEl = host.querySelector('svg');
+      if (!svgEl) return svg;
+
+      // Map CSS-pixel measurements back to SVG user units via the viewBox.
+      const svgRect = svgEl.getBoundingClientRect();
+      if (!svgRect.width || !svgRect.height) return svg;
+      let vx = 0, vy = 0, vw = svgRect.width, vh = svgRect.height;
+      if (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width) {
+        const vb = svgEl.viewBox.baseVal;
+        vx = vb.x; vy = vb.y; vw = vb.width; vh = vb.height;
+      }
+      const sx = vw / svgRect.width;
+      const sy = vh / svgRect.height;
+      const fontScale = Math.min(sx, sy);
+
+      // Leaf block elements (no block children) each become one text line.
+      const BLOCK_SEL = 'div, p, li, tr, h1, h2, h3, h4';
+      svgEl.querySelectorAll('foreignObject').forEach((fo) => {
+        const blocks = Array.from(fo.querySelectorAll(BLOCK_SEL))
+          .filter((b) => !b.querySelector(BLOCK_SEL));
+        const sources = blocks.length > 0 ? blocks : [fo];
+
+        const text = document.createElementNS(SVG_NS, 'text');
+        let added = 0;
+        for (const el of sources) {
+          const content = el.textContent.replace(/\s+/g, ' ').trim();
+          if (!content) continue;
+          // Measure the actual text run, not the block box: blocks often span
+          // the full row width while their text is left/right aligned, so
+          // anchoring at the block center shifts the text. A Range over the
+          // contents gives the rendered glyph bounds.
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const tr = range.getBoundingClientRect();
+          if (!tr.width && !tr.height) continue;
+          const cs = window.getComputedStyle(el);
+          const fontSize = (parseFloat(cs.fontSize) || 14) * fontScale;
+          const cx = vx + (tr.left + tr.width / 2 - svgRect.left) * sx;
+          const cy = vy + (tr.top + tr.height / 2 - svgRect.top) * sy;
+
+          const tspan = document.createElementNS(SVG_NS, 'tspan');
+          tspan.setAttribute('x', cx.toFixed(2));
+          tspan.setAttribute('y', (cy + fontSize * 0.35).toFixed(2));
+          tspan.setAttribute('text-anchor', 'middle');
+          tspan.setAttribute('font-size', fontSize.toFixed(2));
+          tspan.setAttribute('fill', cs.color || '#000');
+          if (parseInt(cs.fontWeight, 10) >= 600) tspan.setAttribute('font-weight', 'bold');
+          tspan.textContent = content;
+          text.appendChild(tspan);
+          added++;
+        }
+        if (added > 0) fo.parentNode.replaceChild(text, fo);
+      });
+
+      return new XMLSerializer().serializeToString(svgEl);
+    } catch (err) {
+      console.warn('[mermaid-export] foreignObject conversion failed, keeping original:', err);
+      return svg;
+    } finally {
+      host.remove();
+    }
+  }
+
+  async function renderMermaidSourceToPng(source, fallbackConfig) {
+    const id = 'mermaid-export-' + Math.random().toString(36).slice(2);
+    let result;
+    try {
+      result = await window.mermaid.render(id, source);
+    } catch (err) {
+      if (fallbackConfig) {
+        console.warn('[mermaid-export] retrying with fallback config for:', source.split('\n')[0]);
+        window.mermaid.initialize(fallbackConfig);
+        result = await window.mermaid.render(id + '-fb', source);
+      } else {
+        throw err;
+      }
+    }
+    const rawSvg = typeof result === 'string' ? result : result.svg;
+
+    const rawIntrinsic = parseSvgIntrinsicSize(rawSvg);
+    const textSvg = convertForeignObjectsToText(rawSvg);
+    const svg = await tightenSvgViewBox(textSvg);
+    const tightIntrinsic = parseSvgIntrinsicSize(svg);
+
+    const intrinsic = tightIntrinsic;
+    let width = intrinsic.width || 0;
+    let height = intrinsic.height || 0;
+
+    if (!width || !height) {
+      throw new Error('Cannot determine mermaid diagram size');
+    }
+
+    // Compute a Word-friendly display size.
+    // The default DOCX page is A4 with 1701-twips (≈3 cm) side margins, leaving
+    // about 567 CSS pixels of body width. We cap the image just under that width
+    // so it never crosses the margins while using as much of the page as possible
+    // (keeps labels readable). Tall diagrams are also capped in display height.
+    const MAX_WIDTH_PX = 560;          // fit within A4 body width (~567 px)
+    const MIN_WIDTH_PX = 1;            // do not artificially enlarge tiny diagrams
+    const MAX_HEIGHT_PX = 640;         // avoid overly tall diagrams
+    const MAX_UPSCALE = 1;             // never scale up beyond intrinsic size
+
+    const scaleDown = Math.min(1, MAX_WIDTH_PX / width);
+    const scaleUp = Math.max(1, MIN_WIDTH_PX / width);
+    const scaleHeight = MAX_HEIGHT_PX / height;
+    const scale = Math.min(scaleDown, scaleUp, MAX_UPSCALE, scaleHeight);
+
+    const logicalWidth = Math.max(1, Math.round(width * scale));
+    const logicalHeight = Math.max(1, Math.round(height * scale));
+
+    const preview = source.split('\n').slice(0, 2).join(' ').substring(0, 80);
+    const debugEntry = {
+      preview,
+      rawSize: { width: rawIntrinsic.width, height: rawIntrinsic.height },
+      tightSize: { width: tightIntrinsic.width, height: tightIntrinsic.height },
+      displaySize: { width: logicalWidth, height: logicalHeight },
+      rawSvg,
+      svg,
+    };
+    window.__mermaidDebug = window.__mermaidDebug || [];
+    window.__mermaidDebug.push(debugEntry);
+    console.log('[mermaid-export]', debugEntry);
+
+    return { svg, width: logicalWidth, height: logicalHeight };
+  }
+
   async function exportWord() {
     const tab = state.tabs[state.activeTab];
     if (!tab || !tab.content) {
@@ -3764,9 +4070,118 @@ window.agentBridge = {
 
     try {
       showToast('正在生成 Word 文档...');
+
+      const mermaidBlocks = findMermaidBlocks(tab.content);
+      const mermaidImages = {};
+      if (mermaidBlocks.length > 0) {
+        showToast(`正在渲染 ${mermaidBlocks.length} 个 Mermaid 图表...`);
+
+        // Export with the light theme so text is dark on Word's white background.
+        // Restore the editor theme afterwards so the live preview is not affected.
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        const savedTheme = isDark ? CONFIG.mermaidTheme.dark : CONFIG.mermaidTheme.light;
+
+        const exportThemeCSS = `
+          .node rect, .node circle, .node polygon, .node path { stroke-width: 3px; }
+          .label tspan, .label text { font-size: 12px; }
+          .nodeLabel { font-size: 12px; }
+          .edgeLabel, .edgeLabel tspan, .edgeLabel text { font-size: 11px; }
+          .actor, .actor-man { font-size: 22px; }
+          .messageText { font-size: 20px; }
+          .classTitle { font-size: 15px; }
+          .entityLabel { font-size: 15px; }
+          .relationshipLabel { font-size: 13px; }
+          .pieTitleText { font-size: 18px; }
+          .slice { font-size: 15px; }
+          .legend text { font-size: 13px; }
+        `;
+        const compactConfig = {
+          startOnLoad: false,
+          theme: 'default',
+          securityLevel: 'loose',
+          htmlLabels: false,
+          themeCSS: exportThemeCSS,
+          themeVariables: { fontSize: '12px' },
+          flowchart: { htmlLabels: false, useMaxWidth: false, padding: 8, nodeSpacing: 30, rankSpacing: 35 },
+          sequence: { useMaxWidth: false, diagramMarginX: 10, diagramMarginY: 5, actorMargin: 12, boxMargin: 4, messageMargin: 10 },
+          class: { htmlLabels: false, useMaxWidth: false, padding: 8 },
+          state: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          er: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          journey: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          gantt: { useMaxWidth: false, padding: 6 },
+          pie: { useMaxWidth: false, padding: 2 },
+          requirement: { useMaxWidth: false, padding: 6 },
+          gitgraph: { useMaxWidth: false, padding: 6 },
+          mindmap: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          timeline: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          c4context: { htmlLabels: false, useMaxWidth: false, padding: 6 },
+          block: { htmlLabels: false, useMaxWidth: false, padding: 6 }
+        };
+        const safeClassConfig = {
+          startOnLoad: false,
+          theme: 'default',
+          securityLevel: 'loose',
+          htmlLabels: false,
+          themeCSS: '',
+          class: { htmlLabels: false, useMaxWidth: false, padding: 15 },
+          flowchart: { htmlLabels: false, useMaxWidth: false }
+        };
+
+        try {
+          await Promise.all(
+            mermaidBlocks.map(async (source) => {
+              try {
+                // Re-initialize before each block so a per-block fallback cannot
+                // leak its config into the next diagram.
+                if (typeof window.mermaid !== 'undefined' && window.mermaid.initialize) {
+                  window.mermaid.initialize(compactConfig);
+                }
+                const fallback = /^\s*classDiagram\b/m.test(source) ? safeClassConfig : undefined;
+                const { svg, width, height } = await renderMermaidSourceToPng(source, fallback);
+                mermaidImages[source] = { svg, width, height };
+              } catch (err) {
+                const preview = source.split('\n').slice(0, 2).join(' ').substring(0, 80);
+                console.error('Mermaid render failed for:', preview, err);
+                showError('Mermaid 渲染失败，将导出源码: ' + (err.message || err));
+              }
+            })
+          );
+
+          const renderedKeys = Object.keys(mermaidImages);
+          console.log('[export-word] blocks found:', mermaidBlocks.length, 'rendered:', renderedKeys.length);
+          console.log('[export-word] intermediate data available in window.__mermaidDebug');
+        } finally {
+          if (typeof window.mermaid !== 'undefined' && window.mermaid.initialize) {
+            window.mermaid.initialize({
+              startOnLoad: false,
+              theme: savedTheme,
+              securityLevel: 'loose',
+              htmlLabels: true,
+              themeCSS: '',
+              flowchart: { htmlLabels: true, useMaxWidth: true, padding: 8, nodeSpacing: 50, rankSpacing: 50 },
+              sequence: { useMaxWidth: true, diagramMarginX: 50, diagramMarginY: 10, actorMargin: 50, boxMargin: 10, messageMargin: 35 },
+              class: { htmlLabels: true, useMaxWidth: true, padding: 5 },
+              state: { htmlLabels: true, useMaxWidth: true, padding: 5 },
+              er: { htmlLabels: true, useMaxWidth: true, padding: 20 },
+              journey: { htmlLabels: true, useMaxWidth: true, padding: 8 },
+              gantt: { useMaxWidth: true, padding: 8 },
+              pie: { useMaxWidth: true, padding: 10 },
+              requirement: { useMaxWidth: true, padding: 10 },
+              gitgraph: { useMaxWidth: true, padding: 10 },
+              mindmap: { useMaxWidth: true, padding: 10 },
+              timeline: { useMaxWidth: true, padding: 10 },
+              c4context: { useMaxWidth: true, padding: 10 },
+              block: { useMaxWidth: true, padding: 10 }
+            });
+          }
+        }
+      }
+
       const result = await invoke('export_word', {
         markdown: tab.content,
-        fileName: tab.name
+        fileName: tab.name,
+        filePath: tab.path || '',
+        mermaidImages
       });
       showToast('Word 导出成功: ' + result);
     } catch (err) {
@@ -4507,15 +4922,8 @@ window.agentBridge = {
   }
 
   function checkPlatform() {
-    if (typeof __TAURI__ !== 'undefined') {
-      __TAURI__.core.invoke('get_platform')
-        .then(platform => {
-          if (platform === 'macos' && elements.exportWordBtn) {
-            elements.exportWordBtn.style.display = 'none';
-          }
-        })
-        .catch(err => console.warn('Failed to get platform:', err));
-    }
+    // Platform-specific UI adjustments go here.
+    // Word export is now available on all platforms via Rust native converter.
   }
 
   // ============================================

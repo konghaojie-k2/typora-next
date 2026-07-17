@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::process::{Command, Stdio};
-use tauri::Manager;
 use std::sync::{Arc, Mutex};
+use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 
 use crate::{get_config, AppConfig, AppState};
@@ -84,8 +84,12 @@ fn kill_process_by_pid(pid: u32) {
 }
 
 #[cfg(not(windows))]
-fn kill_process_by_pid(_pid: u32) {
-    // Unix kill not implemented for this prototype
+fn kill_process_by_pid(pid: u32) {
+    let _ = std::process::Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
 }
 
 /// Resolve the directory where agent-bridge.js should write its logs.
@@ -125,32 +129,26 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
         // MSI install: resources/ subdirectory (standard Tauri resource path)
         exe_parent("resources/agent-bridge.js"),
         // exe 父目录的父目录 (target/release/ -> target/)
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                let parent = p.parent()?;
-                let grandparent = parent.parent()?;
-                Some(grandparent.join("agent-bridge.js"))
-            }),
+        std::env::current_exe().ok().and_then(|p| {
+            let parent = p.parent()?;
+            let grandparent = parent.parent()?;
+            Some(grandparent.join("agent-bridge.js"))
+        }),
         // exe 父目录的父目录的父目录 (target/release/ -> src-tauri/)
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                let parent = p.parent()?;
-                let grandparent = parent.parent()?;
-                let great_grandparent = grandparent.parent()?;
-                Some(great_grandparent.join("agent-bridge.js"))
-            }),
+        std::env::current_exe().ok().and_then(|p| {
+            let parent = p.parent()?;
+            let grandparent = parent.parent()?;
+            let great_grandparent = grandparent.parent()?;
+            Some(great_grandparent.join("agent-bridge.js"))
+        }),
         // exe 父目录的父目录的父目录的父目录 (target/release/ -> worktree root)
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                let parent = p.parent()?;
-                let grandparent = parent.parent()?;
-                let great_grandparent = grandparent.parent()?;
-                let great_great_grandparent = great_grandparent.parent()?;
-                Some(great_great_grandparent.join("agent-bridge.js"))
-            }),
+        std::env::current_exe().ok().and_then(|p| {
+            let parent = p.parent()?;
+            let grandparent = parent.parent()?;
+            let great_grandparent = grandparent.parent()?;
+            let great_great_grandparent = great_grandparent.parent()?;
+            Some(great_great_grandparent.join("agent-bridge.js"))
+        }),
         // 当前工作目录
         Some(std::path::PathBuf::from("agent-bridge.js")),
         Some(std::path::PathBuf::from("../agent-bridge.js")),
@@ -192,14 +190,23 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
 
     let candidates = [
         exe_dir.join("skills"),
-        exe_dir.join("_up_").join("skills"),       // Tauri resources (Windows MSI)
-        exe_dir.join("resources").join("skills"),  // Tauri resources alt layout
-        exe_dir.join("..").join("skills"),       // target/release/../skills = target/skills
-        exe_dir.join("..").join("..").join("skills"),  // target/release/../../skills = project-root/skills
+        exe_dir.join("_up_").join("skills"), // Tauri resources (Windows MSI)
+        exe_dir.join("resources").join("skills"), // Tauri resources alt layout
+        exe_dir.join("..").join("skills"),   // target/release/../skills = target/skills
+        exe_dir.join("..").join("..").join("skills"), // target/release/../../skills = project-root/skills
         exe_dir.join("..").join("src-tauri").join("skills"), // target/release/ -> target/src-tauri/skills
-        exe_dir.join("..").join("..").join("src-tauri").join("skills"), // target/release/ -> project-root/src-tauri/skills
-        exe_dir.join("..").join("..").join("..").join("src-tauri").join("skills"), // worktree root/src-tauri/skills
-        exe_dir.join("..").join("..").join("..").join("skills"),  // project root/skills (fallback)
+        exe_dir
+            .join("..")
+            .join("..")
+            .join("src-tauri")
+            .join("skills"), // target/release/ -> project-root/src-tauri/skills
+        exe_dir
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("src-tauri")
+            .join("skills"), // worktree root/src-tauri/skills
+        exe_dir.join("..").join("..").join("..").join("skills"), // project root/skills (fallback)
     ];
 
     for c in &candidates {
@@ -230,7 +237,8 @@ fn check_sdk_quick() -> Result<bool, String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let result = cmd.status()
+    let result = cmd
+        .status()
         .map_err(|e| format!("Failed to run node: {}", e))?;
     Ok(result.success())
 }
@@ -241,7 +249,9 @@ fn check_sdk_quick() -> Result<bool, String> {
 /// `SKILL.md` — we mirror that layout under `{project}/.claude/skills/`.
 pub fn copy_bundled_skills_to_project(project_path: &str) -> Result<(), String> {
     let src_dir = get_bundled_skills_dir()?;
-    let dst_dir = std::path::PathBuf::from(project_path).join(".claude").join("skills");
+    let dst_dir = std::path::PathBuf::from(project_path)
+        .join(".claude")
+        .join("skills");
 
     std::fs::create_dir_all(&dst_dir)
         .map_err(|e| format!("Failed to create {}: {}", dst_dir.display(), e))?;
@@ -272,11 +282,15 @@ pub fn copy_bundled_skills_to_project(project_path: &str) -> Result<(), String> 
             if !src_file.is_file() {
                 continue;
             }
-            let dst_file = dst_skill_dir.join(
-                file_entry.file_name().to_string_lossy().to_string(),
-            );
-            std::fs::copy(&src_file, &dst_file)
-                .map_err(|e| format!("Failed to copy {} -> {}: {}", src_file.display(), dst_file.display(), e))?;
+            let dst_file = dst_skill_dir.join(file_entry.file_name().to_string_lossy().to_string());
+            std::fs::copy(&src_file, &dst_file).map_err(|e| {
+                format!(
+                    "Failed to copy {} -> {}: {}",
+                    src_file.display(),
+                    dst_file.display(),
+                    e
+                )
+            })?;
         }
     }
 
@@ -337,22 +351,31 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("Failed to spawn agent-bridge init: {}", e))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("Init stage failed (exit {:?}): {}", output.status.code(), stderr));
+        return Err(format!(
+            "Init stage failed (exit {:?}): {}",
+            output.status.code(),
+            stderr
+        ));
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     // Find the last line starting with '{' (the init result JSON)
-    let json_line = stdout.lines()
+    let json_line = stdout
+        .lines()
         .map(|l| l.trim())
         .filter(|l| l.starts_with('{') && l.ends_with('}'))
         .last()
         .ok_or_else(|| {
-            format!("No JSON in init output. Raw stdout: {}", &stdout[..stdout.len().min(200)])
+            format!(
+                "No JSON in init output. Raw stdout: {}",
+                &stdout[..stdout.len().min(200)]
+            )
         })?;
 
     let parsed: Value = serde_json::from_str(json_line)
@@ -409,7 +432,10 @@ async fn run_agent_bridge(
         .env("NODE_NO_WARNINGS", "1")
         // Tell agent-bridge.js where to write logs (MSI install → app_log_dir,
         // dev → script dir). Falls back to __dirname if unset.
-        .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir(&app_handle).to_string_lossy().to_string());
+        .env(
+            "TYPORA_NEXT_LOG_DIR",
+            _agent_log_dir(&app_handle).to_string_lossy().to_string(),
+        );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
     if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
@@ -417,8 +443,12 @@ async fn run_agent_bridge(
     }
 
     // Redirect stderr to a debug file
-    let stderr_log = std::path::PathBuf::from(&bridge_path).parent().unwrap_or(std::path::Path::new(".")).join("agent-stderr.log");
-    let stderr_file = std::fs::File::create(&stderr_log).map_err(|e| format!("Failed to create stderr log: {}", e))?;
+    let stderr_log = std::path::PathBuf::from(&bridge_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("agent-stderr.log");
+    let stderr_file = std::fs::File::create(&stderr_log)
+        .map_err(|e| format!("Failed to create stderr log: {}", e))?;
     cmd.stderr(stderr_file);
 
     #[cfg(windows)]
@@ -443,14 +473,24 @@ async fn run_agent_bridge(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
 
     // Stream JSON lines to frontend
-    let debug_log = std::path::PathBuf::from(&bridge_path).parent().unwrap_or(std::path::Path::new(".")).join("rust-debug.log");
+    let debug_log = std::path::PathBuf::from(&bridge_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("rust-debug.log");
     let log_msg = |msg: &str| {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&debug_log) {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&debug_log)
+        {
             use std::io::Write;
             let _ = writeln!(f, "{}", msg);
         }
     };
-    log_msg(&format!("[start] stage={} bridge_path={:?}", stage, bridge_path));
+    log_msg(&format!(
+        "[start] stage={} bridge_path={:?}",
+        stage, bridge_path
+    ));
 
     // Streaming: read JSON lines from stdout one by one and emit each to
     // the frontend immediately (not batched). This lets the user see
@@ -473,14 +513,21 @@ async fn run_agent_bridge(
                 // Parse as generic JSON and forward immediately
                 match serde_json::from_str::<Value>(&trimmed) {
                     Ok(event) => {
-                        let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("unknown");
+                        let event_type = event
+                            .get("type")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown");
                         log_msg(&format!("[emit] type={}", event_type));
                         if let Err(e) = app_handle.emit("agent-event", &event) {
                             log_msg(&format!("[emit-error] {}", e));
                         }
                     }
                     Err(e) => {
-                        log_msg(&format!("[parse-error] {} — raw: {}", e, &trimmed[..std::cmp::min(100, trimmed.len())]));
+                        log_msg(&format!(
+                            "[parse-error] {} — raw: {}",
+                            e,
+                            &trimmed[..std::cmp::min(100, trimmed.len())]
+                        ));
                     }
                 }
             }
@@ -494,7 +541,10 @@ async fn run_agent_bridge(
     log_msg(&format!("[total] {} lines", stdout_lines.len()));
 
     // Dump raw content to file for debugging
-    let dump_path = std::path::PathBuf::from(&bridge_path).parent().unwrap_or(std::path::Path::new(".")).join("stdout-dump.txt");
+    let dump_path = std::path::PathBuf::from(&bridge_path)
+        .parent()
+        .unwrap_or(std::path::Path::new("."))
+        .join("stdout-dump.txt");
     let _ = std::fs::write(&dump_path, stdout_lines.join("\n"));
 
     // Wait for process to finish
@@ -504,7 +554,10 @@ async fn run_agent_bridge(
     log_msg(&format!("[done] exit={:?}", status.code()));
 
     if !status.success() {
-        return Err(format!("Agent bridge exited with code: {:?}", status.code()));
+        return Err(format!(
+            "Agent bridge exited with code: {:?}",
+            status.code()
+        ));
     }
 
     Ok(())
@@ -523,7 +576,10 @@ pub async fn plan_course(
     app_handle: AppHandle,
     agent_process: State<'_, AgentProcess>,
 ) -> Result<(), String> {
-    eprintln!("[ai_agent] plan_course called: goal={}, level={}, hours={}", goal, level, hours);
+    eprintln!(
+        "[ai_agent] plan_course called: goal={}, level={}, hours={}",
+        goal, level, hours
+    );
     let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
     eprintln!("[ai_agent] Config loaded, spawning agent bridge...");
 
@@ -635,8 +691,13 @@ pub fn parse_plan_response(raw: &str) -> Result<Value, String> {
     };
 
     // Parse JSON
-    let mut outline: Value = serde_json::from_str(&cleaned)
-        .map_err(|e| format!("解析大纲 JSON 失败: {} — 原始响应: {}", e, &raw[..raw.len().min(200)]))?;
+    let mut outline: Value = serde_json::from_str(&cleaned).map_err(|e| {
+        format!(
+            "解析大纲 JSON 失败: {} — 原始响应: {}",
+            e,
+            &raw[..raw.len().min(200)]
+        )
+    })?;
 
     // Validate chapters
     let chapters = outline
@@ -677,7 +738,11 @@ pub fn parse_plan_response(raw: &str) -> Result<Value, String> {
 
     let total_duration: u32 = normalized
         .iter()
-        .map(|ch| ch.get("duration_minutes").and_then(|v| v.as_u64()).unwrap_or(0) as u32)
+        .map(|ch| {
+            ch.get("duration_minutes")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32
+        })
         .sum();
 
     outline["chapters"] = Value::Array(normalized);
@@ -690,8 +755,12 @@ pub fn parse_plan_response(raw: &str) -> Result<Value, String> {
         .map(|s| {
             !s.is_empty()
                 && s.len() <= 50
-                && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                && s.chars().next().map(|c| c.is_ascii_alphanumeric()).unwrap_or(false)
+                && s.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+                && s.chars()
+                    .next()
+                    .map(|c| c.is_ascii_alphanumeric())
+                    .unwrap_or(false)
         })
         .unwrap_or(false);
     if !slug_is_valid {
@@ -712,7 +781,12 @@ pub async fn plan_course_llm(
     hours: u32,
     app_handle: AppHandle,
 ) -> Result<Value, String> {
-    log::info!("[plan_llm] plan_course_llm START: goal_len={}, level={}, hours={}", goal.len(), level, hours);
+    log::info!(
+        "[plan_llm] plan_course_llm START: goal_len={}, level={}, hours={}",
+        goal.len(),
+        level,
+        hours
+    );
 
     // Get config
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
@@ -789,8 +863,15 @@ pub async fn plan_course_llm(
 
     log::info!(
         "[plan_llm] SUCCESS: chapters={}, total_duration={}",
-        outline.get("chapters").and_then(|v| v.as_array()).map(|a| a.len()).unwrap_or(0),
-        outline.get("total_duration").and_then(|v| v.as_u64()).unwrap_or(0)
+        outline
+            .get("chapters")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0),
+        outline
+            .get("total_duration")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
     );
     Ok(outline)
 }
@@ -827,8 +908,7 @@ pub async fn generate_chapters(
 
     let process: AgentProcess = (*agent_process).clone();
     tauri::async_runtime::spawn(async move {
-        match run_agent_bridge("generate", &config, args, app_handle.clone(), process).await
-        {
+        match run_agent_bridge("generate", &config, args, app_handle.clone(), process).await {
             Ok(()) => {
                 let _ = app_handle.emit(
                     "agent-event",
@@ -925,19 +1005,23 @@ More text"#;
     #[test]
     fn test_generate_filename() {
         assert_eq!(generate_filename(0, "注意力机制"), "00-注意力机制.md");
-        assert_eq!(generate_filename(5, "Self-Attention 详解！"), "05-Self-Attention-详解.md");
+        assert_eq!(
+            generate_filename(5, "Self-Attention 详解！"),
+            "05-Self-Attention-详解.md"
+        );
         assert_eq!(generate_filename(1, ""), "01-.md");
     }
 
     // Helper: extract JSON from text (mirrors agent-bridge logic)
     fn extract_json(text: &str) -> serde_json::Value {
-        let code_block = text.split("```json").nth(1)
+        let code_block = text
+            .split("```json")
+            .nth(1)
             .and_then(|s| s.split("```").next());
         if let Some(json_str) = code_block {
             return serde_json::from_str(json_str.trim()).expect("Valid JSON in code block");
         }
-        let raw_json = text.split('{').nth(1)
-            .map(|s| format!("{{{}}}", s));
+        let raw_json = text.split('{').nth(1).map(|s| format!("{{{}}}", s));
         if let Some(json_str) = raw_json {
             return serde_json::from_str(&json_str).expect("Valid raw JSON");
         }
@@ -946,7 +1030,10 @@ More text"#;
 
     fn generate_filename(index: usize, title: &str) -> String {
         let safe = title
-            .replace(|c: char| !c.is_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&c), "-")
+            .replace(
+                |c: char| !c.is_alphanumeric() && !('\u{4e00}'..='\u{9fff}').contains(&c),
+                "-",
+            )
             .replace("---", "-")
             .replace("--", "-")
             .trim_matches('-')
@@ -962,9 +1049,15 @@ More text"#;
     fn test_build_plan_prompt_includes_goal_level_hours() {
         let p = build_plan_prompt("学 Rust", "beginner", 3);
         assert!(p.contains("学 Rust"), "prompt should include goal");
-        assert!(p.contains("小白（零基础）"), "prompt should translate beginner to label");
+        assert!(
+            p.contains("小白（零基础）"),
+            "prompt should translate beginner to label"
+        );
         assert!(p.contains("3 小时"), "prompt should include hours");
-        assert!(p.contains("project_slug"), "prompt should describe the output schema");
+        assert!(
+            p.contains("project_slug"),
+            "prompt should describe the output schema"
+        );
     }
 
     #[test]
@@ -1014,7 +1107,11 @@ More text"#;
         let v = parse_plan_response(r#"{"chapters":[],"project_slug":"FooBar"}"#).unwrap();
         assert_eq!(v["project_slug"], "learning-project");
         // Slug too long
-        let v = parse_plan_response(&format!(r#"{{"chapters":[],"project_slug":"{}"}}"#, "a".repeat(60))).unwrap();
+        let v = parse_plan_response(&format!(
+            r#"{{"chapters":[],"project_slug":"{}"}}"#,
+            "a".repeat(60)
+        ))
+        .unwrap();
         assert_eq!(v["project_slug"], "learning-project");
         // Slug starts with hyphen
         let v = parse_plan_response(r#"{"chapters":[],"project_slug":"-bad"}"#).unwrap();
@@ -1027,7 +1124,10 @@ More text"#;
     #[test]
     fn test_parse_plan_response_rejects_missing_chapters() {
         let raw = r#"{"project_slug":"demo"}"#;
-        assert!(parse_plan_response(raw).is_err(), "should reject without chapters");
+        assert!(
+            parse_plan_response(raw).is_err(),
+            "should reject without chapters"
+        );
     }
 
     #[test]
@@ -1035,7 +1135,6 @@ More text"#;
         assert!(parse_plan_response("not json at all").is_err());
         assert!(parse_plan_response("```json\n{invalid}\n```").is_err());
     }
-
 }
 
 /// Abort the running agent process
@@ -1086,7 +1185,10 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         .env("NODE_NO_WARNINGS", "1")
         // Keep logs in app_log_dir so they don't leak into the user's cwd
         // (e.g. when the app is launched by double-clicking a .md file).
-        .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir(&app_handle).to_string_lossy().to_string());
+        .env(
+            "TYPORA_NEXT_LOG_DIR",
+            _agent_log_dir(&app_handle).to_string_lossy().to_string(),
+        );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
     if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
@@ -1100,13 +1202,19 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("Failed to spawn agent-bridge check: {}", e))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    log::info!("[ai_agent] check_agent_sdk exit={:?} stdout={} stderr={}", output.status.code(), stdout.trim(), stderr.trim());
+    log::info!(
+        "[ai_agent] check_agent_sdk exit={:?} stdout={} stderr={}",
+        output.status.code(),
+        stdout.trim(),
+        stderr.trim()
+    );
 
     if !output.status.success() {
         return Ok(serde_json::json!({
@@ -1116,7 +1224,8 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
     }
 
     // Parse the last non-empty JSON line from stdout (in case logs leak)
-    let last_json_line = stdout.lines()
+    let last_json_line = stdout
+        .lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty() && (l.starts_with('{') || l.starts_with('[')))
         .last()
@@ -1131,20 +1240,53 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
     }
 }
 
+/// Get the platform-appropriate directory for auto-installing the Agent SDK.
+fn agent_app_data_dir() -> Option<std::path::PathBuf> {
+    if cfg!(windows) {
+        let appdata = std::env::var("APPDATA").ok()?;
+        Some(
+            std::path::PathBuf::from(&appdata)
+                .join("TyporaNext")
+                .join("agent"),
+        )
+    } else if cfg!(target_os = "macos") {
+        let home = std::env::var("HOME").ok()?;
+        Some(
+            std::path::PathBuf::from(&home)
+                .join("Library")
+                .join("Application Support")
+                .join("com.typora-next.app")
+                .join("agent"),
+        )
+    } else {
+        // Linux / other Unix
+        let home = std::env::var("HOME").ok()?;
+        Some(
+            std::path::PathBuf::from(&home)
+                .join(".local")
+                .join("share")
+                .join("typora-next")
+                .join("agent"),
+        )
+    }
+}
+
 /// Resolve the NODE_PATH that makes `@anthropic-ai/claude-agent-sdk` available.
 ///
 /// Strategy:
 /// 1. Dev: node_modules next to agent-bridge.js
 /// 2. Global: `npm root -g` (npm 5+ prefix; node's `module.globalPaths` no longer used)
-/// 3. Auto-install: `npm install` to `%APPDATA%/TyporaNext/agent/`
+/// 3. Auto-install: `npm install` to platform app data directory
 ///
 /// Returns the directory to set as NODE_PATH, or None.
 fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
     // Helper: check if SDK exists in a given directory (which should contain node_modules/)
     let has_sdk = |dir: &std::path::Path| -> bool {
         let checks = [
-            dir.join("node_modules").join("@anthropic-ai").join("claude-agent-sdk"),
-            dir.join("@anthropic-ai").join("claude-agent-sdk"),  // dir is already node_modules
+            dir.join("node_modules")
+                .join("@anthropic-ai")
+                .join("claude-agent-sdk"),
+            dir.join("@anthropic-ai").join("claude-agent-sdk"), // dir is already node_modules
         ];
         checks.iter().any(|p| p.exists())
     };
@@ -1153,46 +1295,60 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
     if let Some(parent) = bridge_path.parent() {
         if has_sdk(parent) {
             let nm = parent.join("node_modules");
-            let node_path = if nm.join("@anthropic-ai").join("claude-agent-sdk").exists() { nm } else { parent.to_path_buf() };
+            let node_path = if nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+                nm
+            } else {
+                parent.to_path_buf()
+            };
             log::info!("[agent_path] found local SDK at {:?}", node_path);
             return Some(node_path);
         }
     }
 
     // 2. Find npm's global node_modules (npm 5+ prefix, not node's compiled-in globalPaths).
-    //    `node -e "module.globalPaths"` returns Node's own hard-coded dirs
-    //    (C:\Users\<u>\.node_modules etc.), which npm 5+ no longer uses.
-    //    Use `npm root -g` instead — it follows npm's own prefix resolution
-    //    (env / npmrc), which is where `npm install -g` actually places packages.
-    //    Rust's `Command::new("npm")` won't resolve npm's wrapper scripts on Windows;
-    //    spawn through cmd so the shell can find npm.cmd / npm.ps1.
-    let mut npm_cmd = std::process::Command::new("cmd");
-    npm_cmd.args(["/C", "npm root -g"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        npm_cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-    if let Ok(output) = npm_cmd.output()
-    {
-        let path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-        if path.join("@anthropic-ai").join("claude-agent-sdk").exists() {
-            log::info!("[agent_path] found global SDK via npm root -g at {:?}", path);
-            return Some(path);
+    //    Use `npm root -g` — it follows npm's own prefix resolution.
+    //    On Windows, spawn through cmd so the shell can find npm.cmd / npm.ps1.
+    let npm_root_global = |_path: &mut std::path::PathBuf| -> Option<std::path::PathBuf> {
+        let mut npm_cmd = if cfg!(windows) {
+            let mut c = std::process::Command::new("cmd");
+            c.args(["/C", "npm root -g"]);
+            c
+        } else {
+            let mut c = std::process::Command::new("npm");
+            c.args(["root", "-g"]);
+            c
+        };
+        npm_cmd
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            npm_cmd.creation_flags(CREATE_NO_WINDOW);
         }
+        if let Ok(output) = npm_cmd.output() {
+            let p = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+            if p.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+                log::info!("[agent_path] found global SDK via npm root -g at {:?}", p);
+                return Some(p);
+            }
+        }
+        None
+    };
+    if let Some(p) = npm_root_global(&mut std::path::PathBuf::new()) {
+        return Some(p);
     }
 
-    // 3. Auto-install to AppData
-    log::info!("[agent_path] SDK not found, installing to AppData...");
-    let appdata = std::env::var("APPDATA").ok()?;
-    let target_dir = std::path::PathBuf::from(&appdata).join("TyporaNext").join("agent");
+    // 3. Auto-install to platform-appropriate app data directory
+    log::info!("[agent_path] SDK not found, installing...");
+    let target_dir = agent_app_data_dir()?;
     std::fs::create_dir_all(&target_dir).ok()?;
 
     // Copy agent-bridge.js
-    let bridge_name = bridge_path.file_name().unwrap_or(std::ffi::OsStr::new("agent-bridge.js"));
+    let bridge_name = bridge_path
+        .file_name()
+        .unwrap_or(std::ffi::OsStr::new("agent-bridge.js"));
     let dest_bridge = target_dir.join(bridge_name);
     if !dest_bridge.exists() {
         if let Err(e) = std::fs::copy(bridge_path, &dest_bridge) {
@@ -1213,11 +1369,23 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
 
     // Run npm install if SDK still missing
     let target_nm = target_dir.join("node_modules");
-    if !target_nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+    if !target_nm
+        .join("@anthropic-ai")
+        .join("claude-agent-sdk")
+        .exists()
+    {
         log::info!("[agent_path] running npm install in {:?}", target_dir);
         let install = || -> Option<()> {
-            let mut install_cmd = std::process::Command::new("cmd");
-            install_cmd.args(["/C", "npm install --only=production --no-audit --no-fund"])
+            let mut install_cmd = if cfg!(windows) {
+                let mut c = std::process::Command::new("cmd");
+                c.args(["/C", "npm install --only=production --no-audit --no-fund"]);
+                c
+            } else {
+                let mut c = std::process::Command::new("npm");
+                c.args(["install", "--only=production", "--no-audit", "--no-fund"]);
+                c
+            };
+            install_cmd
                 .current_dir(&target_dir)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
@@ -1237,7 +1405,11 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
         install();
     }
 
-    if target_nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+    if target_nm
+        .join("@anthropic-ai")
+        .join("claude-agent-sdk")
+        .exists()
+    {
         log::info!("[agent_path] installed SDK to {:?}", target_nm);
         Some(target_nm)
     } else {
@@ -1257,10 +1429,10 @@ use std::collections::HashMap;
 pub struct QuizQuestion {
     pub id: String,
     #[serde(rename = "qtype")]
-    pub qtype: String,           // "single" | "multiple" | "short"
+    pub qtype: String, // "single" | "multiple" | "short"
     pub question: String,
     pub options: Vec<QuizOption>,
-    pub correct: Value,          // String for single, Vec<String> for multiple, null for short
+    pub correct: Value, // String for single, Vec<String> for multiple, null for short
     #[serde(default)]
     pub weak_concepts: Vec<String>,
 }
@@ -1283,7 +1455,7 @@ pub struct QuizOption {
 /// Quiz evaluation result
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QuizResult {
-    pub rating: String,          // "mastered" | "learning" | "struggling"
+    pub rating: String, // "mastered" | "learning" | "struggling"
     pub score: f32,
     pub weak_concepts: Vec<String>,
     pub suggestions: Vec<String>,
@@ -1300,12 +1472,27 @@ pub fn build_extra_question(idx: usize, concept: &str, explanation: &str) -> Qui
     QuizQuestion {
         id: format!("extra_{}", idx + 1),
         qtype: "single".to_string(),
-        question: format!("你在本章中询问过「{}」的含义。以下哪项描述最准确？", concept),
+        question: format!(
+            "你在本章中询问过「{}」的含义。以下哪项描述最准确？",
+            concept
+        ),
         options: vec![
-            QuizOption { label: "A".to_string(), text: summary },
-            QuizOption { label: "B".to_string(), text: "这是一种数据压缩算法".to_string() },
-            QuizOption { label: "C".to_string(), text: "这是数据库查询优化技术".to_string() },
-            QuizOption { label: "D".to_string(), text: "这是前端 UI 渲染框架".to_string() },
+            QuizOption {
+                label: "A".to_string(),
+                text: summary,
+            },
+            QuizOption {
+                label: "B".to_string(),
+                text: "这是一种数据压缩算法".to_string(),
+            },
+            QuizOption {
+                label: "C".to_string(),
+                text: "这是数据库查询优化技术".to_string(),
+            },
+            QuizOption {
+                label: "D".to_string(),
+                text: "这是前端 UI 渲染框架".to_string(),
+            },
         ],
         correct: serde_json::Value::String("A".to_string()),
         weak_concepts: vec![concept.to_string()],
@@ -1331,9 +1518,8 @@ fn repair_json_quotes(raw: &str) -> String {
             let prev_non_ascii = i > 0 && b[i - 1] >= 0x80;
             let next_non_ascii = i + 1 < len && b[i + 1] >= 0x80;
             // Also catch `"？` where `？` is CJK punctuation (EF BC 9F)
-            let next_is_cjk_punct = i + 3 < len
-                && b[i + 1] == 0xef && b[i + 2] == 0xbc
-                && prev_non_ascii;
+            let next_is_cjk_punct =
+                i + 3 < len && b[i + 1] == 0xef && b[i + 2] == 0xbc && prev_non_ascii;
             if (prev_non_ascii && next_non_ascii) || next_is_cjk_punct {
                 result.push(b'\\');
             }
@@ -1360,7 +1546,10 @@ pub async fn generate_chapter_quiz(
     // Normalize path separators for Windows
     let chapter_file_norm = chapter_file.replace('/', "\\");
     let quiz_path = if chapter_file_norm.ends_with(".md") {
-        format!("{}.quiz.json", &chapter_file_norm[..chapter_file_norm.len() - 3])
+        format!(
+            "{}.quiz.json",
+            &chapter_file_norm[..chapter_file_norm.len() - 3]
+        )
     } else {
         format!("{}.quiz.json", chapter_file_norm)
     };
@@ -1371,7 +1560,8 @@ pub async fn generate_chapter_quiz(
     if let Some(p) = parent {
         match std::fs::read_dir(p) {
             Ok(entries) => {
-                let files: Vec<String> = entries.filter_map(|e| e.ok())
+                let files: Vec<String> = entries
+                    .filter_map(|e| e.ok())
                     .map(|e| e.file_name().to_string_lossy().to_string())
                     .collect();
                 log::info!("[Sprint3] files in dir {:?}: {:?}", p, files);
@@ -1380,8 +1570,12 @@ pub async fn generate_chapter_quiz(
         }
     }
 
-    let quiz_content = std::fs::read_to_string(&quiz_path)
-        .map_err(|e| format!("找不到测验文件 '{}': {}。请先生成 quiz.json 或检查文件路径。", quiz_path, e))?;
+    let quiz_content = std::fs::read_to_string(&quiz_path).map_err(|e| {
+        format!(
+            "找不到测验文件 '{}': {}。请先生成 quiz.json 或检查文件路径。",
+            quiz_path, e
+        )
+    })?;
 
     // Attempt to parse — if the agent wrote bare ASCII `"` inside string values
     // (e.g. `"...被称为"破坏过程"？"` instead of `"...被称为\"破坏过程\"？"`),
@@ -1462,20 +1656,37 @@ pub async fn generate_chapter_quiz(
             let basename_str = basename.to_string_lossy().to_string();
             // Try project_path directly, then parent dir (in case baseDir is chapters/ subdir)
             let start_dir = std::path::PathBuf::from(proj);
-            let mut exp_path = start_dir.join(".learning").join("explanations").join(format!("{}.json", basename_str));
+            let mut exp_path = start_dir
+                .join(".learning")
+                .join("explanations")
+                .join(format!("{}.json", basename_str));
             if !exp_path.exists() {
                 if let Some(parent) = start_dir.parent() {
-                    exp_path = parent.join(".learning").join("explanations").join(format!("{}.json", basename_str));
+                    exp_path = parent
+                        .join(".learning")
+                        .join("explanations")
+                        .join(format!("{}.json", basename_str));
                 }
             }
-            log::info!("[Sprint6] checking explanations for extra quiz: {:?} exists={}", exp_path, exp_path.exists());
+            log::info!(
+                "[Sprint6] checking explanations for extra quiz: {:?} exists={}",
+                exp_path,
+                exp_path.exists()
+            );
             if exp_path.exists() {
                 match std::fs::read_to_string(&exp_path) {
                     Ok(exp_content) => {
-                        match serde_json::from_str::<crate::explanation_persistence::ChapterExplanations>(&exp_content) {
+                        match serde_json::from_str::<
+                            crate::explanation_persistence::ChapterExplanations,
+                        >(&exp_content)
+                        {
                             Ok(exp_data) => {
                                 let max_extra = std::cmp::min(3, exp_data.conversations.len());
-                                log::info!("[Sprint6] found {} conversations, max_extra={}", exp_data.conversations.len(), max_extra);
+                                log::info!(
+                                    "[Sprint6] found {} conversations, max_extra={}",
+                                    exp_data.conversations.len(),
+                                    max_extra
+                                );
                                 let extras: Vec<(String, String)> = exp_data.conversations
                                     .iter()
                                     .filter_map(|c| {
@@ -1499,21 +1710,32 @@ pub async fn generate_chapter_quiz(
                                     })
                                     .take(max_extra)
                                     .collect();
-                                log::info!("[Sprint6] selected {} extras from conversations", extras.len());
+                                log::info!(
+                                    "[Sprint6] selected {} extras from conversations",
+                                    extras.len()
+                                );
                                 for (idx, (concept, explanation)) in extras.iter().enumerate() {
                                     let q = build_extra_question(idx, concept, explanation);
                                     extra_questions.push(q);
-                                    log::info!("[Sprint7] built extra question for concept: {}", concept);
+                                    log::info!(
+                                        "[Sprint7] built extra question for concept: {}",
+                                        concept
+                                    );
                                 }
                             }
-                            Err(e) => log::warn!("[Sprint6] failed to parse explanations json: {}", e),
+                            Err(e) => {
+                                log::warn!("[Sprint6] failed to parse explanations json: {}", e)
+                            }
                         }
                     }
                     Err(e) => log::warn!("[Sprint6] failed to read explanations file: {}", e),
                 }
             }
         } else {
-            log::warn!("[Sprint6] could not extract basename from chapter_file: {}", chapter_file);
+            log::warn!(
+                "[Sprint6] could not extract basename from chapter_file: {}",
+                chapter_file
+            );
         }
     } else {
         log::info!("[Sprint6] project_path is empty or None, skipping extra questions");
@@ -1565,7 +1787,8 @@ pub async fn evaluate_quiz(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
 
     if !output.status.success() {
@@ -1580,8 +1803,8 @@ pub async fn evaluate_quiz(
 
     // Validate rating
     match result.rating.as_str() {
-        "mastered" | "learning" | "struggling" => {},
-        _ => return Err(format!("Invalid rating: {}", result.rating))
+        "mastered" | "learning" | "struggling" => {}
+        _ => return Err(format!("Invalid rating: {}", result.rating)),
     }
 
     Ok(result)
@@ -1606,7 +1829,11 @@ pub struct ExplainV2Response {
 
 /// Build LLM prompt for explain_selection
 /// Pure function — extracted for testability
-pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Option<&[QAItem]>) -> String {
+pub fn build_explain_prompt(
+    text: &str,
+    context: Option<&str>,
+    previous_qa: Option<&[QAItem]>,
+) -> String {
     let mut parts: Vec<String> = Vec::new();
 
     if let Some(ctx) = context {
@@ -1631,7 +1858,9 @@ pub fn build_explain_prompt(text: &str, context: Option<&str>, previous_qa: Opti
     parts.push("同时给出3-4个用户可能想追问的问题（作为JSON数组）。".to_string());
     parts.push(String::new());
     parts.push("返回格式（合法JSON）：".to_string());
-    parts.push("{\"explanation\": \"...\", \"suggested_questions\": [\"...\", \"...\"]}".to_string());
+    parts.push(
+        "{\"explanation\": \"...\", \"suggested_questions\": [\"...\", \"...\"]}".to_string(),
+    );
     parts.push(String::new());
 
     let truncated = if text.chars().count() > 197 {
@@ -1769,9 +1998,7 @@ pub async fn explain_selection(
     // Read session_id from .learning/agent-session.json so the agent shares
     // the project's session (memory of prior turns).  Fall back to None if
     // the file doesn't exist or is unreadable.
-    let session_id = project_path
-        .as_ref()
-        .and_then(|pp| read_session_id(pp));
+    let session_id = project_path.as_ref().and_then(|pp| read_session_id(pp));
 
     // Quick check: is Agent SDK available? If not, skip agent-bridge entirely
     // to avoid the ~500ms node cold start + hang risk.
@@ -1785,13 +2012,18 @@ pub async fn explain_selection(
             previous_qa.clone(),
             app_handle.clone(),
             session_id.clone(),
-        ).await {
+        )
+        .await
+        {
             Ok(result) => {
                 log::info!("[Sprint6] explain_selection via Agent SDK: ok");
                 return Ok(result);
             }
             Err(e) => {
-                log::info!("[Sprint6] explain_selection Agent failed, falling back to ureq: {}", e);
+                log::info!(
+                    "[Sprint6] explain_selection Agent failed, falling back to ureq: {}",
+                    e
+                );
             }
         }
     } else {
@@ -1800,19 +2032,22 @@ pub async fn explain_selection(
 
     // Fallback: ureq direct call (same as before)
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
-    let api_key = config.api_key
+    let api_key = config
+        .api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key，请在设置中配置")?;
 
     let provider = config.ai_provider.unwrap_or_default();
-    let base_url = config.ai_base_url
+    let base_url = config
+        .ai_base_url
         .filter(|u| !u.is_empty())
         .unwrap_or_else(|| match provider {
             crate::AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
             crate::AiProvider::Openai => "https://api.openai.com".to_string(),
         });
 
-    let model = config.model
+    let model = config
+        .model
         .filter(|m| !m.is_empty())
         .unwrap_or_else(|| match provider {
             crate::AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
@@ -1855,19 +2090,24 @@ pub async fn explain_selection(
         }
     };
 
-    let json: serde_json::Value = response.into_json()
+    let json: serde_json::Value = response
+        .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
     let raw_content = if is_anthropic {
         json["content"][0]["text"].as_str()
     } else {
         json["choices"][0]["message"]["content"].as_str()
-    }.ok_or("响应中没有内容")?;
+    }
+    .ok_or("响应中没有内容")?;
 
     let result = parse_explain_response(raw_content);
 
-    log::info!("[Sprint6] explain_selection SUCCESS: explanation_len={}, questions={}",
-        result.explanation.len(), result.suggested_questions.len());
+    log::info!(
+        "[Sprint6] explain_selection SUCCESS: explanation_len={}, questions={}",
+        result.explanation.len(),
+        result.suggested_questions.len()
+    );
     Ok(result)
 }
 
@@ -1883,13 +2123,18 @@ pub async fn explain_selection_agent(
     app_handle: tauri::AppHandle,
     session_id: Option<String>,
 ) -> Result<ExplainV2Response, String> {
-    log::info!("[Cornell] explain_selection_agent START: text_len={}, session_id={}",
-        text.len(), session_id.as_deref().unwrap_or("(none)"));
+    log::info!(
+        "[Cornell] explain_selection_agent START: text_len={}, session_id={}",
+        text.len(),
+        session_id.as_deref().unwrap_or("(none)")
+    );
 
     let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
 
-    let prev_qa_json: Vec<serde_json::Value> = previous_qa.unwrap_or_default().into_iter()
+    let prev_qa_json: Vec<serde_json::Value> = previous_qa
+        .unwrap_or_default()
+        .into_iter()
         .map(|qa| serde_json::json!({ "q": qa.q, "a": qa.a }))
         .collect();
 
@@ -1932,16 +2177,18 @@ pub async fn explain_selection_agent(
     }
 
     log::info!("[Cornell] explain-agent: spawning node process...");
-    let mut child = cmd.spawn()
-        .map_err(|e| {
-            log::error!("[Cornell] explain-agent: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
+    let mut child = cmd.spawn().map_err(|e| {
+        log::error!("[Cornell] explain-agent: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
 
-    let status = child.wait()
+    let status = child
+        .wait()
         .map_err(|e| format!("Failed to wait for agent-bridge: {}", e))?;
 
-    let stderr = child.stderr.take()
+    let stderr = child
+        .stderr
+        .take()
         .map(|mut s| {
             use std::io::Read;
             let mut buf = String::new();
@@ -1953,9 +2200,16 @@ pub async fn explain_selection_agent(
     // Agent wrote the result to disk — verify and read back
     if !output_file.exists() {
         let msg = if status.success() {
-            format!("Agent exited OK but did not write expected file: {:?}", output_file)
+            format!(
+                "Agent exited OK but did not write expected file: {:?}",
+                output_file
+            )
         } else {
-            format!("Agent explain failed (exit {:?}): {}", status.code().unwrap_or(-1), stderr.trim())
+            format!(
+                "Agent explain failed (exit {:?}): {}",
+                status.code().unwrap_or(-1),
+                stderr.trim()
+            )
         };
         log::error!("[Cornell] explain-agent: {}", msg);
         return Err(msg);
@@ -1967,12 +2221,21 @@ pub async fn explain_selection_agent(
 
     let result = parse_explain_response(&content);
     if result.explanation.is_empty() {
-        log::error!("[Cornell] explain-agent: parsed empty explanation. content: {}", &content[..std::cmp::min(200, content.len())]);
-        return Err(format!("Agent explain returned empty explanation. Raw: {}", &content[..std::cmp::min(200, content.len())]));
+        log::error!(
+            "[Cornell] explain-agent: parsed empty explanation. content: {}",
+            &content[..std::cmp::min(200, content.len())]
+        );
+        return Err(format!(
+            "Agent explain returned empty explanation. Raw: {}",
+            &content[..std::cmp::min(200, content.len())]
+        ));
     }
 
-    log::info!("[Cornell] explain-agent SUCCESS: expl_len={}, questions={}",
-        result.explanation.len(), result.suggested_questions.len());
+    log::info!(
+        "[Cornell] explain-agent SUCCESS: expl_len={}, questions={}",
+        result.explanation.len(),
+        result.suggested_questions.len()
+    );
     Ok(result)
 }
 
@@ -1986,7 +2249,11 @@ pub async fn adapt_subsequent_chapters(
     weak_concepts: Vec<String>,
     _agent_process: State<'_, AgentProcess>,
 ) -> Result<Value, String> {
-    log::info!("[Sprint3] adapt_subsequent: rating={}, weak={:?}", rating, weak_concepts);
+    log::info!(
+        "[Sprint3] adapt_subsequent: rating={}, weak={:?}",
+        rating,
+        weak_concepts
+    );
 
     if rating == "mastered" {
         // No adaptation needed for mastered chapters
@@ -2008,7 +2275,8 @@ pub async fn adapt_subsequent_chapters(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = cmd.output()
+    let output = cmd
+        .output()
         .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
 
     if !output.status.success() {
@@ -2076,7 +2344,8 @@ async fn spawn_generate_extra_quiz(
     qa_history: &[crate::explanation_persistence::ExplanationQAEntry],
     output_file: &std::path::Path,
 ) -> Result<(), String> {
-    let qa: Vec<serde_json::Value> = qa_history.iter()
+    let qa: Vec<serde_json::Value> = qa_history
+        .iter()
         .map(|qa| serde_json::json!({ "q": qa.q, "a": qa.a }))
         .collect();
     let concepts_array = vec![serde_json::json!({
@@ -2099,8 +2368,7 @@ async fn spawn_generate_extra_quiz(
     });
 
     if let Some(parent) = output_file.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("创建 extras 目录失败: {}", e))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建 extras 目录失败: {}", e))?;
     }
 
     let mut cmd = std::process::Command::new("node");
@@ -2117,11 +2385,15 @@ async fn spawn_generate_extra_quiz(
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
-    let status = child.wait()
+    let status = child
+        .wait()
         .map_err(|e| format!("Failed to wait for agent-bridge: {}", e))?;
-    let stderr = child.stderr.take()
+    let stderr = child
+        .stderr
+        .take()
         .map(|mut s| {
             use std::io::Read;
             let mut buf = String::new();
@@ -2132,9 +2404,16 @@ async fn spawn_generate_extra_quiz(
 
     if !output_file.exists() {
         return Err(if status.success() {
-            format!("Agent exited OK but did not write expected file: {:?}", output_file)
+            format!(
+                "Agent exited OK but did not write expected file: {:?}",
+                output_file
+            )
         } else {
-            format!("Agent 生成附加题失败 (exit {:?}): {}", status.code().unwrap_or(-1), stderr.trim())
+            format!(
+                "Agent 生成附加题失败 (exit {:?}): {}",
+                status.code().unwrap_or(-1),
+                stderr.trim()
+            )
         });
     }
     Ok(())
@@ -2154,7 +2433,8 @@ pub async fn ensure_extra_questions(
     };
 
     // One-time cleanup: remove the legacy single-file extras from the old model
-    let legacy_extras = crate::explanation_persistence::get_legacy_extras_file_path(proj, &chapter_file);
+    let legacy_extras =
+        crate::explanation_persistence::get_legacy_extras_file_path(proj, &chapter_file);
     if legacy_extras.exists() {
         let _ = std::fs::remove_file(&legacy_extras);
         log::info!("[Sprint7] removed legacy extras file {:?}", legacy_extras);
@@ -2167,9 +2447,9 @@ pub async fn ensure_extra_questions(
         // Fallback: try the parent dir's .learning
         let start = std::path::PathBuf::from(proj);
         if let Some(parent) = start.parent() {
-            if let Ok(data) = crate::explanation_persistence::load(
-                &parent.to_string_lossy(), &chapter_file
-            ) {
+            if let Ok(data) =
+                crate::explanation_persistence::load(&parent.to_string_lossy(), &chapter_file)
+            {
                 if !data.conversations.is_empty() {
                     exp_data = data;
                 }
@@ -2182,8 +2462,7 @@ pub async fn ensure_extra_questions(
 
     // Scan extras chapter dir to find existing cue_ids
     let extras_dir = crate::explanation_persistence::get_extras_chapter_dir(proj, &chapter_file);
-    std::fs::create_dir_all(&extras_dir)
-        .map_err(|e| format!("创建 extras 目录失败: {}", e))?;
+    std::fs::create_dir_all(&extras_dir).map_err(|e| format!("创建 extras 目录失败: {}", e))?;
 
     let existing_cue_ids: std::collections::HashSet<String> = std::fs::read_dir(&extras_dir)
         .map(|rd| {
@@ -2192,7 +2471,9 @@ pub async fn ensure_extra_questions(
                     let p = e.path();
                     if p.extension().and_then(|s| s.to_str()) == Some("json") {
                         p.file_stem().map(|s| s.to_string_lossy().to_string())
-                    } else { None }
+                    } else {
+                        None
+                    }
                 })
                 .collect()
         })
@@ -2209,15 +2490,24 @@ pub async fn ensure_extra_questions(
         if conv.selected_text.trim().is_empty() {
             continue;
         }
-        let output_file = crate::explanation_persistence::get_extra_cue_path(
-            proj, &chapter_file, &conv.id
-        );
+        let output_file =
+            crate::explanation_persistence::get_extra_cue_path(proj, &chapter_file, &conv.id);
         match spawn_generate_extra_quiz(
-            &bridge_path, proj, &config,
-            conv.selected_text.trim(), &conv.qa_history, &output_file,
-        ).await {
+            &bridge_path,
+            proj,
+            &config,
+            conv.selected_text.trim(),
+            &conv.qa_history,
+            &output_file,
+        )
+        .await
+        {
             Ok(()) => log::info!("[Sprint7] generated extras for cue {}", conv.id),
-            Err(e) => log::warn!("[Sprint7] failed to generate extras for cue {}: {}", conv.id, e),
+            Err(e) => log::warn!(
+                "[Sprint7] failed to generate extras for cue {}: {}",
+                conv.id,
+                e
+            ),
         }
     }
 
@@ -2255,15 +2545,15 @@ pub async fn load_extra_questions(
     }
 
     let mut all: Vec<QuizQuestion> = Vec::new();
-    let entries = std::fs::read_dir(&extras_dir)
-        .map_err(|e| format!("读取 extras 目录失败: {}", e))?;
+    let entries =
+        std::fs::read_dir(&extras_dir).map_err(|e| format!("读取 extras 目录失败: {}", e))?;
     for entry in entries.filter_map(|e| e.ok()) {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读取 extras 文件失败: {}", e))?;
+        let content =
+            std::fs::read_to_string(&path).map_err(|e| format!("读取 extras 文件失败: {}", e))?;
         if let Ok(questions) = serde_json::from_str::<Vec<QuizQuestion>>(&content) {
             all.extend(questions);
         }
@@ -2284,8 +2574,13 @@ pub async fn socratic_chat(
     app_handle: tauri::AppHandle,
     session_id: Option<String>,
 ) -> Result<crate::SocraticChatResponse, String> {
-    log::info!("[Sprint8b] socratic_chat START: project={}, concepts={:?}, has_answer={}, session_id={}",
-        project_path, concept_titles, user_answer.is_some(), session_id.as_deref().unwrap_or("(none)"));
+    log::info!(
+        "[Sprint8b] socratic_chat START: project={}, concepts={:?}, has_answer={}, session_id={}",
+        project_path,
+        concept_titles,
+        user_answer.is_some(),
+        session_id.as_deref().unwrap_or("(none)")
+    );
 
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
@@ -2323,14 +2618,17 @@ pub async fn socratic_chat(
     }
 
     log::info!("[Sprint8b] socratic_chat: spawning node process...");
-    let output = cmd.output()
-        .map_err(|e| {
-            log::error!("[Sprint8b] socratic_chat: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
+    let output = cmd.output().map_err(|e| {
+        log::error!("[Sprint8b] socratic_chat: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
 
-    log::info!("[Sprint8b] socratic_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
-        output.status.code(), output.stdout.len(), output.stderr.len());
+    log::info!(
+        "[Sprint8b] socratic_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
+        output.status.code(),
+        output.stdout.len(),
+        output.stderr.len()
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2352,12 +2650,22 @@ pub async fn socratic_chat(
         .filter(|l| !l.trim().is_empty())
         .find_map(|l| serde_json::from_str::<crate::SocraticChatResponse>(l.trim()).ok())
         .ok_or_else(|| {
-            log::error!("[Sprint8b] socratic_chat: no parseable result line — raw: {}", stdout.trim());
+            log::error!(
+                "[Sprint8b] socratic_chat: no parseable result line — raw: {}",
+                stdout.trim()
+            );
             let trimmed = stdout.trim();
-            format!("Failed to parse socratic response. Raw: {}", &trimmed[..std::cmp::min(200, trimmed.len())])
+            format!(
+                "Failed to parse socratic response. Raw: {}",
+                &trimmed[..std::cmp::min(200, trimmed.len())]
+            )
         })?;
 
-    log::info!("[Sprint8b] socratic_chat SUCCESS: content_len={}, done={}", result.content.len(), result.done);
+    log::info!(
+        "[Sprint8b] socratic_chat SUCCESS: content_len={}, done={}",
+        result.content.len(),
+        result.done
+    );
     Ok(result)
 }
 
@@ -2372,8 +2680,13 @@ pub async fn generate_review_content_agent(
     app_handle: tauri::AppHandle,
     session_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log::info!("[PB1] generate_review_content_agent START: project={}, chapter={}, concepts={}, weak={:?}",
-        project_path, chapter_file, concepts.len(), weak_concepts);
+    log::info!(
+        "[PB1] generate_review_content_agent START: project={}, chapter={}, concepts={}, weak={:?}",
+        project_path,
+        chapter_file,
+        concepts.len(),
+        weak_concepts
+    );
 
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
@@ -2409,11 +2722,10 @@ pub async fn generate_review_content_agent(
     }
 
     log::info!("[PB1] review-gen: spawning node process...");
-    let output = cmd.output()
-        .map_err(|e| {
-            log::error!("[PB1] review-gen: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
+    let output = cmd.output().map_err(|e| {
+        log::error!("[PB1] review-gen: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2432,14 +2744,31 @@ pub async fn generate_review_content_agent(
         .filter(|l| !l.trim().is_empty())
         .find_map(|l| {
             let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
-            if v.get("cards").is_some() { Some(v) } else { None }
+            if v.get("cards").is_some() {
+                Some(v)
+            } else {
+                None
+            }
         })
         .ok_or_else(|| {
-            log::error!("[PB1] review-gen: no parseable cards line — raw: {}", stdout.trim());
-            format!("Failed to parse review-gen response: no valid cards object. Raw: {}", &stdout.trim()[..std::cmp::min(200, stdout.trim().len())])
+            log::error!(
+                "[PB1] review-gen: no parseable cards line — raw: {}",
+                stdout.trim()
+            );
+            format!(
+                "Failed to parse review-gen response: no valid cards object. Raw: {}",
+                &stdout.trim()[..std::cmp::min(200, stdout.trim().len())]
+            )
         })?;
 
-    log::info!("[PB1] review-gen SUCCESS: card_count={}", result.get("cards").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0));
+    log::info!(
+        "[PB1] review-gen SUCCESS: card_count={}",
+        result
+            .get("cards")
+            .and_then(|c| c.as_object())
+            .map(|o| o.len())
+            .unwrap_or(0)
+    );
     Ok(result)
 }
 
@@ -2451,8 +2780,11 @@ pub async fn generate_review_content_batch_agent(
     app_handle: tauri::AppHandle,
     session_id: Option<String>,
 ) -> Result<serde_json::Value, String> {
-    log::info!("[PB1-Batch] generate_review_content_batch_agent START: project={}, concepts={}",
-        project_path, concepts.len());
+    log::info!(
+        "[PB1-Batch] generate_review_content_batch_agent START: project={}, concepts={}",
+        project_path,
+        concepts.len()
+    );
 
     let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
     let bridge_path = get_agent_bridge_path()?;
@@ -2486,15 +2818,17 @@ pub async fn generate_review_content_batch_agent(
     }
 
     log::info!("[PB1-Batch] review-gen-batch: spawning node process...");
-    let output = cmd.output()
-        .map_err(|e| {
-            log::error!("[PB1-Batch] review-gen-batch: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
+    let output = cmd.output().map_err(|e| {
+        log::error!("[PB1-Batch] review-gen-batch: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        log::error!("[PB1-Batch] review-gen-batch: agent failed: stderr={}", stderr);
+        log::error!(
+            "[PB1-Batch] review-gen-batch: agent failed: stderr={}",
+            stderr
+        );
         return Err(format!("Agent review generation failed: {}", stderr));
     }
 
@@ -2509,14 +2843,31 @@ pub async fn generate_review_content_batch_agent(
         .filter(|l| !l.trim().is_empty())
         .find_map(|l| {
             let v: serde_json::Value = serde_json::from_str(l.trim()).ok()?;
-            if v.get("cards").is_some() { Some(v) } else { None }
+            if v.get("cards").is_some() {
+                Some(v)
+            } else {
+                None
+            }
         })
         .ok_or_else(|| {
-            log::error!("[PB1-Batch] review-gen-batch: no parseable cards line — raw: {}", stdout.trim());
-            format!("Failed to parse review-gen-batch response: no valid cards object. Raw: {}", &stdout.trim()[..std::cmp::min(200, stdout.trim().len())])
+            log::error!(
+                "[PB1-Batch] review-gen-batch: no parseable cards line — raw: {}",
+                stdout.trim()
+            );
+            format!(
+                "Failed to parse review-gen-batch response: no valid cards object. Raw: {}",
+                &stdout.trim()[..std::cmp::min(200, stdout.trim().len())]
+            )
         })?;
 
-    log::info!("[PB1-Batch] review-gen-batch SUCCESS: card_count={}", result.get("cards").and_then(|c| c.as_object()).map(|o| o.len()).unwrap_or(0));
+    log::info!(
+        "[PB1-Batch] review-gen-batch SUCCESS: card_count={}",
+        result
+            .get("cards")
+            .and_then(|c| c.as_object())
+            .map(|o| o.len())
+            .unwrap_or(0)
+    );
     Ok(result)
 }
 
@@ -2554,7 +2905,10 @@ pub async fn explore_chat(
             "session_id": session_id,
         }
     });
-    log::info!("[Sprint9] explore_chat: payload_len={}", payload.to_string().len());
+    log::info!(
+        "[Sprint9] explore_chat: payload_len={}",
+        payload.to_string().len()
+    );
 
     let mut cmd = std::process::Command::new("node");
     cmd.arg(&bridge_path)
@@ -2571,14 +2925,17 @@ pub async fn explore_chat(
     }
 
     log::info!("[Sprint9] explore_chat: spawning node process...");
-    let output = cmd.output()
-        .map_err(|e| {
-            log::error!("[Sprint9] explore_chat: spawn failed: {}", e);
-            format!("Failed to spawn agent-bridge: {}", e)
-        })?;
+    let output = cmd.output().map_err(|e| {
+        log::error!("[Sprint9] explore_chat: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
 
-    log::info!("[Sprint9] explore_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
-        output.status.code(), output.stdout.len(), output.stderr.len());
+    log::info!(
+        "[Sprint9] explore_chat: exit_code={:?}, stdout_len={}, stderr_len={}",
+        output.status.code(),
+        output.stdout.len(),
+        output.stderr.len()
+    );
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -2593,7 +2950,10 @@ pub async fn explore_chat(
         return Err("Agent returned empty exploration response".to_string());
     }
 
-    log::info!("[Sprint9] explore_chat SUCCESS: response_len={}", stdout.len());
+    log::info!(
+        "[Sprint9] explore_chat SUCCESS: response_len={}",
+        stdout.len()
+    );
     Ok(stdout)
 }
 
@@ -2603,11 +2963,15 @@ pub async fn explore_chat(
 
 /// Resolve the cache directory and output file path for a paper reader guide.
 /// Pure function; used by `generate_paper_reader_guide` and its tests.
-pub fn resolve_paper_reader_guide_paths(paper_file: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
+pub fn resolve_paper_reader_guide_paths(
+    paper_file: &str,
+) -> Result<(std::path::PathBuf, std::path::PathBuf), String> {
     let paper_path = std::path::PathBuf::from(paper_file);
-    let paper_dir = paper_path.parent()
+    let paper_dir = paper_path
+        .parent()
         .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
-    let paper_stem = paper_path.file_stem()
+    let paper_stem = paper_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("paper");
     let guide_dir = paper_dir.join(".learning").join("paper-reader-guides");
@@ -2624,7 +2988,10 @@ pub async fn generate_paper_reader_guide(
     paper_file: String,
     app_handle: tauri::AppHandle,
 ) -> Result<serde_json::Value, String> {
-    log::info!("[Sprint10] generate_paper_reader_guide START: paper_file={}", paper_file);
+    log::info!(
+        "[Sprint10] generate_paper_reader_guide START: paper_file={}",
+        paper_file
+    );
 
     let paper_path = std::path::PathBuf::from(&paper_file);
     if !paper_path.exists() {
@@ -2636,20 +3003,38 @@ pub async fn generate_paper_reader_guide(
 
     // Round 2: cache hit — read existing guide directly.
     if output_file.exists() {
-        log::info!("[Sprint10] paper-reader: cache hit, reading {}", output_file.display());
-        let guide_content = std::fs::read_to_string(&output_file)
-            .map_err(|e| format!("Failed to read cached guide file {}: {}", output_file.display(), e))?;
+        log::info!(
+            "[Sprint10] paper-reader: cache hit, reading {}",
+            output_file.display()
+        );
+        let guide_content = std::fs::read_to_string(&output_file).map_err(|e| {
+            format!(
+                "Failed to read cached guide file {}: {}",
+                output_file.display(),
+                e
+            )
+        })?;
         let guide: serde_json::Value = serde_json::from_str(&guide_content)
             .map_err(|e| format!("Failed to parse cached guide JSON: {}", e))?;
-        log::info!("[Sprint10] paper-reader cache hit SUCCESS: title={}", guide.get("title").and_then(|t| t.as_str()).unwrap_or("(none)"));
+        log::info!(
+            "[Sprint10] paper-reader cache hit SUCCESS: title={}",
+            guide
+                .get("title")
+                .and_then(|t| t.as_str())
+                .unwrap_or("(none)")
+        );
         return Ok(guide);
     }
 
     // Ensure bundled skills (typora-paper-reader) are available in the project.
-    let paper_dir = paper_path.parent()
+    let paper_dir = paper_path
+        .parent()
         .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
     if let Err(e) = copy_bundled_skills_to_project(&paper_dir.to_string_lossy()) {
-        log::warn!("[Sprint10] paper-reader: failed to copy bundled skills: {}", e);
+        log::warn!(
+            "[Sprint10] paper-reader: failed to copy bundled skills: {}",
+            e
+        );
     }
 
     // Round 3: guard window close while generating.
@@ -2743,19 +3128,29 @@ pub async fn submit_paper_reader_feedback(
     understanding_percentage: u8,
     method_suitability: String,
 ) -> Result<(), String> {
-    log::info!("[Sprint10] submit_paper_reader_feedback START: paper_file={}", paper_file);
+    log::info!(
+        "[Sprint10] submit_paper_reader_feedback START: paper_file={}",
+        paper_file
+    );
 
     if understanding_percentage > 100 {
         return Err("understanding_percentage must be between 0 and 100".to_string());
     }
-    if !matches!(method_suitability.as_str(), "too_shallow" | "just_right" | "too_deep") {
-        return Err("method_suitability must be one of: too_shallow, just_right, too_deep".to_string());
+    if !matches!(
+        method_suitability.as_str(),
+        "too_shallow" | "just_right" | "too_deep"
+    ) {
+        return Err(
+            "method_suitability must be one of: too_shallow, just_right, too_deep".to_string(),
+        );
     }
 
     let paper_path = std::path::PathBuf::from(&paper_file);
-    let paper_dir = paper_path.parent()
+    let paper_dir = paper_path
+        .parent()
         .ok_or_else(|| format!("Invalid paper file path: {}", paper_file))?;
-    let paper_stem = paper_path.file_stem()
+    let paper_stem = paper_path
+        .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("paper");
     let feedback_dir = paper_dir.join(".learning").join("paper-reader-feedback");
@@ -2775,11 +3170,13 @@ pub async fn submit_paper_reader_feedback(
     let mut feedback = if feedback_file.exists() {
         let content = std::fs::read_to_string(&feedback_file)
             .map_err(|e| format!("Failed to read feedback file: {}", e))?;
-        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({
-            "paper_file": paper_file,
-            "paper_title": paper_stem,
-            "feedback_history": []
-        }))
+        serde_json::from_str(&content).unwrap_or_else(|_| {
+            serde_json::json!({
+                "paper_file": paper_file,
+                "paper_title": paper_stem,
+                "feedback_history": []
+            })
+        })
     } else {
         serde_json::json!({
             "paper_file": paper_file,
@@ -2788,17 +3185,26 @@ pub async fn submit_paper_reader_feedback(
         })
     };
 
-    if let Some(history) = feedback.get_mut("feedback_history").and_then(|h| h.as_array_mut()) {
+    if let Some(history) = feedback
+        .get_mut("feedback_history")
+        .and_then(|h| h.as_array_mut())
+    {
         history.push(new_entry);
     } else {
         feedback["feedback_history"] = serde_json::json!([new_entry]);
     }
 
-    std::fs::write(&feedback_file,
-        serde_json::to_string_pretty(&feedback).map_err(|e| format!("Failed to serialize feedback: {}", e))?,
-    ).map_err(|e| format!("Failed to write feedback file: {}", e))?;
+    std::fs::write(
+        &feedback_file,
+        serde_json::to_string_pretty(&feedback)
+            .map_err(|e| format!("Failed to serialize feedback: {}", e))?,
+    )
+    .map_err(|e| format!("Failed to write feedback file: {}", e))?;
 
-    log::info!("[Sprint10] submit_paper_reader_feedback SUCCESS: file={}", feedback_file.display());
+    log::info!(
+        "[Sprint10] submit_paper_reader_feedback SUCCESS: file={}",
+        feedback_file.display()
+    );
     Ok(())
 }
 
@@ -2810,7 +3216,8 @@ mod paper_reader_tests {
     #[test]
     fn test_resolve_paper_reader_guide_paths() {
         let (guide_dir, output_file) =
-            resolve_paper_reader_guide_paths("C:\\\\Users\\\\test\\\\papers\\\\1312.6114.md").unwrap();
+            resolve_paper_reader_guide_paths("C:\\\\Users\\\\test\\\\papers\\\\1312.6114.md")
+                .unwrap();
 
         assert_eq!(
             guide_dir,
@@ -2828,6 +3235,9 @@ mod paper_reader_tests {
         assert!(result.is_ok());
         let (guide_dir, output_file) = result.unwrap();
         assert_eq!(guide_dir, PathBuf::from(".learning\\\\paper-reader-guides"));
-        assert_eq!(output_file, PathBuf::from(".learning\\\\paper-reader-guides\\\\1312.6114.json"));
+        assert_eq!(
+            output_file,
+            PathBuf::from(".learning\\\\paper-reader-guides\\\\1312.6114.json")
+        );
     }
 }

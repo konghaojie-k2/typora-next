@@ -113,14 +113,12 @@ pub fn save_paper_md(
     let now = chrono::Local::now();
     let month_dir = base_dir.join(now.format("%Y-%m").to_string());
 
-    std::fs::create_dir_all(&month_dir)
-        .map_err(|e| format!("创建论文目录失败: {}", e))?;
+    std::fs::create_dir_all(&month_dir).map_err(|e| format!("创建论文目录失败: {}", e))?;
 
     let stem = generate_paper_filename(title_hint, source_name);
     let target = unique_md_path(&month_dir, &stem);
 
-    std::fs::write(&target, content)
-        .map_err(|e| format!("写入论文 Markdown 失败: {}", e))?;
+    std::fs::write(&target, content).map_err(|e| format!("写入论文 Markdown 失败: {}", e))?;
 
     Ok(target)
 }
@@ -168,10 +166,7 @@ mod tests {
 
     #[test]
     fn test_generate_paper_filename_source_fallback() {
-        assert_eq!(
-            generate_paper_filename(None, "my-paper.pdf"),
-            "my-paper"
-        );
+        assert_eq!(generate_paper_filename(None, "my-paper.pdf"), "my-paper");
     }
 
     #[test]
@@ -216,13 +211,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&tmp);
 
-        let path = save_paper_md(
-            &tmp,
-            Some("Test Paper"),
-            "source.pdf",
-            "# Hello",
-        )
-        .unwrap();
+        let path = save_paper_md(&tmp, Some("Test Paper"), "source.pdf", "# Hello").unwrap();
 
         assert!(path.exists());
         let content = std::fs::read_to_string(&path).unwrap();

@@ -66,8 +66,7 @@ impl GraphBuilder {
 
     fn add_chapter(&mut self, chapter_file: &str, concepts: ChapterConcepts) {
         // Extract chapter name from filename: "01.concepts.json" → "01"
-        let chapter = chapter_file
-            .replace(".concepts.json", "");
+        let chapter = chapter_file.replace(".concepts.json", "");
 
         for concept in concepts.concepts {
             if self.seen_ids.insert(concept.id.clone()) {
@@ -167,13 +166,13 @@ fn test_dedup_same_id_across_chapters() {
     );
     builder.add_chapter(
         "02.concepts.json",
-        make_concepts(vec![("attn", "注意力机制v2", vec![])]),  // same id, different name
+        make_concepts(vec![("attn", "注意力机制v2", vec![])]), // same id, different name
     );
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
     // Should keep first occurrence, skip duplicate
     assert_eq!(graph.nodes.len(), 1);
-    assert_eq!(graph.nodes[0].name, "注意力机制");  // first one wins
+    assert_eq!(graph.nodes[0].name, "注意力机制"); // first one wins
 }
 
 #[test]
@@ -186,18 +185,22 @@ fn test_dedup_preserves_edges_from_both_chapters() {
     builder.add_chapter(
         "02.concepts.json",
         make_concepts(vec![
-            ("attn", "注意力机制", vec![]),  // duplicate
+            ("attn", "注意力机制", vec![]), // duplicate
             ("pos-enc", "位置编码", vec!["attn"]),
         ]),
     );
     builder.add_chapter(
         "03.concepts.json",
-        make_concepts(vec![("transformer", "Transformer", vec!["attn", "pos-enc"])]),
+        make_concepts(vec![(
+            "transformer",
+            "Transformer",
+            vec!["attn", "pos-enc"],
+        )]),
     );
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
-    assert_eq!(graph.nodes.len(), 3);  // attn, pos-enc, transformer
-    assert_eq!(graph.edges.len(), 3);  // attn→pos-enc, attn→transformer, pos-enc→transformer
+    assert_eq!(graph.nodes.len(), 3); // attn, pos-enc, transformer
+    assert_eq!(graph.edges.len(), 3); // attn→pos-enc, attn→transformer, pos-enc→transformer
 }
 
 // ============================================
@@ -209,10 +212,7 @@ fn test_no_edges_when_no_depends() {
     let mut builder = GraphBuilder::new();
     builder.add_chapter(
         "01.concepts.json",
-        make_concepts(vec![
-            ("a", "概念A", vec![]),
-            ("b", "概念B", vec![]),
-        ]),
+        make_concepts(vec![("a", "概念A", vec![]), ("b", "概念B", vec![])]),
     );
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
@@ -247,8 +247,8 @@ fn test_edge_direction_from_dep_to_concept() {
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
     assert_eq!(graph.edges.len(), 1);
-    assert_eq!(graph.edges[0].from, "attn");   // dependency (upstream)
-    assert_eq!(graph.edges[0].to, "pos-enc");  // dependent (downstream)
+    assert_eq!(graph.edges[0].from, "attn"); // dependency (upstream)
+    assert_eq!(graph.edges[0].to, "pos-enc"); // dependent (downstream)
 }
 
 // ============================================
@@ -258,10 +258,7 @@ fn test_edge_direction_from_dep_to_concept() {
 #[test]
 fn test_chapter_extraction_basic() {
     let mut builder = GraphBuilder::new();
-    builder.add_chapter(
-        "01.concepts.json",
-        make_concepts(vec![("x", "X", vec![])]),
-    );
+    builder.add_chapter("01.concepts.json", make_concepts(vec![("x", "X", vec![])]));
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
     assert_eq!(graph.nodes[0].chapter, "01");
@@ -286,10 +283,7 @@ fn test_chapter_extraction_with_title() {
 #[test]
 fn test_empty_chapter_produces_empty_graph() {
     let mut builder = GraphBuilder::new();
-    builder.add_chapter(
-        "01.concepts.json",
-        make_concepts(vec![]),
-    );
+    builder.add_chapter("01.concepts.json", make_concepts(vec![]));
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
     assert_eq!(graph.nodes.len(), 0);
@@ -380,8 +374,8 @@ fn test_large_graph_no_duplicates() {
 
     let graph = builder.build("2026-06-06 12:00:00".to_string());
 
-    assert_eq!(graph.nodes.len(), 50);  // 10 * 5
-    assert_eq!(graph.edges.len(), 40);  // 10 * 4 (each chapter has 4 deps)
+    assert_eq!(graph.nodes.len(), 50); // 10 * 5
+    assert_eq!(graph.edges.len(), 40); // 10 * 4 (each chapter has 4 deps)
 
     // Verify no duplicate IDs
     let mut ids: Vec<&str> = graph.nodes.iter().map(|n| n.id.as_str()).collect();

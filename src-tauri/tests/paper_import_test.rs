@@ -17,13 +17,15 @@ fn normalize_paper_url(url: &str) -> Result<String, String> {
         return Err("URL 不能为空".to_string());
     }
 
-    let abs_re = Regex::new(r"https?://arxiv\.org/abs/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
+    let abs_re =
+        Regex::new(r"https?://arxiv\.org/abs/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
     if let Some(caps) = abs_re.captures(trimmed) {
         let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         return Ok(format!("https://arxiv.org/pdf/{}.pdf", id));
     }
 
-    let pdf_re = Regex::new(r"https?://arxiv\.org/pdf/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
+    let pdf_re =
+        Regex::new(r"https?://arxiv\.org/pdf/(\d+\.\d+(?:v\d+)?)").map_err(|e| e.to_string())?;
     if let Some(caps) = pdf_re.captures(trimmed) {
         let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
         return Ok(format!("https://arxiv.org/pdf/{}.pdf", id));
@@ -147,7 +149,10 @@ impl MineruClient {
     fn parse_submit_response(json: &serde_json::Value) -> Result<(String, Option<String>), String> {
         let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
         if code != 0 {
-            let msg = json.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            let msg = json
+                .get("msg")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知错误");
             return Err(format!("minerU 提交失败 ({}): {}", code, msg));
         }
 
@@ -175,7 +180,10 @@ impl MineruClient {
     ) -> Result<(String, Option<String>, Option<String>), String> {
         let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
         if code != 0 {
-            let msg = json.get("msg").and_then(|v| v.as_str()).unwrap_or("未知错误");
+            let msg = json
+                .get("msg")
+                .and_then(|v| v.as_str())
+                .unwrap_or("未知错误");
             return Err(format!("minerU 查询失败 ({}): {}", code, msg));
         }
 
@@ -221,13 +229,12 @@ impl MineruClient {
     }
 
     fn extract_full_md(zip_path: &Path, extract_dir: &Path) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(extract_dir)
-            .map_err(|e| format!("创建解压目录失败: {}", e))?;
+        std::fs::create_dir_all(extract_dir).map_err(|e| format!("创建解压目录失败: {}", e))?;
 
-        let file = std::fs::File::open(zip_path)
-            .map_err(|e| format!("打开 zip 文件失败: {}", e))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| format!("读取 zip 文件失败: {}", e))?;
+        let file =
+            std::fs::File::open(zip_path).map_err(|e| format!("打开 zip 文件失败: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| format!("读取 zip 文件失败: {}", e))?;
 
         for i in 0..archive.len() {
             let mut entry = archive

@@ -58,7 +58,9 @@ struct ChapterExplanations {
 // ============================================
 
 fn get_explanations_dir(project_path: &str) -> PathBuf {
-    PathBuf::from(project_path).join(".learning").join("explanations")
+    PathBuf::from(project_path)
+        .join(".learning")
+        .join("explanations")
 }
 
 fn get_explanation_file_path(project_path: &str, chapter: &str) -> PathBuf {
@@ -71,16 +73,13 @@ fn save_explanation_sync(
     conversation: ExplanationConversation,
 ) -> Result<(), String> {
     let dir = get_explanations_dir(project_path);
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("创建目录失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
 
     let path = get_explanation_file_path(project_path, chapter);
 
     let mut data: ChapterExplanations = if path.exists() {
-        let content = std::fs::read_to_string(&path)
-            .map_err(|e| format!("读取失败: {}", e))?;
-        serde_json::from_str(&content)
-            .map_err(|e| format!("解析失败: {}", e))?
+        let content = std::fs::read_to_string(&path).map_err(|e| format!("读取失败: {}", e))?;
+        serde_json::from_str(&content).map_err(|e| format!("解析失败: {}", e))?
     } else {
         ChapterExplanations {
             chapter: chapter.to_string(),
@@ -89,7 +88,11 @@ fn save_explanation_sync(
     };
 
     // Update or append
-    if let Some(idx) = data.conversations.iter().position(|c| c.id == conversation.id) {
+    if let Some(idx) = data
+        .conversations
+        .iter()
+        .position(|c| c.id == conversation.id)
+    {
         data.conversations[idx] = conversation;
     } else {
         data.conversations.push(conversation);
@@ -98,18 +101,16 @@ fn save_explanation_sync(
     // Cap at 20
     const MAX_CUES: usize = 20;
     if data.conversations.len() > MAX_CUES {
-        data.conversations.sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        data.conversations
+            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
         let excess = data.conversations.len() - MAX_CUES;
         data.conversations.drain(0..excess);
     }
 
-    let json = serde_json::to_string_pretty(&data)
-        .map_err(|e| format!("序列化失败: {}", e))?;
+    let json = serde_json::to_string_pretty(&data).map_err(|e| format!("序列化失败: {}", e))?;
     let temp_path = path.with_extension("tmp");
-    std::fs::write(&temp_path, json)
-        .map_err(|e| format!("写临时文件失败: {}", e))?;
-    std::fs::rename(&temp_path, &path)
-        .map_err(|e| format!("重命名失败: {}", e))?;
+    std::fs::write(&temp_path, json).map_err(|e| format!("写临时文件失败: {}", e))?;
+    std::fs::rename(&temp_path, &path).map_err(|e| format!("重命名失败: {}", e))?;
 
     Ok(())
 }
@@ -125,10 +126,9 @@ fn get_chapter_explanations_sync(
             conversations: vec![],
         });
     }
-    let content = std::fs::read_to_string(&path)
-        .map_err(|e| format!("读取失败: {}", e))?;
-    let data: ChapterExplanations = serde_json::from_str(&content)
-        .map_err(|e| format!("解析失败: {}", e))?;
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取失败: {}", e))?;
+    let data: ChapterExplanations =
+        serde_json::from_str(&content).map_err(|e| format!("解析失败: {}", e))?;
     Ok(data)
 }
 
@@ -141,13 +141,11 @@ fn make_conversation(id: &str, selected: &str, created_at: &str) -> ExplanationC
         id: id.to_string(),
         selected_text: selected.to_string(),
         anchor: None,
-        qa_history: vec![
-            ExplanationQAEntry {
-                q: selected.to_string(),
-                a: format!("解释 for {}", selected),
-                ts: created_at.to_string(),
-            },
-        ],
+        qa_history: vec![ExplanationQAEntry {
+            q: selected.to_string(),
+            a: format!("解释 for {}", selected),
+            ts: created_at.to_string(),
+        }],
         created_at: created_at.to_string(),
     }
 }
@@ -182,8 +180,18 @@ fn test_append_multiple_conversations() {
     let tmp = make_temp_project_dir();
     let project = tmp.to_str().unwrap();
 
-    save_explanation_sync(project, "ch1.md", make_conversation("c1", "注意力", "2026-06-09T10:00:00")).unwrap();
-    save_explanation_sync(project, "ch1.md", make_conversation("c2", "位置编码", "2026-06-09T10:01:00")).unwrap();
+    save_explanation_sync(
+        project,
+        "ch1.md",
+        make_conversation("c1", "注意力", "2026-06-09T10:00:00"),
+    )
+    .unwrap();
+    save_explanation_sync(
+        project,
+        "ch1.md",
+        make_conversation("c2", "位置编码", "2026-06-09T10:01:00"),
+    )
+    .unwrap();
 
     let data = get_chapter_explanations_sync(project, "ch1.md").unwrap();
     assert_eq!(data.conversations.len(), 2);
@@ -230,7 +238,9 @@ fn test_cap_at_20_cues() {
     assert_eq!(data.conversations.len(), 20, "应截断到 20 条");
     // Oldest (c0-c4) should be dropped, newest (c5-c24) kept
     assert!(data.conversations.iter().all(|c| {
-        if !c.id.starts_with('c') { return true; }
+        if !c.id.starts_with('c') {
+            return true;
+        }
         let num: u32 = c.id[1..].parse().unwrap();
         num >= 5
     }));

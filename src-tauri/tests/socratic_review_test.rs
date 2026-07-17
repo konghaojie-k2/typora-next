@@ -98,7 +98,8 @@ fn select_socratic_cluster_pure(
         *degree.entry(e.to.clone()).or_insert(0) += 1;
     }
 
-    let anchor = nodes.iter()
+    let anchor = nodes
+        .iter()
         .max_by_key(|n| degree.get(&n.id).copied().unwrap_or(0))
         .map(|n| n.id.clone())
         .unwrap_or_default();
@@ -112,19 +113,27 @@ fn select_socratic_cluster_pure(
         let mut next_frontier = vec![];
         for node in &frontier {
             for e in edges {
-                let neighbor = if &e.from == node { Some(&e.to) }
-                    else if &e.to == node { Some(&e.from) }
-                    else { None };
+                let neighbor = if &e.from == node {
+                    Some(&e.to)
+                } else if &e.to == node {
+                    Some(&e.from)
+                } else {
+                    None
+                };
                 if let Some(nb) = neighbor {
                     if !visited.contains(nb) {
                         visited.insert(nb.clone());
                         cluster.push(nb.clone());
                         next_frontier.push(nb.clone());
-                        if cluster.len() >= target_size { break; }
+                        if cluster.len() >= target_size {
+                            break;
+                        }
                     }
                 }
             }
-            if cluster.len() >= target_size { break; }
+            if cluster.len() >= target_size {
+                break;
+            }
         }
         frontier = next_frontier;
     }
@@ -254,10 +263,7 @@ fn test_cluster_star_graph() {
 fn test_cluster_disconnected_components() {
     // Two disconnected pairs: a--b and c--d
     let nodes = make_nodes(&["a", "b", "c", "d"]);
-    let edges = vec![
-        make_edge("a", "b", 0.8),
-        make_edge("c", "d", 0.8),
-    ];
+    let edges = vec![make_edge("a", "b", 0.8), make_edge("c", "d", 0.8)];
 
     let cluster = select_socratic_cluster_pure(&nodes, &edges, 4, 0.5);
     // Anchor = a or c (both degree 1). Only a's component reachable.
@@ -293,7 +299,10 @@ fn test_cluster_hash_different_clusters_different_hash() {
 fn test_cluster_hash_format() {
     let h = cluster_hash(&["x".to_string()]);
     assert_eq!(h.len(), 16, "hash 应为 16 位十六进制");
-    assert!(h.chars().all(|c| c.is_ascii_hexdigit()), "hash 应全为十六进制字符");
+    assert!(
+        h.chars().all(|c| c.is_ascii_hexdigit()),
+        "hash 应全为十六进制字符"
+    );
 }
 
 // ============================================
@@ -326,7 +335,10 @@ fn test_state_data_round_trip() {
     assert_eq!(parsed.opt_out, true);
     assert_eq!(parsed.quiz_count_since_last_socratic, 5);
     assert_eq!(parsed.recent_cluster_hashes.len(), 2);
-    assert_eq!(parsed.last_socratic_at, Some("2026-06-01T10:00:00Z".to_string()));
+    assert_eq!(
+        parsed.last_socratic_at,
+        Some("2026-06-01T10:00:00Z".to_string())
+    );
 }
 
 #[test]
@@ -351,8 +363,14 @@ fn test_session_data_round_trip() {
         concept_ids: vec!["jwt".to_string(), "oauth2".to_string()],
         concept_titles: vec!["JWT".to_string(), "OAuth2".to_string()],
         turns: vec![
-            SocraticChatMessage { role: "tutor".to_string(), content: "Q1".to_string() },
-            SocraticChatMessage { role: "user".to_string(), content: "A1".to_string() },
+            SocraticChatMessage {
+                role: "tutor".to_string(),
+                content: "Q1".to_string(),
+            },
+            SocraticChatMessage {
+                role: "user".to_string(),
+                content: "A1".to_string(),
+            },
         ],
         ended_at: "2026-06-01T10:05:00Z".to_string(),
         end_reason: "llm_done".to_string(),
@@ -405,7 +423,8 @@ fn test_state_save_and_load() {
 
 #[test]
 fn test_state_load_default_when_missing() {
-    let tmp_dir = std::env::temp_dir().join(format!("socratic-test-missing-{}", std::process::id()));
+    let tmp_dir =
+        std::env::temp_dir().join(format!("socratic-test-missing-{}", std::process::id()));
     let state_path = tmp_dir.join(".learning").join("socratic-state.json");
 
     // File does not exist → default state
@@ -424,7 +443,8 @@ fn test_state_load_default_when_missing() {
 
 #[test]
 fn test_session_save_creates_file() {
-    let tmp_dir = std::env::temp_dir().join(format!("socratic-session-test-{}", std::process::id()));
+    let tmp_dir =
+        std::env::temp_dir().join(format!("socratic-session-test-{}", std::process::id()));
     let sessions_dir = tmp_dir.join(".learning").join("socratic-sessions");
     std::fs::create_dir_all(&sessions_dir).unwrap();
 

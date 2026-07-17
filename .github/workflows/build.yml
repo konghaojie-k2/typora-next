@@ -1,0 +1,100 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-gnu
+            bundle-args: ""
+          - os: macos-13
+            target: x86_64-apple-darwin
+            bundle-args: ""
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            bundle-args: ""
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install MinGW (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          choco install mingw -y
+          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $env:GITHUB_PATH
+
+      - name: Restore cached dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Build Tauri bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo tauri build --target ${{ matrix.target }}
+
+      - name: Build Tauri bundle (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          cd src-tauri
+          cargo tauri build --target ${{ matrix.target }}
+
+      - name: Create Universal macOS binary
+        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
+        shell: bash
+        run: |
+          # If both x86_64 and aarch64 builds exist, create universal binary
+          UNIVERSAL_DIR="src-tauri/target/universal-apple-darwin/release"
+          mkdir -p "$UNIVERSAL_DIR"
+          # Build universal via Tauri
+          cd src-tauri
+          cargo tauri build --target universal-apple-darwin
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: typora-next-${{ matrix.target }}
+          path: |
+            src-tauri/target/${{ matrix.target }}/release/bundle/
+            src-tauri/target/${{ matrix.target }}/release/app.exe
+            src-tauri/target/${{ matrix.target }}/release/app
+          if-no-files-found: warn

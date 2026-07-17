@@ -91,9 +91,7 @@ impl MineruClient {
     }
 
     /// Submit a URL or local file to minerU.
-    pub fn submit(&self,
-        target: SubmitTarget,
-    ) -> Result<TaskHandle, String> {
+    pub fn submit(&self, target: SubmitTarget) -> Result<TaskHandle, String> {
         match target {
             SubmitTarget::Url(url) => self.submit_url(&url),
             SubmitTarget::LocalFile { name, bytes } => self.submit_local_file(&name, &bytes),
@@ -120,10 +118,7 @@ impl MineruClient {
         self.parse_submit_response(&json)
     }
 
-    fn submit_local_file(&self,
-        name: &str,
-        bytes: &[u8],
-    ) -> Result<TaskHandle, String> {
+    fn submit_local_file(&self, name: &str, bytes: &[u8]) -> Result<TaskHandle, String> {
         let endpoint = format!("{}/api/v4/file-urls/batch", self.base_url);
         let payload = json!({
             "files": [{ "name": name }],
@@ -160,10 +155,7 @@ impl MineruClient {
             .map_err(|e| format!("上传 PDF 到 minerU 失败: {}", e))?;
 
         if upload_resp.status() != 200 {
-            return Err(format!(
-                "上传 PDF 失败，HTTP {}",
-                upload_resp.status()
-            ));
+            return Err(format!("上传 PDF 失败，HTTP {}", upload_resp.status()));
         }
 
         Ok(TaskHandle {
@@ -172,9 +164,7 @@ impl MineruClient {
         })
     }
 
-    fn parse_submit_response(&self,
-        json: &serde_json::Value,
-    ) -> Result<TaskHandle, String> {
+    fn parse_submit_response(&self, json: &serde_json::Value) -> Result<TaskHandle, String> {
         let code = json.get("code").and_then(|v| v.as_i64()).unwrap_or(-1);
         if code != 0 {
             let msg = json
@@ -204,9 +194,7 @@ impl MineruClient {
     }
 
     /// Poll once and return the current status.
-    pub fn poll_status(&self,
-        handle: &TaskHandle,
-    ) -> Result<PollResult, String> {
+    pub fn poll_status(&self, handle: &TaskHandle) -> Result<PollResult, String> {
         let endpoint = if let Some(task_id) = &handle.task_id {
             format!("{}/api/v4/extract/task/{}", self.base_url, task_id)
         } else if let Some(batch_id) = &handle.batch_id {
@@ -290,17 +278,10 @@ impl MineruClient {
     }
 
     /// Block and poll until the task reaches a terminal state.
-    pub fn poll_until_done(
-        &self,
-        handle: &TaskHandle,
-    ) -> Result<PollResult, String> {
+    pub fn poll_until_done(&self, handle: &TaskHandle) -> Result<PollResult, String> {
         for attempt in 0..MAX_POLL_ATTEMPTS {
             let status = self.poll_status(handle)?;
-            log::info!(
-                "[minerU] poll attempt {}: state={}",
-                attempt,
-                status.state
-            );
+            log::info!("[minerU] poll attempt {}: state={}", attempt, status.state);
 
             match status.state.as_str() {
                 "done" => return Ok(status),
@@ -310,8 +291,7 @@ impl MineruClient {
                         status.message.unwrap_or_else(|| "未知原因".to_string())
                     ));
                 }
-                "pending" | "running" | "converting" | "uploading"
-                | "waiting-file" => {
+                "pending" | "running" | "converting" | "uploading" | "waiting-file" => {
                     std::thread::sleep(Duration::from_secs(POLL_INTERVAL_SECS));
                 }
                 other => {
@@ -324,21 +304,16 @@ impl MineruClient {
     }
 
     /// Download the result zip to `dest`.
-    pub fn download_zip(
-        &self,
-        url: &str,
-        dest: &Path,
-    ) -> Result<(), String> {
+    pub fn download_zip(&self, url: &str, dest: &Path) -> Result<(), String> {
         let resp = ureq::get(url)
             .call()
             .map_err(|e| format!("下载 minerU 结果失败: {}", e))?;
 
         let mut reader = resp.into_reader();
-        let mut file = std::fs::File::create(dest)
-            .map_err(|e| format!("创建临时 zip 文件失败: {}", e))?;
+        let mut file =
+            std::fs::File::create(dest).map_err(|e| format!("创建临时 zip 文件失败: {}", e))?;
 
-        std::io::copy(&mut reader, &mut file)
-            .map_err(|e| format!("写入 zip 文件失败: {}", e))?;
+        std::io::copy(&mut reader, &mut file).map_err(|e| format!("写入 zip 文件失败: {}", e))?;
 
         Ok(())
     }
@@ -346,17 +321,13 @@ impl MineruClient {
     /// Extract the full minerU result archive to `extract_dir`, preserving the
     /// internal directory structure (including the `images/` folder referenced
     /// by `full.md`). Returns the path to the extracted `full.md`.
-    pub fn extract_full_md(
-        zip_path: &Path,
-        extract_dir: &Path,
-    ) -> Result<PathBuf, String> {
-        std::fs::create_dir_all(extract_dir)
-            .map_err(|e| format!("创建解压目录失败: {}", e))?;
+    pub fn extract_full_md(zip_path: &Path, extract_dir: &Path) -> Result<PathBuf, String> {
+        std::fs::create_dir_all(extract_dir).map_err(|e| format!("创建解压目录失败: {}", e))?;
 
-        let file = std::fs::File::open(zip_path)
-            .map_err(|e| format!("打开 zip 文件失败: {}", e))?;
-        let mut archive = zip::ZipArchive::new(file)
-            .map_err(|e| format!("读取 zip 文件失败: {}", e))?;
+        let file =
+            std::fs::File::open(zip_path).map_err(|e| format!("打开 zip 文件失败: {}", e))?;
+        let mut archive =
+            zip::ZipArchive::new(file).map_err(|e| format!("读取 zip 文件失败: {}", e))?;
 
         let mut md_path: Option<PathBuf> = None;
 
@@ -377,10 +348,9 @@ impl MineruClient {
                     .map_err(|e| format!("创建解压子目录失败: {}", e))?;
             }
 
-            let mut out_file = std::fs::File::create(&out_path)
-                .map_err(|e| format!("创建解压文件失败: {}", e))?;
-            std::io::copy(&mut entry, &mut out_file)
-                .map_err(|e| format!("解压文件失败: {}", e))?;
+            let mut out_file =
+                std::fs::File::create(&out_path).map_err(|e| format!("创建解压文件失败: {}", e))?;
+            std::io::copy(&mut entry, &mut out_file).map_err(|e| format!("解压文件失败: {}", e))?;
 
             if name.ends_with("full.md") {
                 md_path = Some(out_path);
@@ -488,9 +458,14 @@ mod tests {
             "token".to_string(),
             "vlm".to_string(),
         );
-        let result = client.parse_poll_response(&sample_done_task(), false).unwrap();
+        let result = client
+            .parse_poll_response(&sample_done_task(), false)
+            .unwrap();
         assert_eq!(result.state, "done");
-        assert_eq!(result.full_zip_url, Some("https://example.com/result.zip".to_string()));
+        assert_eq!(
+            result.full_zip_url,
+            Some("https://example.com/result.zip".to_string())
+        );
     }
 
     #[test]
@@ -514,9 +489,14 @@ mod tests {
             "token".to_string(),
             "vlm".to_string(),
         );
-        let result = client.parse_poll_response(&sample_done_batch(), true).unwrap();
+        let result = client
+            .parse_poll_response(&sample_done_batch(), true)
+            .unwrap();
         assert_eq!(result.state, "done");
-        assert_eq!(result.full_zip_url, Some("https://example.com/result.zip".to_string()));
+        assert_eq!(
+            result.full_zip_url,
+            Some("https://example.com/result.zip".to_string())
+        );
     }
 
     #[test]
@@ -547,7 +527,11 @@ mod tests {
         zip.finish().unwrap();
 
         let md_path = MineruClient::extract_full_md(&zip_path, &extract_dir).unwrap();
-        assert!(md_path.ends_with("t1/full.md"), "expected t1/full.md, got {:?}", md_path);
+        assert!(
+            md_path.ends_with("t1/full.md"),
+            "expected t1/full.md, got {:?}",
+            md_path
+        );
         let content = std::fs::read_to_string(&md_path).unwrap();
         assert_eq!(content, "# Hello MinerU");
 

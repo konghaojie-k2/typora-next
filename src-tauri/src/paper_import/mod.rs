@@ -55,9 +55,7 @@ pub fn resolve_papers_dir(
     project_dir: Option<&str>,
 ) -> Result<PathBuf, String> {
     if let Some(dir) = project_dir {
-        let path = PathBuf::from(dir)
-            .join(".learning")
-            .join("papers");
+        let path = PathBuf::from(dir).join(".learning").join("papers");
         return Ok(path);
     }
 

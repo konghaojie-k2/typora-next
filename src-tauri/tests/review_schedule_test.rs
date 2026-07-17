@@ -63,7 +63,11 @@ fn days_to_ymd(mut days: i64) -> (i32, u32, u32) {
     let month_days = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
     let mut month = 1u32;
     for (idx, &md) in month_days.iter().enumerate() {
-        let md = if idx == 1 && is_leap_year(year) { 29 } else { md };
+        let md = if idx == 1 && is_leap_year(year) {
+            29
+        } else {
+            md
+        };
         if days < md {
             month = (idx + 1) as u32;
             break;

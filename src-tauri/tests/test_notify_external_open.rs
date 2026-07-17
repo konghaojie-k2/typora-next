@@ -38,6 +38,12 @@ fn defensive_default_when_focus_state_unknown_is_to_attempt() {
 fn policy_is_symmetric_and_pure() {
     // No side effects, no global state. Two calls with the same input
     // must produce the same output.
-    assert_eq!(should_request_attention(true), should_request_attention(true));
-    assert_eq!(should_request_attention(false), should_request_attention(false));
+    assert_eq!(
+        should_request_attention(true),
+        should_request_attention(true)
+    );
+    assert_eq!(
+        should_request_attention(false),
+        should_request_attention(false)
+    );
 }
