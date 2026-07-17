@@ -1542,9 +1542,10 @@ pub async fn generate_chapter_quiz(
 ) -> Result<QuizWithExtras, String> {
     log::info!("[Sprint3] generate_chapter_quiz for: {}", chapter_file);
 
-    // Infer quiz.json path: replace .md with .quiz.json
-    // Normalize path separators for Windows
-    let chapter_file_norm = chapter_file.replace('/', "\\");
+    // Infer quiz.json path: replace .md with .quiz.json.
+    // Keep the original separators: Rust Path accepts '/' on Windows too,
+    // while forcing '\\' would corrupt paths on macOS/Linux.
+    let chapter_file_norm = chapter_file.as_str();
     let quiz_path = if chapter_file_norm.ends_with(".md") {
         format!(
             "{}.quiz.json",

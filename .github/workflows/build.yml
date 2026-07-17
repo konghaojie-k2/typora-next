@@ -13,17 +13,17 @@ env:
 jobs:
   build:
     strategy:
+      # One platform failing must not cancel the others.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
             target: x86_64-pc-windows-gnu
-            bundle-args: ""
-          - os: macos-13
+          # macos-13 runners are retired; macos-15-intel is the Intel image.
+          - os: macos-15-intel
             target: x86_64-apple-darwin
-            bundle-args: ""
           - os: macos-latest
             target: aarch64-apple-darwin
-            bundle-args: ""
 
     runs-on: ${{ matrix.os }}
 
@@ -50,42 +50,24 @@ jobs:
       - name: Restore cached dependencies
         uses: Swatinem/rust-cache@v2
 
-      - name: Build (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          cd src-tauri
-          cargo build --release --target ${{ matrix.target }}
+      # Prebuilt tauri-cli binary (much faster than cargo install).
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
 
-      - name: Build (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd src-tauri
-          cargo build --release --target ${{ matrix.target }}
-
-      - name: Build Tauri bundle (Windows)
-        if: runner.os == 'Windows'
+      - name: Build & bundle
         shell: bash
         run: |
           cd src-tauri
           cargo tauri build --target ${{ matrix.target }}
 
-      - name: Build Tauri bundle (macOS)
-        if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          cd src-tauri
-          cargo tauri build --target ${{ matrix.target }}
-
+      # Universal dmg: built once on the Apple Silicon runner (needs both targets).
       - name: Create Universal macOS binary
-        if: runner.os == 'macOS' && matrix.target == 'aarch64-apple-darwin'
+        if: matrix.target == 'aarch64-apple-darwin'
         shell: bash
         run: |
-          # If both x86_64 and aarch64 builds exist, create universal binary
-          UNIVERSAL_DIR="src-tauri/target/universal-apple-darwin/release"
-          mkdir -p "$UNIVERSAL_DIR"
-          # Build universal via Tauri
+          rustup target add x86_64-apple-darwin
           cd src-tauri
           cargo tauri build --target universal-apple-darwin
 
@@ -95,6 +77,5 @@ jobs:
           name: typora-next-${{ matrix.target }}
           path: |
             src-tauri/target/${{ matrix.target }}/release/bundle/
-            src-tauri/target/${{ matrix.target }}/release/app.exe
-            src-tauri/target/${{ matrix.target }}/release/app
+            src-tauri/target/universal-apple-darwin/release/bundle/
           if-no-files-found: warn
