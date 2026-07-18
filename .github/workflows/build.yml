@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            target: x86_64-pc-windows-gnu
+            target: x86_64-pc-windows-msvc
           # macos-13 runners are retired; macos-15-intel is the Intel image.
           - os: macos-15-intel
             target: x86_64-apple-darwin
@@ -39,13 +39,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-
-      - name: Install MinGW (Windows)
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: |
-          choco install mingw -y
-          echo "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin" >> $env:GITHUB_PATH
 
       - name: Restore cached dependencies
         uses: Swatinem/rust-cache@v2
