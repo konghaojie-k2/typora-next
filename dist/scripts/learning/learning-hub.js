@@ -28,7 +28,9 @@
 
       try {
         const homeDir = await window.__TAURI__.path.homeDir();
-        this.filePath = homeDir + '/' + DEFAULT_CONFIG_DIR + '/' + CONFIG_FILE;
+        // Normalize backslashes to forward slashes for consistent path handling
+        const normalized = homeDir.replace(/\\/g, '/').replace(/\/+$/, '');
+        this.filePath = normalized + '/' + DEFAULT_CONFIG_DIR + '/' + CONFIG_FILE;
       } catch (e) {
         console.warn('[LearningHub] Failed to get home dir:', e);
       }

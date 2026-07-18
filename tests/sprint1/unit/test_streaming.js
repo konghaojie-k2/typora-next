@@ -287,6 +287,8 @@ TestRunner.test('generateChapters emits NO progress_log (per "取消" feedback)'
     async function* queryFn() {
       // The agent writes the .md file via Write tool (simulated)
       const filename = path.join(projectPath, '00-Big-Chapter.md');
+      const dir = path.dirname(filename);
+      if (!origExists.call(fs, dir)) origMkdir.call(fs, dir, { recursive: true })
       origWrite.call(fs, filename, '# Big Chapter\n\nContent here.');
       // Return ≥ 5 char confirmation (Phase D host requires this)
       yield { type: 'assistant', message: { content: [{ type: 'text', text: '第 1 章已生成: Big Chapter' }] } };

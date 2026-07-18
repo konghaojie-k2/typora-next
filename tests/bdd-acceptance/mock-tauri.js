@@ -564,8 +564,8 @@ const mockFS = {
 // ============================================
 const mockPath = {
   homeDir: async () => {
-    // Return with BACKSLASHES to simulate Windows
-    return os.tmpdir().replace(/\//g, '\\');
+    // Return with forward slashes for consistent path handling
+    return os.tmpdir().replace(/\\/g, '/');
   }
 };
 

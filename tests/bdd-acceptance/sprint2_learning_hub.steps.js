@@ -52,14 +52,14 @@ steps.given('用户没有创建过任何学习项目', async function() {
   this.tempHomeDir = createTempDir();
   // Override homeDir mock to return temp dir with Windows backslashes
   const originalHomeDir = window.__TAURI__.path.homeDir;
-  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\//g, '\\');
+  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\\/g, '/');
   this._restoreHomeDir = () => { window.__TAURI__.path.homeDir = originalHomeDir; };
 });
 
 steps.given('用户之前创建过{int}个学习项目', async function(count) {
   count = parseInt(count, 10);
   this.tempHomeDir = createTempDir();
-  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\//g, '\\');
+  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\\/g, '/');
 
   const configDir = path.join(this.tempHomeDir, '.typora-next');
   fs.mkdirSync(configDir, { recursive: true });
@@ -87,7 +87,7 @@ steps.given('用户之前创建过{int}个学习项目', async function(count) {
 
 steps.given('学习项目列表中有{string}项目', async function(name) {
   this.tempHomeDir = createTempDir();
-  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\//g, '\\');
+  window.__TAURI__.path.homeDir = async () => this.tempHomeDir.replace(/\\/g, '/');
 
   const configDir = path.join(this.tempHomeDir, '.typora-next');
   fs.mkdirSync(configDir, { recursive: true });
