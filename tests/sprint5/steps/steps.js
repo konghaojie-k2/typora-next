@@ -8,11 +8,11 @@
  * 真实文件系统验证见 tests/bdd-acceptance/sprint5_mermaid_apply_fix.steps.js
  */
 
-const { StepRegistry } = require('./runner');
+const { StepRegistry } = require('../../shared/runner');
 
 // Node.js 兼容 + 加载纯函数模块
 if (typeof global.window === 'undefined') global.window = {};
-const { replaceMermaidInSource } = require('../../dist/scripts/mermaid-source-replace');
+const { replaceMermaidInSource } = require('../../../dist/scripts/mermaid-source-replace');
 
 const steps = new StepRegistry();
 

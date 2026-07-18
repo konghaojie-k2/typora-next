@@ -72,7 +72,11 @@ steps.given('用户提交第{int}章测验', async function(chapterNum) {
   if (!this.project) {
     this.project = {
       name: 'Test',
-      chapters: [{ duration_minutes: 25 }],
+      chapters: [
+        { title: 'Ch1', status: 'ready', duration_minutes: 25 },
+        { title: 'Ch2', status: 'ready', duration_minutes: 25 },
+        { title: 'Ch3', status: 'ready', duration_minutes: 25 },
+      ],
       currentChapter: 0,
       concepts: {}
     };

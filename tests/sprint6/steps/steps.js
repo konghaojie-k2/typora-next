@@ -12,7 +12,7 @@
  * 真实文件系统验证见 tests/bdd-acceptance/sprint6_explain_conversation.steps.js
  */
 
-const { StepRegistry } = require('./runner');
+const { StepRegistry } = require('../../shared/runner');
 
 // Node.js 兼容
 if (typeof global.window === 'undefined') global.window = {};

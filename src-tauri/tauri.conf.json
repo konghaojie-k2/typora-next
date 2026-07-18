@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "",
-    "beforeBuildCommand": ""
+    "beforeBuildCommand": "node tests/run-all.js"
   },
   "app": {
     "withGlobalTauri": true,
@@ -53,11 +53,13 @@
         "role": "Editor"
       }
     ],
-    "macos": {
+    "macOS": {
       "minimumSystemVersion": "10.13"
     },
-    "android": {
-      "debugApplicationIdSuffix": ".debug"
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
     }
   }
 }

@@ -55,6 +55,7 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: tauri-cli
+          version: "2.11.1"
 
       - name: Build & bundle
         shell: bash

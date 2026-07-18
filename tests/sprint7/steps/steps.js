@@ -13,11 +13,11 @@
  * 模拟 user/app/system 之间的交互，验证关键不变量。
  */
 
-const { StepRegistry } = require('./runner');
+const { StepRegistry } = require('../../shared/runner');
 
 if (typeof global.window === 'undefined') global.window = {};
 const { computeToggledTheme, resolveInitialTheme, domCommandForTheme } =
-  require('../../dist/scripts/theme-manager');
+  require('../../../dist/scripts/theme-manager');
 
 const steps = new StepRegistry();
 
@@ -176,12 +176,12 @@ module.exports = steps;
 // Allow running this file directly: node sprint7_steps.js
 if (require.main === module) {
   // Filter to only sprint7 feature file
-  const { runFeatures } = require('./runner');
+  const { runFeatures } = require('../../shared/runner');
   const path = require('path');
   const fs = require('fs');
   const featureFile = path.join(__dirname, '..', 'features', 'sprint7_theme_switch.feature');
   const content = fs.readFileSync(featureFile, 'utf-8');
-  const { parseFeature } = require('./runner');
+  const { parseFeature } = require('../../shared/runner');
   const scenarios = parseFeature(content);
 
   (async () => {
