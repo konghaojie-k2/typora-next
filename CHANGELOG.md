@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.3.0] - 2026-07-18
+
+### Features — 论文导读 + DOCX 导出重做 + 引导模式
+
+- **论文导读（Paper Reader）**：从 arXiv URL / PDF 一键导入学术论文（后端 MinerU 解析 + arXiv 抓取），在专属 tab 中阅读并给出 AI 导读（背景 / 方法 / 结果），可对导读条目点赞 / 点踩
+  - 导读 sidebar 合并到主应用左侧 TOC panel，与主应用渲染后处理统一
+  - 论文阅读与课程模式可并行切换（AppWorkspace 状态机 Normal / Course / Paper 注册表 + TransitionRules）
+- **DOCX 导出全面修复**
+  - Mermaid 渲染尺寸修复（之前 SVG 只占图片 1/9）；字号分层（序列图 22/20，流程图节点 12/边 11）；flowchart 间距 12/12 → 30/35；`flowchart.htmlLabels:false` 让 class / state / er 输出原生 SVG text（修复文字丢失）；新增 foreignObject → SVG text 兜底转换器
+  - 数学公式 OMML：修复 Word 丢弃公式的三层嵌套 off-by-one；`\sqrt` 补 `<m:deg/>` + `degHide` 消除根号上方空参数虚线框；新增 37 个回归测试
+- **工具栏自定义 tooltip**：每个工具栏按钮可独立配置提示文案
+- **首次启动引导模式**：新用户首次启动时进入引导流程，降低学习曲线
+- **Demo 资源打包**：`samples/full.md` 随安装包发布，前端可通过新 `get_demo_file` Tauri 命令读取作为引导示例
+
+### Fixes
+
+- 修复 `generate_chapter_quiz` 强制 Windows 路径分隔符 `replace('/', "\\")` 导致 macOS / Linux 路径损坏
+- 修复学习模式滑动窗口入口多处重复入口（统一为单一入口）
+- 修复 `project.json` 并发写入竞态
+- 修复课程生成期间用户关闭 tab 导致状态机卡死的关闭保护
+- 修复 macOS-13 runner 已退役导致的 CI 必然失败；universal dmg 步骤补 `rustup target add x86_64-apple-darwin`
+
+### Refactor
+
+- **AppWorkspace 状态机**：Normal / Course / Paper 注册表 + TransitionRules；切换确认弹窗结构化（当前 → 目标彩色徽标 + impact 文案）
+- Course 模式从 body class 迁移到 workspace context，body class 仅作 CSS 开关
+- Paper Reader 从 `#paper-reader-wrapper` 覆盖层改为 tab 增强模型
+- 工作区色板：常规灰 / 课程紫 #8b5cf6 / 论文橙 #f97316 + 工具栏渐变
+- `resolveRecentFileRoute` 提取为可测纯函数
+
+### Infrastructure
+
+- `docx-export` crate 纳入版本库（`src-tauri/crates/docx-export/`）
+- GitHub Actions 构建矩阵扩展：`fail-fast: false`；Intel macOS runner 由 macos-13 升级到 macos-15-intel；预编译 tauri-cli 安装（taiki-e/install-action）
+- Sprint 10 测试套件：4 套 BDD feature（pb1~pb4 paper reader）+ AppWorkspace 单元测试
+- 新增 SVG 栅格化依赖：`resvg` / `usvg` / `fontdb` / `tiny-skia`
+- `.gitignore` 增加 `.cargo-home` 与临时测试文件
+
 ## [0.2.1] - 2026-06-27
 
 ### Features — 复习系统最终验收
