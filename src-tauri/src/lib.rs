@@ -944,6 +944,26 @@ async fn export_word(
     mermaid_images: Option<HashMap<String, MermaidSvgInfo>>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
+    // Prepare local log
+    let log_dir = app
+        .path()
+        .app_data_dir()
+        .unwrap_or_else(|_| std::env::temp_dir());
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log_path = log_dir.join("export.log");
+    let log_export = |msg: &str| {
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+        {
+            use std::io::Write;
+            let _ = writeln!(f, "[{}] {}", chrono::Local::now().format("%H:%M:%S"), msg);
+        }
+    };
+
+    log_export(&format!("[export_word] 开始导出: {}", file_name));
+
     let base_dir = std::path::Path::new(&file_path)
         .parent()
         .map(|p| p.to_path_buf())
@@ -967,28 +987,80 @@ async fn export_word(
         })
         .collect();
 
-    let bytes = docx_export::markdown_to_docx_with_mermaid(&markdown, &base_dir, &mermaid_bytes)
-        .map_err(|e| format!("DOCX 生成失败: {}", e))?;
+    log_export(&format!(
+        "[export_word] Mermaid 图片 {} 个",
+        mermaid_bytes.len()
+    ));
+
+    let _ = app.emit(
+        "export-progress",
+        serde_json::json!({"stage": "docx", "percent": 60, "message": "正在生成 Word 文档..."}),
+    );
+
+    log_export("[export_word] 开始 markdown_to_docx...");
+
+    use tokio::time::timeout;
+    let docx_future = tokio::task::spawn_blocking(move || {
+        docx_export::markdown_to_docx_with_mermaid(&markdown, &base_dir, &mermaid_bytes)
+    });
+    let bytes = timeout(std::time::Duration::from_secs(120), docx_future)
+        .await
+        .map_err(|_| {
+            log_export("[export_word] 超时（>2分钟）");
+            "DOCX 生成超时（超过 2 分钟），请检查文档是否包含过大表格或过多图片".to_string()
+        })?
+        .map_err(|e| {
+            log_export(&format!("[export_word] 线程失败: {}", e));
+            format!("DOCX 生成线程失败: {}", e)
+        })?
+        .map_err(|e| {
+            log_export(&format!("[export_word] DOCX 生成失败: {}", e));
+            format!("DOCX 生成失败: {}", e)
+        })?;
+
+    log_export(&format!(
+        "[export_word] DOCX 生成完成: {} 字节",
+        bytes.len()
+    ));
+
+    let _ = app.emit(
+        "export-progress",
+        serde_json::json!({"stage": "dialog", "percent": 85, "message": "正在选择保存路径..."}),
+    );
 
     let default_name = file_name
         .replace(".md", ".docx")
         .replace(".markdown", ".docx");
 
     use tauri_plugin_dialog::DialogExt;
-    let file_path = app
-        .dialog()
+    use tokio::sync::oneshot;
+
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
         .file()
         .add_filter("Word Document", &["docx"])
         .set_file_name(&default_name)
-        .blocking_save_file();
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
 
+    let file_path = rx.await.map_err(|_| "对话框通信失败".to_string())?;
     match file_path {
         Some(path) => {
+            log_export(&format!("[export_word] 保存路径: {:?}", path.as_path()));
             let path_ref = path.as_path().unwrap_or(std::path::Path::new(""));
             std::fs::write(path_ref, &bytes).map_err(|e| format!("写入文件失败: {}", e))?;
+            log_export("[export_word] 写入完成");
+            let _ = app.emit(
+                "export-progress",
+                serde_json::json!({"stage": "done", "percent": 100, "message": "导出完成 ✓"}),
+            );
             Ok(path_ref.display().to_string())
         }
-        None => Err("用户取消了保存".to_string()),
+        None => {
+            log_export("[export_word] 用户取消");
+            Err("用户取消了保存".to_string())
+        }
     }
 }
 

@@ -2,12 +2,9 @@ name: Release
 
 on:
   push:
+    branches: [master]
     tags: ["v*"]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: "Tag to release (e.g. v0.3.0)"
-        required: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -46,7 +43,7 @@ jobs:
       - name: Install Tauri CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@2.11.1
+          tool: tauri-cli@2
 
       - name: Build & bundle
         shell: bash
@@ -80,13 +77,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Determine version
+      - name: Determine version and release type
         id: version
         run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "tag=${{ github.event.inputs.tag }}" >> $GITHUB_OUTPUT
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # Tag push: use tag name as version, full release
+            echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            echo "tag=${GITHUB_REF_NAME}" >> $GITHUB_OUTPUT
+            # Push to master: nightly build with date+sha
+            DATE=$(date +%Y%m%d)
+            SHA=${GITHUB_SHA:0:7}
+            echo "tag=nightly-${DATE}-${SHA}" >> $GITHUB_OUTPUT
+            echo "prerelease=true" >> $GITHUB_OUTPUT
           fi
 
       - name: Download all artifacts
@@ -94,14 +97,15 @@ jobs:
         with:
           path: artifacts
 
-      - name: Create Release
+      - name: Create/Update Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
-          name: TyporaNext ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
           body_path: CHANGELOG.md
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.version.outputs.prerelease }}
+          fail_on_unmatched_files: false
           files: |
             artifacts/**/*.msi
             artifacts/**/*.exe

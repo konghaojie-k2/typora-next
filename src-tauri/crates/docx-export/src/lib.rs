@@ -634,9 +634,13 @@ fn tokenize_code<'a>(line: &'a str, lang: &str) -> Vec<(&'a str, TokenKind)> {
 
 fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a str, TokenKind)> {
     let mut tokens = Vec::new();
-    let mut i = 0;
     let chars: Vec<char> = line.chars().collect();
+    // Map each char index to its byte position in the original string.
+    // Append line.len() as sentinel so byte_pos[i] is always valid for i ≤ chars.len().
+    let mut byte_pos: Vec<usize> = line.char_indices().map(|(b, _)| b).collect();
+    byte_pos.push(line.len());
     let len = chars.len();
+    let mut i = 0; // char index
 
     while i < len {
         // Whitespace run (including leading spaces so indentation is preserved).
@@ -645,17 +649,17 @@ fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a 
             while i < len && chars[i].is_whitespace() {
                 i += 1;
             }
-            tokens.push((&line[start..i], TokenKind::Plain));
+            tokens.push((&line[byte_pos[start]..byte_pos[i]], TokenKind::Plain));
             continue;
         }
 
         // Line comments.
         if i + 1 < len && chars[i] == '/' && chars[i + 1] == '/' {
-            tokens.push((&line[i..], TokenKind::Comment));
+            tokens.push((&line[byte_pos[i]..], TokenKind::Comment));
             break;
         }
         if i + 1 < len && chars[i] == '#' {
-            tokens.push((&line[i..], TokenKind::Comment));
+            tokens.push((&line[byte_pos[i]..], TokenKind::Comment));
             break;
         }
 
@@ -674,7 +678,7 @@ fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a 
                     i += 1;
                 }
             }
-            tokens.push((&line[start..i], TokenKind::String));
+            tokens.push((&line[byte_pos[start]..byte_pos[i]], TokenKind::String));
             continue;
         }
 
@@ -695,7 +699,7 @@ fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a 
             {
                 i += 1;
             }
-            tokens.push((&line[start..i], TokenKind::Number));
+            tokens.push((&line[byte_pos[start]..byte_pos[i]], TokenKind::Number));
             continue;
         }
 
@@ -705,7 +709,7 @@ fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a 
             while i < len && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                 i += 1;
             }
-            let word = &line[start..i];
+            let word = &line[byte_pos[start]..byte_pos[i]];
             let kind = if keywords.contains(&word) {
                 TokenKind::Keyword
             } else {
@@ -718,7 +722,7 @@ fn tokenize_generic<'a, 'b>(line: &'a str, keywords: &'b [&'b str]) -> Vec<(&'a 
         // Punctuation / operators.
         let start = i;
         i += 1;
-        tokens.push((&line[start..i], TokenKind::Plain));
+        tokens.push((&line[byte_pos[start]..byte_pos[i]], TokenKind::Plain));
     }
 
     tokens
@@ -2095,7 +2099,12 @@ fn read_image(path: &str) -> Result<Pic, String> {
 }
 
 fn fetch_image_bytes(url: &str) -> Result<Vec<u8>, String> {
-    let resp = ureq::get(url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(10))
+        .timeout_read(std::time::Duration::from_secs(30))
+        .build();
+    let resp = agent
+        .get(url)
         .call()
         .map_err(|e| format!("Failed to fetch image {}: {}", url, e))?;
     let mut bytes = Vec::new();

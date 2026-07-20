@@ -51,6 +51,9 @@ walkdir = "2"
 # Base64 encoding for file downloads
 base64 = "0.22"
 
+# Async oneshot channel for bridging callback-based dialogs
+tokio = { version = "1", features = ["sync", "time"] }
+
 # DOCX export with native OMML math equations
 docx-export = { path = "crates/docx-export" }
 

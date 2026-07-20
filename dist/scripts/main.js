@@ -3213,7 +3213,7 @@ window.agentBridge = {
     console.log('[DEBUG Any [[...]] in raw HTML]:', bracketMatches);
 
     const embedRegex = /!\[\[([^\]]+)\]\]/g;
-    const textNodes = collectTextNodes('code, pre, .mermaid, a');
+    const textNodes = collectTextNodes(elements.markdownBody, 'code, pre, .mermaid, a');
     console.log('[DEBUG initObsidianEmbeds] Found textNodes:', textNodes.length);
 
     // Debug: show first 10 text node contents
@@ -4061,6 +4061,59 @@ window.agentBridge = {
     return { svg, width: logicalWidth, height: logicalHeight };
   }
 
+  // ============================================
+  // Export Progress Bar
+  // ============================================
+  let _exportProgressEl = null;
+
+  function getExportProgressEl() {
+    if (!_exportProgressEl) {
+      _exportProgressEl = document.getElementById('export-progress');
+      if (!_exportProgressEl) {
+        _exportProgressEl = document.createElement('div');
+        _exportProgressEl.id = 'export-progress';
+        _exportProgressEl.className = 'export-progress-overlay';
+        _exportProgressEl.innerHTML =
+          '<div class="export-progress-status">' +
+            '<span class="export-progress-label">正在准备导出...</span>' +
+            '<span class="export-progress-percent">0%</span>' +
+          '</div>' +
+          '<div class="export-progress-track">' +
+            '<div class="export-progress-fill" id="export-progress-fill"></div>' +
+          '</div>';
+      document.body.appendChild(_exportProgressEl);
+      }
+    }
+    return _exportProgressEl;
+  }
+
+  function showExportProgress(label, percent) {
+    const el = getExportProgressEl();
+    el.classList.add('visible');
+    el.querySelector('.export-progress-label').textContent = label;
+    const fill = el.querySelector('.export-progress-fill');
+    fill.classList.remove('done');
+    const pct = Math.min(100, Math.max(0, percent));
+    fill.style.width = pct + '%';
+    el.querySelector('.export-progress-percent').textContent = pct + '%';
+  }
+
+  function hideExportProgress() {
+    const el = getExportProgressEl();
+    el.classList.remove('visible');
+    el.querySelector('.export-progress-fill').style.width = '0%';
+  }
+
+  function doneExportProgress() {
+    const el = getExportProgressEl();
+    const fill = el.querySelector('.export-progress-fill');
+    fill.style.width = '100%';
+    fill.classList.add('done');
+    el.querySelector('.export-progress-label').textContent = '导出完成 ✓';
+    el.querySelector('.export-progress-percent').textContent = '100%';
+    setTimeout(hideExportProgress, 2000);
+  }
+
   async function exportWord() {
     const tab = state.tabs[state.activeTab];
     if (!tab || !tab.content) {
@@ -4069,12 +4122,12 @@ window.agentBridge = {
     }
 
     try {
-      showToast('正在生成 Word 文档...');
+      showExportProgress('正在准备导出...', 0);
 
       const mermaidBlocks = findMermaidBlocks(tab.content);
       const mermaidImages = {};
       if (mermaidBlocks.length > 0) {
-        showToast(`正在渲染 ${mermaidBlocks.length} 个 Mermaid 图表...`);
+        showExportProgress(`正在渲染 Mermaid 图表 (1/${mermaidBlocks.length})...`, 5);
 
         // Export with the light theme so text is dark on Word's white background.
         // Restore the editor theme afterwards so the live preview is not affected.
@@ -4128,6 +4181,8 @@ window.agentBridge = {
         };
 
         try {
+          let mermaidDone = 0;
+          const totalMermaid = mermaidBlocks.length;
           await Promise.all(
             mermaidBlocks.map(async (source) => {
               try {
@@ -4144,6 +4199,9 @@ window.agentBridge = {
                 console.error('Mermaid render failed for:', preview, err);
                 showError('Mermaid 渲染失败，将导出源码: ' + (err.message || err));
               }
+              mermaidDone++;
+              const pct = 5 + Math.round((mermaidDone / totalMermaid) * 55);
+              showExportProgress(`正在渲染 Mermaid 图表 (${mermaidDone}/${totalMermaid})...`, pct);
             })
           );
 
@@ -4177,15 +4235,37 @@ window.agentBridge = {
         }
       }
 
-      const result = await invoke('export_word', {
-        markdown: tab.content,
-        fileName: tab.name,
-        filePath: tab.path || '',
-        mermaidImages
-      });
-      showToast('Word 导出成功: ' + result);
+      // Listen for real-time progress from the Rust backend
+      let unlistenProgress = null;
+      if (window.__TAURI__ && window.__TAURI__.event) {
+        unlistenProgress = await window.__TAURI__.event.listen('export-progress', (event) => {
+          const { stage, percent, message } = event.payload;
+          const label = message || stage;
+          if (percent >= 100) {
+            doneExportProgress();
+          } else {
+            showExportProgress(label, percent);
+          }
+        });
+      } else {
+        // Fallback: show indeterminate progress
+        showExportProgress('正在生成 Word 文档...', 70);
+      }
+
+      try {
+        const result = await invoke('export_word', {
+          markdown: tab.content,
+          fileName: tab.name,
+          filePath: tab.path || '',
+          mermaidImages
+        });
+        doneExportProgress();
+      } finally {
+        if (unlistenProgress) unlistenProgress();
+      }
     } catch (err) {
       console.error('Word export failed:', err);
+      hideExportProgress();
       showError('Word 导出失败: ' + err);
     }
   }
