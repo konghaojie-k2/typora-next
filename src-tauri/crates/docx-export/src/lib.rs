@@ -9,9 +9,17 @@ use docx_rs::*;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use image::GenericImageView;
 
 const MATH_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
+
+/// Max image width in pixels for DOCX output.
+/// Docx-rs default A4: page=11906twips, margins=1701twips each side
+/// → body width = 8504 twips = 5.906 inches.
+/// 540px * 9525 EMU/px = 5,143,500 EMU = 5.625 inches (≈ 0.14in margin each side).
+const MAX_IMAGE_WIDTH_PX: u32 = 540;
 
 /// Math expression types
 #[derive(Debug, Clone, PartialEq)]
@@ -238,14 +246,19 @@ pub fn markdown_to_docx(markdown: &str, base_dir: &Path) -> Result<Vec<u8>, Stri
     // 2. Extract math blocks (skipping code blocks) and replace with placeholders.
     let (protected_md, math_blocks) = preprocess_math_skip_code_blocks(&md);
 
-    // 3. Walk pulldown-cmark events and build a docx-rs document.
-    let docx = Converter::new(base_dir).run(&protected_md)?;
+    // 3. Replace [toc] with TOC placeholder (case-insensitive, whole-line).
+    let protected_toc = replace_toc_placeholder(&protected_md);
 
-    // 4. Build XML representation and inject OMML equations.
+    // 4. Walk pulldown-cmark events and build a docx-rs document.
+    let docx = Converter::new(base_dir).run(&protected_toc)?;
+
+    // 5. Build XML representation and inject OMML equations.
     let mut xml_docx = docx.build();
     inject_math_omml(&mut xml_docx, &math_blocks)?;
+    inject_toc_styles(&mut xml_docx);
+    enable_update_fields_on_open(&mut xml_docx);
 
-    // 5. Pack to bytes.
+    // 6. Pack to bytes.
     let mut buf = Vec::new();
     xml_docx
         .pack(std::io::Cursor::new(&mut buf))
@@ -270,21 +283,89 @@ pub fn markdown_to_docx_with_mermaid(
     // 2. Extract math blocks (skipping code blocks) and replace with placeholders.
     let (protected_md, math_blocks) = preprocess_math_skip_code_blocks(&md);
 
-    // 3. Walk pulldown-cmark events and build a docx-rs document.
+    // 3. Replace [toc] with TOC placeholder (case-insensitive, whole-line).
+    let protected_toc = replace_toc_placeholder(&protected_md);
+
+    // 4. Walk pulldown-cmark events and build a docx-rs document.
     let docx = Converter::new(base_dir)
         .with_mermaid_images(mermaid_images.clone())
-        .run(&protected_md)?;
+        .run(&protected_toc)?;
 
-    // 4. Build XML representation and inject OMML equations.
+    // 5. Build XML representation and inject OMML equations.
     let mut xml_docx = docx.build();
     inject_math_omml(&mut xml_docx, &math_blocks)?;
+    inject_toc_styles(&mut xml_docx);
+    enable_update_fields_on_open(&mut xml_docx);
 
-    // 5. Pack to bytes.
+    // 6. Pack to bytes.
     let mut buf = Vec::new();
     xml_docx
         .pack(std::io::Cursor::new(&mut buf))
         .map_err(|e| format!("DOCX pack failed: {}", e))?;
     Ok(buf)
+}
+
+/// Inject `toc 1`–`toc 5` paragraph styles into styles.xml.
+///
+/// When Word updates a TOC field it formats each entry with the built-in
+/// `toc N` style. If those styles are missing from styles.xml the entries
+/// render as plain Normal paragraphs — no dot leaders, no right-aligned page
+/// numbers, no level indentation. docx-rs 0.4.20's `Style` builder has no
+/// tab-stop support, so the styles are appended as raw XML.
+///
+/// Tab position 8504 twips = page width (11906) - left/right margins (1701×2),
+/// i.e. the right edge of the body text area.
+fn inject_toc_styles(xml_docx: &mut XMLDocx) {
+    let styles = String::from_utf8_lossy(&xml_docx.styles).to_string();
+    if styles.contains("w:styleId=\"TOC1\"") {
+        return;
+    }
+    let mut toc_styles = String::new();
+    for level in 1..=5usize {
+        let indent = (level - 1) * 240;
+        toc_styles.push_str(&format!(
+            "<w:style w:type=\"paragraph\" w:styleId=\"TOC{level}\">\
+                <w:name w:val=\"toc {level}\"/>\
+                <w:basedOn w:val=\"Normal\"/>\
+                <w:next w:val=\"Normal\"/>\
+                <w:pPr>\
+                    <w:tabs><w:tab w:val=\"right\" w:leader=\"dot\" w:pos=\"8504\"/></w:tabs>\
+                    <w:spacing w:after=\"100\"/>\
+                    <w:ind w:left=\"{indent}\"/>\
+                </w:pPr>\
+            </w:style>"
+        ));
+    }
+    let patched = styles.replace("</w:styles>", &format!("{}</w:styles>", toc_styles));
+    xml_docx.styles = patched.into_bytes();
+}
+
+/// Inject `<w:updateFields w:val="true"/>` into settings.xml so Word prompts to
+/// update fields (including the TOC field) when the document is opened.
+/// This is how real Word documents with a TOC behave: on open, Word asks
+/// "This document contains fields that may refer to other files. Do you want
+/// to update the fields?" and regenerates the TOC automatically.
+fn enable_update_fields_on_open(xml_docx: &mut XMLDocx) {
+    let settings = String::from_utf8_lossy(&xml_docx.settings).to_string();
+    if settings.contains("updateFields") {
+        return;
+    }
+    // Insert right after the <w:settings ...> opening tag.
+    let patched = if let Some(pos) = settings.find("<w:settings") {
+        if let Some(end) = settings[pos..].find('>') {
+            let insert_at = pos + end + 1;
+            format!(
+                "{}<w:updateFields w:val=\"true\"/>{}",
+                &settings[..insert_at],
+                &settings[insert_at..]
+            )
+        } else {
+            settings
+        }
+    } else {
+        settings
+    };
+    xml_docx.settings = patched.into_bytes();
 }
 
 // ============================================================================
@@ -357,6 +438,20 @@ fn preprocess_math_skip_code_blocks(text: &str) -> (String, Vec<(String, String,
     }
 
     (result, stored)
+}
+
+/// Replace `[toc]` (case-insensitive, whole-line) with a TOC placeholder.
+/// The placeholder is later detected in the paragraph builder and converted to
+/// a Word native TOC field.
+///
+/// Line-ending note: `\s*` is NOT used around `\[toc\]` because `\s` includes
+/// `\n`, which would consume the blank-line paragraph separators. Instead we
+/// allow leading/trailing `[ \t]` and an optional trailing `\r` so the pattern
+/// matches on Windows CRLF files (`[toc]\r\n`) as well as LF files.
+pub fn replace_toc_placeholder(text: &str) -> String {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| Regex::new(r"(?mi)^[ \t]*\[toc\][ \t]*\r?$").unwrap());
+    re.replace_all(text, "%%TOC%%").to_string()
 }
 
 fn find_code_block_ranges(text: &str) -> Vec<(usize, usize)> {
@@ -603,6 +698,59 @@ fn split_into_paragraphs(xml: &str) -> Vec<DocxSegment> {
     }
 
     segments
+}
+
+/// Detect a hand-written TOC section and replace it with a Word TOC field.
+///
+/// Chinese documents almost always carry a manually typed TOC instead of a
+/// `[toc]` marker:
+///
+/// ```markdown
+/// ## 目录
+///
+/// 1. 第一章 …
+/// 2. 第二章 …
+/// ```
+///
+/// This transform replaces the "目录"/"Contents" heading with a
+/// `BlockItem::TocPlaceholder` (which expands to a Word TOC field that Word
+/// regenerates from the real headings) and drops the immediately-following
+/// list items, since Word will produce those entries itself.
+fn collapse_handwritten_toc(blocks: Vec<BlockItem>) -> Vec<BlockItem> {
+    let mut out: Vec<BlockItem> = Vec::with_capacity(blocks.len());
+    let mut iter = blocks.into_iter().peekable();
+    while let Some(block) = iter.next() {
+        let is_toc_heading = match &block {
+            BlockItem::Heading(_, inlines) => {
+                is_toc_heading_text(&inlines_to_plain_text(inlines))
+            }
+            _ => false,
+        };
+        if is_toc_heading {
+            out.push(BlockItem::TocPlaceholder);
+            // Drop the hand-written entries: every consecutive list item that
+            // directly follows the TOC heading.
+            while matches!(iter.peek(), Some(BlockItem::ListItem { .. })) {
+                iter.next();
+            }
+            continue;
+        }
+        out.push(block);
+    }
+    out
+}
+
+/// Match heading texts that mark a hand-written table of contents.
+/// Whitespace (incl. full-width) is stripped before comparison so that
+/// "目录", "目 录", "目　录" and "Contents" variants all match.
+fn is_toc_heading_text(text: &str) -> bool {
+    let t: String = text
+        .trim()
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace() && *c != '\u{3000}')
+        .collect();
+    matches!(t.as_str(), "目录" | "目次" | "contents" | "tableofcontents")
 }
 
 // ============================================================================
@@ -1043,6 +1191,7 @@ enum BlockItem {
     MathBlock {
         idx: usize,
     },
+    TocPlaceholder,
     Table {
         rows: Vec<Vec<Vec<InlineItem>>>,
         alignments: Vec<pulldown_cmark::Alignment>,
@@ -1118,9 +1267,15 @@ impl Converter {
         }
         state.finish();
 
+        // Collapse a hand-written TOC section (a "目录"/"Contents" heading
+        // followed by a list of chapter titles) into a Word TOC field block.
+        // Real Chinese documents almost always carry a manually typed TOC
+        // like `## 目录` + numbered list instead of a `[toc]` marker.
+        let blocks = collapse_handwritten_toc(state.blocks);
+
         // Collect list numbering requirements.
         let mut list_kinds: HashMap<usize, ListKind> = HashMap::new();
-        for block in &state.blocks {
+        for block in &blocks {
             if let BlockItem::ListItem {
                 numbering_id, kind, ..
             } = block
@@ -1140,7 +1295,7 @@ impl Converter {
         // "表1：描述" / "Table 1: description" becomes the table's caption above it.
         let mut processed_blocks: Vec<BlockItem> = Vec::new();
         let mut table_counter = 0usize;
-        for block in state.blocks {
+        for block in blocks {
             if let BlockItem::Table { rows, alignments } = block {
                 if let Some(BlockItem::Paragraph(inlines, _)) = processed_blocks.last() {
                     let text = inlines_to_plain_text(inlines);
@@ -1194,6 +1349,11 @@ impl Converter {
                         ));
                     } else {
                         docx = docx.add_paragraph(self.block_to_paragraph(block));
+                    }
+                }
+                BlockItem::TocPlaceholder => {
+                    for para in self.build_toc_paragraphs() {
+                        docx = docx.add_paragraph(para);
                     }
                 }
                 _ => docx = docx.add_paragraph(self.block_to_paragraph(block)),
@@ -1297,6 +1457,41 @@ impl Converter {
             );
         }
         abs
+    }
+
+    /// Build the TOC block: a "目录" caption paragraph followed by the Word TOC
+    /// field paragraph. The field paragraph ends with a page break so the body
+    /// content starts on a fresh page — the TOC itself stays on the same page
+    /// as the document title that precedes it.
+    ///
+    /// Per OOXML, `w:dirty` is only valid on the `begin` fldChar; putting it on
+    /// `separate`/`end` makes some Word versions treat the field as corrupt.
+    /// The page-break run sits AFTER the `end` fldChar, so it survives field
+    /// updates (only the content between `separate` and `end` gets replaced).
+    fn build_toc_paragraphs(&self) -> Vec<Paragraph> {
+        // "目录" caption: direct formatting only, no heading style and no
+        // outline level, so it never appears inside the TOC itself.
+        let title = Paragraph::new().align(AlignmentType::Center).add_run(
+            Run::new().bold().size(32).add_text("目  录"),
+        );
+
+        let field = Paragraph::new()
+            .add_run(Run::new().add_field_char(FieldCharType::Begin, true))
+            .add_run(
+                Run::new().add_instr_text(InstrText::TOC(
+                    InstrToC::new()
+                        .heading_styles_range(1, 5)
+                        .hyperlink()
+                        .hide_tab_and_page_numbers_in_webview()
+                        .use_applied_paragraph_line_level(),
+                )),
+            )
+            .add_run(Run::new().add_field_char(FieldCharType::Separate, false))
+            .add_run(Run::new().add_text("（打开文档后自动更新生成目录）"))
+            .add_run(Run::new().add_field_char(FieldCharType::End, false))
+            .add_run(Run::new().add_break(BreakType::Page));
+
+        vec![title, field]
     }
 
     fn build_caption_paragraph(
@@ -1420,6 +1615,10 @@ impl Converter {
                         .set(ParagraphBorder::new(ParagraphBorderPosition::Bottom).color("CCCCCC")),
                 );
                 para
+            }
+            BlockItem::TocPlaceholder => {
+                // Handled directly by Converter::run (expands to 2 paragraphs).
+                Paragraph::new()
             }
             BlockItem::Table { .. } | BlockItem::TableCaption(_, _) | BlockItem::Caption(_, _) => {
                 // Tables and captions are handled directly by Converter::run.
@@ -1768,7 +1967,22 @@ impl<'a> ParserState<'a> {
         if let Some(builder) = self.block_stack.pop() {
             let block = match builder {
                 BlockBuilder::Paragraph(inlines) => {
-                    if let [InlineItem::Math { idx }] = inlines.as_slice() {
+                    // Detect TOC placeholder (standalone %%TOC%% on its own paragraph)
+                    if let [InlineItem::Text(ref t)] = inlines.as_slice() {
+                        let trimmed = t.trim();
+                        if trimmed == "%%TOC%%" {
+                            BlockItem::TocPlaceholder
+                        } else if let [InlineItem::Math { idx }] = inlines.as_slice() {
+                            BlockItem::MathBlock { idx: *idx }
+                        } else {
+                            BlockItem::Paragraph(
+                                inlines,
+                                QuoteInfo {
+                                    depth: self.blockquote_depth,
+                                },
+                            )
+                        }
+                    } else if let [InlineItem::Math { idx }] = inlines.as_slice() {
                         BlockItem::MathBlock { idx: *idx }
                     } else {
                         BlockItem::Paragraph(
@@ -2095,7 +2309,26 @@ fn read_image(path: &str) -> Result<Pic, String> {
     } else {
         std::fs::read(path).map_err(|e| format!("Cannot read image {}: {}", path, e))?
     };
-    Ok(Pic::new(&bytes))
+
+    // Load image to determine and optionally constrain dimensions
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| format!("Cannot decode image {}: {}", path, e))?;
+    let (w, h) = img.dimensions();
+
+    // Constrain width to MAX_IMAGE_WIDTH_PX, scale height proportionally
+    let (out_w, out_h) = if w > MAX_IMAGE_WIDTH_PX {
+        let ratio = h as f64 / w as f64;
+        (MAX_IMAGE_WIDTH_PX, (MAX_IMAGE_WIDTH_PX as f64 * ratio).round() as u32)
+    } else {
+        (w, h)
+    };
+
+    // Re-encode as PNG (docx-rs only supports PNG)
+    let mut png_buf = Vec::new();
+    img.write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png)
+        .map_err(|e| format!("Cannot re-encode image {} as PNG: {}", path, e))?;
+
+    Ok(Pic::new_with_dimensions(png_buf, out_w, out_h))
 }
 
 fn fetch_image_bytes(url: &str) -> Result<Vec<u8>, String> {

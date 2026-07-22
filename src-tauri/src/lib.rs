@@ -6,12 +6,13 @@ use std::collections::HashMap;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::path::{PathBuf};
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod ai_agent;
 pub mod paper_import;
+mod docx_template;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
 
@@ -963,6 +964,7 @@ async fn export_word(
     file_name: String,
     file_path: String,
     mermaid_images: Option<HashMap<String, MermaidSvgInfo>>,
+    template_path: Option<String>,
     app: tauri::AppHandle,
 ) -> Result<String, String> {
     // Prepare local log
@@ -1043,6 +1045,29 @@ async fn export_word(
         "[export_word] DOCX 生成完成: {} 字节",
         bytes.len()
     ));
+
+    // Apply template styles/numbering if a template was provided.
+    let bytes = if let Some(tp) = &template_path {
+        log_export(&format!("[export_word] 应用模板: {}", tp));
+        let tp_path = Path::new(tp);
+        if tp_path.exists() {
+            match docx_template::apply_template(&bytes, tp_path) {
+                Ok(b) => {
+                    log_export("[export_word] 模板应用成功");
+                    b
+                }
+                Err(e) => {
+                    log_export(&format!("[export_word] 模板应用失败: {}", e));
+                    return Err(format!("模板应用失败: {}", e));
+                }
+            }
+        } else {
+            log_export("[export_word] 模板文件不存在，跳过");
+            bytes
+        }
+    } else {
+        bytes
+    };
 
     let _ = app.emit(
         "export-progress",
@@ -4498,3 +4523,5 @@ pub fn run() {
             _ => {}
         });
 }
+
+// apply_template lives in docx_template module — see src/docx_template.rs

@@ -11,6 +11,8 @@ latex2mathml = "0.2.3"
 deckmint-math = "0.1.7"
 regex = "1"
 ureq = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [dev-dependencies]
 zip = "2"
+png = "0.17"

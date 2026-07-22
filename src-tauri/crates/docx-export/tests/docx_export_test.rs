@@ -852,3 +852,289 @@ fn test_list_with_bold() {
         "bold should be preserved in list items"
     );
 }
+
+/// Test [toc] is converted to a Word TOC field.
+#[test]
+fn test_toc_placeholder() {
+    let md = "# Heading 1\n\n[toc]\n\nSome text";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    // Should NOT contain %%TOC%% as text
+    assert!(!xml.contains("%%TOC%%"), "%%TOC%% must not remain as plain text");
+    // Should NOT contain literal [toc]
+    assert!(!xml.contains("[toc]"), "[toc] must not appear as plain text");
+
+    // Must contain the TOC field instruction with proper structure
+    assert!(
+        xml.contains("<w:instrText"),
+        "must have field instruction element"
+    );
+    assert!(
+        xml.contains("TOC \\o"),
+        "TOC instruction must specify heading levels, got XML that contains TOC"
+    );
+}
+
+/// Test [TOC] uppercase variant is also detected.
+#[test]
+fn test_toc_uppercase() {
+    let md = "# Heading 1\n\n[TOC]\n\nSome text\n\nMore";
+    let protected = docx_export::replace_toc_placeholder(md);
+    assert!(protected.contains("%%TOC%%"), "uppercase [TOC] should be replaced");
+}
+
+/// Test [toc] on a Windows CRLF file is detected (the `$` anchor must not be
+/// defeated by the trailing `\r`).
+#[test]
+fn test_toc_crlf() {
+    let md = "# Heading 1\r\n\r\n[toc]\r\n\r\nSome text";
+    let protected = docx_export::replace_toc_placeholder(md);
+    assert!(
+        protected.contains("%%TOC%%"),
+        "[toc] on CRLF line endings must be replaced, got: {:?}",
+        protected
+    );
+
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+    assert!(
+        !xml.contains("[toc]"),
+        "literal [toc] must not appear in the DOCX"
+    );
+    assert!(
+        xml.contains("<w:instrText"),
+        "TOC field instruction must be present in the DOCX"
+    );
+}
+
+/// Test [toc] with leading/trailing spaces is detected.
+#[test]
+fn test_toc_with_spaces() {
+    let md = "# H\n\n  [toc]  \n\ntext";
+    let protected = docx_export::replace_toc_placeholder(md);
+    assert!(
+        protected.contains("%%TOC%%"),
+        "[toc] with surrounding spaces must be replaced, got: {:?}",
+        protected
+    );
+}
+
+/// Test a hand-written TOC section ("## 目录" + numbered list) is replaced by
+/// a Word TOC field, and the hand-typed entries are removed from the body.
+#[test]
+fn test_handwritten_toc_section() {
+    let md = "# 启机模型数据预处理验收文档\n\n\
+## 目录\n\n\
+1. 项目背景、数据说明与验收范围\n\
+2. 预处理算法能力总览\n\
+3. 数据表结构定义\n\n\
+## 1. 项目背景、数据说明与验收范围\n\n\
+本次验收面向机组启机过程的离线复盘。\n\n\
+## 2. 预处理算法能力总览\n\n\
+本章从业务目标与价值说明预处理算法。\n";
+
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    // Must contain the TOC field instruction.
+    assert!(
+        xml.contains("<w:instrText"),
+        "hand-written TOC section must become a Word TOC field"
+    );
+    // The hand-written entries must be dropped (they only exist as headings now).
+    // "预处理算法能力总览" appears once as the H2 heading, and must NOT also
+    // appear as a numbered list item.
+    let occurrences = xml.matches("预处理算法能力总览").count();
+    assert_eq!(
+        occurrences, 1,
+        "hand-written TOC entry must be removed (only the real heading remains), found {}",
+        occurrences
+    );
+    // No list numbering should remain where the hand TOC was.
+    // (The document has no other lists, so no numPr should exist at all.)
+    assert!(
+        !xml.contains("<w:numPr>"),
+        "hand-written TOC list items must not produce numbered list markup"
+    );
+    // Body headings are still headings.
+    assert!(xml.contains(r#"w:pStyle w:val="Heading2""#));
+}
+
+/// Test a "目录" heading WITHOUT a following list also becomes a TOC field.
+#[test]
+fn test_handwritten_toc_heading_only() {
+    let md = "# Title\n\n## 目录\n\n## 第一章\n\n内容\n";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    assert!(
+        xml.contains("<w:instrText"),
+        "bare 目录 heading must still become a Word TOC field"
+    );
+    assert!(
+        xml.contains("第一章"),
+        "following body heading must be preserved"
+    );
+}
+
+/// Test a bullet-style hand-written TOC is also collapsed.
+#[test]
+fn test_handwritten_toc_bullet_list() {
+    let md = "# Title\n\n## 目录\n\n- 第一章\n- 第二章\n\n## 第一章\n\n内容\n";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    assert!(xml.contains("<w:instrText"));
+    assert!(
+        !xml.contains("<w:numPr>"),
+        "bullet TOC entries must be removed"
+    );
+}
+
+/// Test that a heading whose text merely CONTAINS 目录 as part of a longer
+/// title is NOT treated as a TOC section.
+#[test]
+fn test_toc_heading_exact_match_only() {
+    let md = "# 附录目录结构说明\n\n正文内容\n";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    assert!(
+        !xml.contains("<w:instrText"),
+        "longer heading containing 目录 must NOT become a TOC field"
+    );
+    assert!(xml.contains("附录目录结构说明"));
+}
+
+/// Test the exported DOCX asks Word to update fields on open (for TOC).
+#[test]
+fn test_update_fields_on_open() {
+    let md = "# Heading 1\n\n[toc]\n\nSome text";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+    let mut settings = String::new();
+    std::io::Read::read_to_string(
+        &mut archive.by_name("word/settings.xml").unwrap(),
+        &mut settings,
+    )
+    .unwrap();
+    assert!(
+        settings.contains("updateFields"),
+        "settings.xml must contain <w:updateFields w:val=\"true\"/> so Word regenerates the TOC on open"
+    );
+}
+
+/// Test TOC paragraph styles (toc 1..5) with dot-leader tabs are injected into
+/// styles.xml so Word renders a native-looking table of contents.
+#[test]
+fn test_toc_styles_injected() {
+    let md = "# Heading 1\n\n[toc]\n\nSome text";
+    let bytes = docx_export::markdown_to_docx(md, Path::new(".")).unwrap();
+    let styles_xml = extract_docx_file(&bytes, "word/styles.xml");
+
+    for level in 1..=5 {
+        assert!(
+            styles_xml.contains(&format!("w:styleId=\"TOC{}\"", level)),
+            "styles.xml must define the toc {} style",
+            level
+        );
+    }
+    assert!(
+        styles_xml.contains("w:leader=\"dot\""),
+        "toc styles must have dot-leader tab stops"
+    );
+    assert!(
+        styles_xml.contains("w:pos=\"8504\""),
+        "toc styles must right-align page numbers at the body width (8504 twips)"
+    );
+
+    // The TOC field paragraph must end with a page break (body starts on a new
+    // page), and must NOT begin with one (TOC stays on the title's page).
+    let doc_xml = extract_document_xml(&bytes);
+    let fld_begin = doc_xml.find("w:fldCharType=\"begin\"").expect("field begin");
+    let fld_end = doc_xml.find("w:fldCharType=\"end\"").expect("field end");
+    let page_break = doc_xml.find("w:type=\"page\"").expect("page break");
+    assert!(
+        page_break > fld_end,
+        "page break must come AFTER the field end (body starts on next page)"
+    );
+    assert!(
+        page_break > fld_begin,
+        "sanity: page break after field begin"
+    );
+    // "目录" caption text must be present before the field.
+    assert!(
+        doc_xml.contains("目"),
+        "TOC caption text should be present"
+    );
+}
+
+/// Create a test PNG image at the given dimensions.
+fn create_test_png(width: u32, height: u32) -> Vec<u8> {
+    use std::io::Cursor;
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut encoder = png::Encoder::new(&mut cursor, width, height);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header().unwrap();
+        let pixel_data: Vec<u8> = vec![255u8; (width * 3 * height) as usize];
+        writer.write_image_data(&pixel_data).unwrap();
+    }
+    cursor.into_inner()
+}
+
+/// Test image wider than MAX_IMAGE_WIDTH_PX is constrained.
+#[test]
+fn test_image_size_constrained() {
+    let dir = std::env::temp_dir().join("typora_docx_test_image_constrain");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // Create a 2000×1000 synthetic PNG image (wider than MAX_IMAGE_WIDTH_PX = 650).
+    let png_bytes = create_test_png(2000, 1000);
+    let img_path = dir.join("wide.png");
+    std::fs::write(&img_path, &png_bytes).unwrap();
+
+    let md = &format!("![wide]({})", img_path.display());
+    let bytes = docx_export::markdown_to_docx(md, &dir).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    // 540px * 9525 EMU/px = 5143500, height scaled: 540 * 1000/2000 = 270px → 270 * 9525 = 2571750
+    assert!(
+        xml.contains(r#"cx="5143500""#),
+        "image width should be constrained to 540px (5143500 EMU)"
+    );
+    assert!(
+        xml.contains(r#"cy="2571750""#),
+        "image height should be proportionally scaled"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Test small image is NOT upscaled beyond its natural size.
+#[test]
+fn test_small_image_not_upscaled() {
+    let dir = std::env::temp_dir().join("typora_docx_test_small");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    // 32×32 small image
+    let png_bytes = create_test_png(32, 32);
+    let img_path = dir.join("small.png");
+    std::fs::write(&img_path, &png_bytes).unwrap();
+
+    let md = &format!("![small]({})", img_path.display());
+    let bytes = docx_export::markdown_to_docx(md, &dir).unwrap();
+    let xml = extract_document_xml(&bytes);
+
+    // 32px * 9525 = 304800 EMU — small images stay their natural size.
+    assert!(
+        xml.contains(r#"cx="304800""#),
+        "small image should not be upscaled: expected 304800 EMU"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

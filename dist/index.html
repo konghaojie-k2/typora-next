@@ -302,18 +302,23 @@
           <button class="modal-btn modal-btn-secondary" id="restartOnboardingBtn" type="button">重新显示引导</button>
           <span class="setting-hint">再次显示工具栏功能介绍</span>
         </div>
-        <div class="settings-about-link">
-          <span id="settingsAboutBtn" class="about-link-text">关于 Typora Next</span>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button class="modal-btn modal-btn-secondary" id="settingsCancel">取消</button>
-        <button class="modal-btn modal-btn-primary" id="settingsSave">保存</button>
-      </div>
-    </div>
-  </div>
+	        <div class="setting-item">
+	          <label class="setting-label" for="settingWordTemplate">Word 导出模板</label>
+	          <input type="checkbox" id="settingWordTemplate" class="setting-checkbox">
+	          <span class="setting-hint">启用后每次导出 Word 时可选择模板 .docx 文件控制输出样式</span>
+	        </div>
+	        <div class="settings-about-link">
+	          <span id="settingsAboutBtn" class="about-link-text">关于 Typora Next</span>
+	        </div>
+	      </div>
+	      <div class="modal-footer">
+	        <button class="modal-btn modal-btn-secondary" id="settingsCancel">取消</button>
+	        <button class="modal-btn modal-btn-primary" id="settingsSave">保存</button>
+	      </div>
+	    </div>
+	  </div>
 
-  <!-- About Modal -->
+	  <!-- About Modal -->
   <div class="modal-overlay" id="aboutModal" style="display: none;">
     <div class="modal-content about-modal-content">
       <div class="modal-header">

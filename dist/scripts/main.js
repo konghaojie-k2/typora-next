@@ -113,6 +113,7 @@ window.agentBridge = {
     settingMineruModel: document.getElementById('settingMineruModel'),
     settingTheme: document.getElementById('settingTheme'),
     settingCustomCursor: document.getElementById('settingCustomCursor'),
+    settingWordTemplate: document.getElementById('settingWordTemplate'),
     settingsModalClose: document.getElementById('settingsModalClose'),
     settingsCancel: document.getElementById('settingsCancel'),
     settingsSave: document.getElementById('settingsSave'),
@@ -3640,12 +3641,13 @@ window.agentBridge = {
     chip.classList.add(`status-${status}`);
     text.textContent = AGENT_STATUS_LABELS[status] || status;
 
+    const clickHint = '（点击重新检测）';
     if (status === 'missing') {
-      chip.title = errorMessage || '未检测到 Claude Code Agent SDK';
+      chip.title = errorMessage ? `${errorMessage} ${clickHint}` : `未检测到 Claude Code Agent SDK ${clickHint}`;
     } else if (status === 'ready') {
-      chip.title = 'Claude Code Agent SDK 已就绪';
+      chip.title = `Claude Code Agent SDK 已就绪 ${clickHint}`;
     } else if (status === 'idle') {
-      chip.title = '进入课程模式后自动检测 Agent SDK';
+      chip.title = `点击检测 Agent SDK ${clickHint}`;
     } else {
       chip.title = '正在检测 Claude Code Agent SDK…';
     }
@@ -3662,6 +3664,11 @@ window.agentBridge = {
         <div class="agent-missing-toast-body">
           <div class="agent-missing-toast-title">未检测到 Claude Code Agent</div>
           <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Agent SDK 才能使用。</div>
+          <div class="agent-missing-toast-install">
+            <p>打开终端执行：</p>
+            <code>npm install -g @anthropic-ai/claude-agent-sdk</code>
+            <button class="agent-missing-toast-copy" id="agentMissingCopyBtn">复制</button>
+          </div>
           <div class="agent-missing-toast-actions">
             <button class="agent-missing-toast-btn primary" id="agentMissingRetryBtn">重新检测</button>
             <button class="agent-missing-toast-btn" id="agentMissingDismissBtn">忽略</button>
@@ -3677,6 +3684,9 @@ window.agentBridge = {
       });
       toast.querySelector('#agentMissingDismissBtn').addEventListener('click', hideAgentMissingToast);
       toast.querySelector('#agentMissingCloseBtn').addEventListener('click', hideAgentMissingToast);
+      toast.querySelector('#agentMissingCopyBtn').addEventListener('click', () => {
+        navigator.clipboard.writeText('npm install -g @anthropic-ai/claude-agent-sdk').catch(() => {});
+      });
     }
 
     const hint = toast.querySelector('.agent-missing-toast-hint');
@@ -3723,9 +3733,9 @@ window.agentBridge = {
     if (!chip) return;
 
     chip.addEventListener('click', () => {
-      if (chip.classList.contains('status-missing')) {
-        checkAgentSdk();
-      }
+      // Click the chip at any state (idle / ready / missing) triggers a
+      // re-check, so the user has a clear way to verify after installing.
+      checkAgentSdk();
     });
 
     // Initial check is now gated behind entering learning mode; we only set up
@@ -4135,6 +4145,44 @@ window.agentBridge = {
       return;
     }
 
+    // Check if template toggle is on; if so, ask user to pick a .docx template.
+    let templatePath = null;
+    if (localStorage.getItem('wordExportUseTemplate') === 'true') {
+      const useTemplate = await _showConfirm('已启用 Word 模板样式。\n\n导出前是否先选择模板文件？\n\n• 选择模板：使用模板中的字体/字号/行距/编号样式\n• 取消：本次仍用默认样式导出');
+      if (useTemplate) {
+        try {
+          if (window.__TAURI__ && window.__TAURI__.dialog) {
+            const selected = await window.__TAURI__.dialog.open({
+              title: '选择 Word 样式模板',
+              filters: [{ name: 'Word 模板', extensions: ['docx'] }],
+              multiple: false
+            });
+            if (selected) {
+              templatePath = selected;
+            }
+          } else {
+            // Fallback for non-Tauri environment (web preview)
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.accept = '.docx';
+            const file = await new Promise((resolve) => {
+              input.onchange = () => resolve(input.files[0]);
+              input.click();
+            });
+            if (file) {
+              // For web preview, we can't get a real path; skip template
+              console.warn('[export-word] Template selection requires Tauri runtime');
+            }
+          }
+        } catch (err) {
+          console.warn('[export-word] Template selection failed:', err);
+          // Non-fatal: continue export without template
+        }
+      }
+      // If user cancelled the confirm or the file dialog, templatePath stays null
+      // and we export without a template.
+    }
+
     try {
       showExportProgress('正在准备导出...', 0);
 
@@ -4271,7 +4319,8 @@ window.agentBridge = {
           markdown: tab.content,
           fileName: tab.name,
           filePath: tab.path || '',
-          mermaidImages
+          mermaidImages,
+          templatePath: templatePath || null
         });
         doneExportProgress();
       } finally {
@@ -4894,6 +4943,10 @@ window.agentBridge = {
     if (elements.settingsModal) {
       elements.settingsModal.style.display = 'flex';
     }
+    // Load word template toggle from localStorage
+    if (elements.settingWordTemplate) {
+      elements.settingWordTemplate.checked = localStorage.getItem('wordExportUseTemplate') === 'true';
+    }
   }
 
   function closeSettings() {
@@ -5132,6 +5185,11 @@ window.agentBridge = {
       theme: theme || null,
       custom_cursor: customCursor || null
     };
+
+    // Save word template toggle to localStorage
+    if (elements.settingWordTemplate) {
+      localStorage.setItem('wordExportUseTemplate', elements.settingWordTemplate.checked ? 'true' : 'false');
+    }
 
     try {
       await invoke('set_config', { config });

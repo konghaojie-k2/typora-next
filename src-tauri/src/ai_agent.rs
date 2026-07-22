@@ -1163,7 +1163,7 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
             log::warn!("[ai_agent] bridge_path error: {}", e);
             return Ok(serde_json::json!({
                 "available": false,
-                "error": format!("agent-bridge.js not found: {}. 请安装 Node.js 并确保路径正确", e)
+                "error": format!("agent-bridge.js 未找到: {}. 请确保应用文件完整（重新安装）", e)
             }));
         }
     };

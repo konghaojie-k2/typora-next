@@ -959,6 +959,7 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  cursor: pointer;
   padding: 4px 10px;
   border-radius: var(--radius-full);
   background: var(--color-bg-tertiary);
@@ -989,10 +990,9 @@ main {
 .agent-status-chip.status-missing {
   background: var(--color-error-light);
   color: var(--color-error);
-  cursor: pointer;
 }
 
-.agent-status-chip.status-missing:hover {
+.agent-status-chip:hover {
   border-color: currentColor;
 }
 
@@ -1100,6 +1100,45 @@ main {
 
 .agent-missing-toast-btn.primary:hover {
   background: #dc2626;
+}
+
+.agent-missing-toast-install {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+}
+
+.agent-missing-toast-install p {
+  margin: 0 0 6px;
+  color: var(--color-text-secondary);
+}
+
+.agent-missing-toast-install code {
+  display: block;
+  padding: 6px 8px;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  word-break: break-all;
+  user-select: all;
+}
+
+.agent-missing-toast-copy {
+  margin-top: 6px;
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.agent-missing-toast-copy:hover {
+  background: var(--color-bg-tertiary);
 }
 
 .agent-missing-toast-close {
