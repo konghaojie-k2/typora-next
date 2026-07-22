@@ -130,7 +130,21 @@ window.agentBridge = {
     searchClose: document.getElementById('searchClose'),
     agentStatusChip: document.getElementById('agentStatusChip'),
     agentStatusDot: document.querySelector('#agentStatusChip .agent-status-dot'),
-    agentStatusText: document.querySelector('#agentStatusChip .agent-status-text')
+    agentStatusText: document.querySelector('#agentStatusChip .agent-status-text'),
+
+    // About modal
+    settingsAboutBtn: document.getElementById('settingsAboutBtn'),
+    aboutModal: document.getElementById('aboutModal'),
+    aboutModalClose: document.getElementById('aboutModalClose'),
+    aboutModalCloseBtn: document.getElementById('aboutModalCloseBtn'),
+    aboutVersion: document.getElementById('aboutVersion'),
+    aboutPlatform: document.getElementById('aboutPlatform'),
+    aboutIdentifier: document.getElementById('aboutIdentifier'),
+
+    // Update
+    updateBadge: document.getElementById('updateBadge'),
+    checkUpdateBtn: document.getElementById('checkUpdateBtn'),
+    updateStatus: document.getElementById('updateStatus')
   };
 
   // ============================================
@@ -4730,6 +4744,27 @@ window.agentBridge = {
       });
     }
 
+    // About modal
+    if (elements.settingsAboutBtn) {
+      elements.settingsAboutBtn.addEventListener('click', openAboutModal);
+    }
+    if (elements.aboutModalClose) {
+      elements.aboutModalClose.addEventListener('click', closeAboutModal);
+    }
+    if (elements.aboutModalCloseBtn) {
+      elements.aboutModalCloseBtn.addEventListener('click', closeAboutModal);
+    }
+    if (elements.aboutModal) {
+      elements.aboutModal.addEventListener('click', (e) => {
+        if (e.target === elements.aboutModal) closeAboutModal();
+      });
+    }
+
+    // Update check button
+    if (elements.checkUpdateBtn) {
+      elements.checkUpdateBtn.addEventListener('click', () => checkForUpdates(elements.updateStatus));
+    }
+
     if (elements.fileTreeSearch) {
       elements.fileTreeSearch.addEventListener('input', (e) => {
         filterFileTree(e.target.value);
@@ -4867,6 +4902,172 @@ window.agentBridge = {
     }
   }
 
+  // ============================================
+  // About Modal
+  // ============================================
+  async function openAboutModal() {
+    if (!elements.aboutModal) return;
+    // Load version info
+    try {
+      const info = await invoke('get_app_info');
+      if (elements.aboutVersion) elements.aboutVersion.textContent = info.version;
+      if (elements.aboutPlatform) elements.aboutPlatform.textContent = info.platform;
+      if (elements.aboutIdentifier) elements.aboutIdentifier.textContent = info.identifier;
+    } catch (err) {
+      console.error('Failed to load app info:', err);
+      if (elements.aboutVersion) elements.aboutVersion.textContent = '--';
+    }
+    elements.aboutModal.style.display = 'flex';
+  }
+
+  function closeAboutModal() {
+    if (elements.aboutModal) {
+      elements.aboutModal.style.display = 'none';
+    }
+  }
+
+  // ============================================
+  // Update Check
+  // ============================================
+  let _updateAvailableInfo = null;
+
+  async function checkForUpdates(showStatusEl) {
+    const statusEl = showStatusEl || elements.updateStatus;
+    if (statusEl) {
+      statusEl.textContent = '检查中…';
+      statusEl.className = 'about-update-status checking';
+    }
+
+    try {
+      const result = await window.Updater.check();
+      if (result.available) {
+        _updateAvailableInfo = result;
+        showUpdateBadge(true);
+        if (statusEl) {
+          statusEl.textContent = `发现新版本 ${result.version}，请更新`;
+          statusEl.className = 'about-update-status update-available';
+        }
+        // Ask user if they want to update now
+        if (!showStatusEl) {
+          // Auto-detected on startup — show a lightweight notification
+          askUpdateConfirmation(result);
+        }
+      } else {
+        showUpdateBadge(false);
+        if (statusEl) {
+          if (result.error) {
+            statusEl.textContent = '更新服务未配置，请设置 GitHub Release';
+            statusEl.className = 'about-update-status error';
+          } else {
+            statusEl.textContent = '已是最新版本 ✓';
+            statusEl.className = 'about-update-status up-to-date';
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[About] Update check error:', err);
+      if (statusEl) {
+        statusEl.textContent = '检查更新失败';
+        statusEl.className = 'about-update-status error';
+      }
+    }
+  }
+
+  function showUpdateBadge(show) {
+    if (elements.updateBadge) {
+      elements.updateBadge.style.display = show ? 'block' : 'none';
+    }
+    // Also update settings button tooltip
+    if (elements.settingsBtn) {
+      elements.settingsBtn.setAttribute('data-tooltip', show ? '设置（有可用更新）' : '设置');
+    }
+  }
+
+  async function askUpdateConfirmation(update) {
+    // Simple confirm dialog
+    const confirmed = await new Promise((resolve) => {
+      // Use a simple custom confirm or Tauri dialog if available
+      if (window.__TAURI__ && window.__TAURI__.core) {
+        // Emit a custom event that the update handler can pick up
+        window.__updateConfirmResolve = resolve;
+        showUpdateNotification(update);
+      } else {
+        resolve(false);
+      }
+    });
+
+    if (confirmed) {
+      await performUpdate(update);
+    }
+  }
+
+  function showUpdateNotification(update) {
+    // Create a lightweight notification banner
+    const existing = document.getElementById('updateNotification');
+    if (existing) existing.remove();
+
+    const notif = document.createElement('div');
+    notif.id = 'updateNotification';
+    notif.className = 'update-notification';
+    notif.innerHTML = `
+      <div class="update-notif-content">
+        <span class="update-notif-icon">📦</span>
+        <span class="update-notif-text">发现新版本 <strong>${update.version}</strong></span>
+        <div class="update-notif-actions">
+          <button class="update-notif-btn update-notif-primary" id="updateNotifInstall">更新</button>
+          <button class="update-notif-btn update-notif-skip" id="updateNotifSkip">稍后</button>
+        </div>
+      </div>
+      <button class="update-notif-close" id="updateNotifClose">&times;</button>
+    `;
+    document.body.appendChild(notif);
+
+    // Animate in
+    requestAnimationFrame(() => notif.classList.add('show'));
+
+    // Wire up buttons
+    document.getElementById('updateNotifInstall').addEventListener('click', () => {
+      notif.classList.remove('show');
+      setTimeout(() => notif.remove(), 300);
+      if (window.__updateConfirmResolve) window.__updateConfirmResolve(true);
+    });
+    document.getElementById('updateNotifSkip').addEventListener('click', () => {
+      notif.classList.remove('show');
+      setTimeout(() => notif.remove(), 300);
+      if (window.__updateConfirmResolve) window.__updateConfirmResolve(false);
+    });
+    document.getElementById('updateNotifClose').addEventListener('click', () => {
+      notif.classList.remove('show');
+      setTimeout(() => notif.remove(), 300);
+      if (window.__updateConfirmResolve) window.__updateConfirmResolve(false);
+    });
+  }
+
+  async function performUpdate(update) {
+    if (!update) return;
+    try {
+      if (elements.updateStatus) {
+        elements.updateStatus.textContent = '正在下载更新…';
+        elements.updateStatus.className = 'about-update-status checking';
+      }
+
+      await update.downloadAndInstall();
+
+      if (elements.updateStatus) {
+        elements.updateStatus.textContent = '更新已下载，正在重启…';
+      }
+
+      // Restart to apply update
+      await window.Updater.restart();
+    } catch (err) {
+      console.error('[Update] Download/install failed:', err);
+      if (elements.updateStatus) {
+        elements.updateStatus.textContent = '更新失败：' + (err.message || String(err));
+        elements.updateStatus.className = 'about-update-status error';
+      }
+    }
+  }
+
   async function testLLMConfig() {
     const apiKey = elements.settingApiKey ? elements.settingApiKey.value.trim() : '';
     const aiProvider = elements.settingAiProvider ? elements.settingAiProvider.value : 'anthropic';
@@ -4999,6 +5200,11 @@ window.agentBridge = {
     initAgentStatusIndicator();
 
     console.log('Typora Next initialized');
+
+    // Auto-check for updates on startup (delay to not block UI)
+    setTimeout(() => {
+      checkForUpdates(null);
+    }, 5000);
   }
 
   function checkPlatform() {

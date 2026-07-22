@@ -61,5 +61,13 @@
         "language": "zh-CN"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDI3NUU4NUMyMUMxRDZEQjkKUldTNWJSMGN3b1ZlSjZLcWlHaytETVBuekx2MWRkQWRHcytmRFloQW1SRjh6dFQvV2M5QkZyRDgK",
+      "endpoints": [
+        "https://github.com/konghaojie-k2/typora-next/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

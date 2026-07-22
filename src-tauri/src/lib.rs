@@ -824,6 +824,27 @@ fn get_platform() -> String {
     std::env::consts::OS.to_string()
 }
 
+/// Application info for the About dialog
+#[derive(Debug, Serialize)]
+struct AppInfo {
+    version: String,
+    name: String,
+    identifier: String,
+    platform: String,
+}
+
+/// Get application version and metadata for the About dialog
+#[tauri::command]
+fn get_app_info(app: tauri::AppHandle) -> AppInfo {
+    let package = app.package_info();
+    AppInfo {
+        version: package.version.to_string(),
+        name: package.name.to_string(),
+        identifier: app.config().identifier.clone(),
+        platform: std::env::consts::OS.to_string(),
+    }
+}
+
 /// Show the given file in the system file manager
 #[tauri::command]
 fn show_in_folder(path: String) -> Result<(), String> {
@@ -4324,6 +4345,8 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
             // When a new instance is launched while one is already running,
             // emit the file path to the existing instance
@@ -4450,7 +4473,8 @@ pub fn run() {
             import_paper_from_url,
             get_paper_import_status,
             create_project_subdir,
-            get_demo_file
+            get_demo_file,
+            get_app_info
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

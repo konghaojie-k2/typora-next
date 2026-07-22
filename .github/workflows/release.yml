@@ -45,8 +45,11 @@ jobs:
         with:
           tool: tauri-cli@2
 
-      - name: Build & bundle
+      - name: Build & bundle (signed)
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           cd src-tauri
           cargo tauri build --target ${{ matrix.target }}
@@ -54,6 +57,9 @@ jobs:
       - name: Create Universal macOS binary
         if: matrix.target == 'aarch64-apple-darwin'
         shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           rustup target add x86_64-apple-darwin
           cd src-tauri
@@ -81,11 +87,9 @@ jobs:
         id: version
         run: |
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            # Tag push: use tag name as version, full release
             echo "tag=${{ github.ref_name }}" >> $GITHUB_OUTPUT
             echo "prerelease=false" >> $GITHUB_OUTPUT
           else
-            # Push to master: nightly build with date+sha
             DATE=$(date +%Y%m%d)
             SHA=${GITHUB_SHA:0:7}
             echo "tag=nightly-${DATE}-${SHA}" >> $GITHUB_OUTPUT
@@ -96,6 +100,108 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      - name: Generate latest.json manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Extract app version from tauri.conf.json
+          VERSION=$(grep '"version"' src-tauri/tauri.conf.json | head -1 | sed 's/.*: "\([^"]*\)".*/\1/')
+          echo "App version: $VERSION"
+          TAG=${{ steps.version.outputs.tag }}
+          REPO="${{ github.repository }}"
+
+          # Build platforms JSON using jq
+          PLATFORMS='{}'
+
+          # Walk all bundle directories in downloaded artifacts
+          for artifact_dir in artifacts/*/; do
+            [ -d "$artifact_dir" ] || continue
+
+            # Determine platform key from directory name
+            dir_name=$(basename "$artifact_dir")
+            platform=""
+            case "$dir_name" in
+              *x86_64-pc-windows-msvc*)   platform="windows-x86_64" ;;
+              *x86_64-apple-darwin*)       platform="darwin-x86_64" ;;
+              *aarch64-apple-darwin*)      platform="darwin-aarch64" ;;
+              *universal-apple-darwin*)    platform="darwin-universal" ;;
+            esac
+            [ -z "$platform" ] && continue
+
+            # Find installer file (prefer .tar.gz for macOS, .exe for Windows, skip .msi)
+            installer=""
+            if [[ "$platform" == windows-* ]]; then
+              installer=$(find "$artifact_dir" -name "*.exe" ! -name "*.exe.sig" 2>/dev/null | head -1)
+              # Fallback to .msi if no .exe
+              if [ -z "$installer" ]; then
+                installer=$(find "$artifact_dir" -name "*.msi" ! -name "*.msi.sig" 2>/dev/null | head -1)
+              fi
+            else
+              installer=$(find "$artifact_dir" -name "*.tar.gz" 2>/dev/null | head -1)
+              # Fallback to .dmg
+              if [ -z "$installer" ]; then
+                installer=$(find "$artifact_dir" -name "*.dmg" ! -name "*.dmg.sig" 2>/dev/null | head -1)
+              fi
+            fi
+
+            if [ -z "$installer" ]; then
+              echo "Warning: No installer found for $platform ($dir_name)"
+              continue
+            fi
+
+            # Find corresponding .sig file
+            sig_file="${installer}.sig"
+            if [ ! -f "$sig_file" ]; then
+              echo "Warning: No .sig file found for $installer"
+              continue
+            fi
+
+            sig_content=$(cat "$sig_file")
+            installer_name=$(basename "$installer")
+            url="https://github.com/${REPO}/releases/download/${TAG}/${installer_name}"
+
+            echo "  $platform → $installer_name"
+
+            # Add to platforms JSON
+            PLATFORMS=$(echo "$PLATFORMS" | jq \
+              --arg p "$platform" \
+              --arg u "$url" \
+              --arg s "$sig_content" \
+              '. + {($p): {"signature": $s, "url": $u}}')
+          done
+
+          # If universal is available, copy it to both darwin archs
+          UNIVERSAL=$(echo "$PLATFORMS" | jq -r '.["darwin-universal"] // empty')
+          if [ -n "$UNIVERSAL" ]; then
+            echo "Using universal binary for both darwin-x86_64 and darwin-aarch64"
+            # Only override if the specific arch entry is missing
+            EXISTING_X86=$(echo "$PLATFORMS" | jq -r '.["darwin-x86_64"] // empty')
+            EXISTING_ARM=$(echo "$PLATFORMS" | jq -r '.["darwin-aarch64"] // empty')
+            if [ -z "$EXISTING_X86" ]; then
+              PLATFORMS=$(echo "$PLATFORMS" | jq '. + {"darwin-x86_64": .["darwin-universal"]}')
+            fi
+            if [ -z "$EXISTING_ARM" ]; then
+              PLATFORMS=$(echo "$PLATFORMS" | jq '. + {"darwin-aarch64": .["darwin-universal"]}')
+            fi
+            PLATFORMS=$(echo "$PLATFORMS" | jq 'del(.["darwin-universal"])')
+          fi
+
+          # Write latest.json
+          PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          cat > latest.json << EOF
+          {
+            "version": "${VERSION}",
+            "notes": "",
+            "pub_date": "${PUB_DATE}",
+            "platforms": ${PLATFORMS}
+          }
+          EOF
+
+          echo ""
+          echo "=== latest.json ==="
+          cat latest.json
 
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
@@ -113,3 +219,5 @@ jobs:
             artifacts/**/*.tar.gz
             artifacts/**/*.deb
             artifacts/**/*.AppImage
+            artifacts/**/*.sig
+            latest.json

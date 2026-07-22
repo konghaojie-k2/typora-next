@@ -143,11 +143,12 @@
               <line x1="12" y1="2" x2="12" y2="15"/>
             </svg>
           </button>
-          <button class="btn-icon" id="settingsBtn" data-tooltip="设置">
+          <button class="btn-icon" id="settingsBtn" data-tooltip="设置" style="position:relative;">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="3"/>
               <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
             </svg>
+            <span class="update-badge" id="updateBadge" style="display:none;"></span>
           </button>
           <button class="btn-icon" id="themeToggle" data-tooltip="切换主题 (Ctrl+Shift+L)">
             <svg id="themeIconLight" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -301,10 +302,75 @@
           <button class="modal-btn modal-btn-secondary" id="restartOnboardingBtn" type="button">重新显示引导</button>
           <span class="setting-hint">再次显示工具栏功能介绍</span>
         </div>
+        <div class="settings-about-link">
+          <span id="settingsAboutBtn" class="about-link-text">关于 Typora Next</span>
+        </div>
       </div>
       <div class="modal-footer">
         <button class="modal-btn modal-btn-secondary" id="settingsCancel">取消</button>
         <button class="modal-btn modal-btn-primary" id="settingsSave">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- About Modal -->
+  <div class="modal-overlay" id="aboutModal" style="display: none;">
+    <div class="modal-content about-modal-content">
+      <div class="modal-header">
+        <h2>关于 Typora Next</h2>
+        <button class="modal-close" id="aboutModalClose">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="about-logo">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="about-logo-icon">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="16" y1="13" x2="8" y2="13"/>
+            <line x1="16" y1="17" x2="8" y2="17"/>
+            <polyline points="10 9 9 9 8 9"/>
+          </svg>
+        </div>
+        <div class="about-app-info">
+          <h3 class="about-app-name">Typora Next</h3>
+          <p class="about-app-desc">一个高质量的 Markdown 预览器</p>
+          <p class="about-release">重预览、轻编辑 · 极致数学渲染 · 丰富图表支持 · Obsidian 语法兼容</p>
+        </div>
+        <div class="about-version-section">
+          <div class="about-version-row">
+            <span class="about-label">版本号</span>
+            <span class="about-value" id="aboutVersion">--</span>
+          </div>
+          <div class="about-version-row">
+            <span class="about-label">平台</span>
+            <span class="about-value" id="aboutPlatform">--</span>
+          </div>
+          <div class="about-version-row">
+            <span class="about-label">应用标识</span>
+            <span class="about-value" id="aboutIdentifier">--</span>
+          </div>
+        </div>
+
+        <!-- Donation Section -->
+        <div class="donate-section">
+          <div class="donate-divider"></div>
+          <h3 class="donate-title">☕ 请我喝咖啡</h3>
+          <p class="donate-desc">如果这个工具对你有帮助，欢迎扫码支持</p>
+          <div class="donate-qr-container">
+            <img src="donate/alipay-qr.png" alt="支付宝收款码" class="donate-qr-img"
+                 onerror="this.onerror=null; this.style.display='none'; this.parentElement.innerHTML='<span class=\'donate-placeholder\'>请将支付宝收款码放置于 dist/donate/alipay-qr.png</span>'">
+          </div>
+          <p class="donate-hint">支付宝扫码</p>
+        </div>
+
+        <!-- Update Check Section -->
+        <div class="about-update-section">
+          <div class="donate-divider"></div>
+          <button class="modal-btn modal-btn-secondary" id="checkUpdateBtn" type="button">🔍 检查更新</button>
+          <span class="about-update-status" id="updateStatus"></span>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="modal-btn modal-btn-primary" id="aboutModalCloseBtn">关闭</button>
       </div>
     </div>
   </div>
@@ -457,6 +523,7 @@
   <script src="scripts/learning/paper-reader-integration.js"></script>
   <script src="scripts/learning/paper-import.js"></script>
   <script src="scripts/onboarding.js"></script>
+  <script src="scripts/updater.js"></script>
   <script src="scripts/main.js"></script>
   <script>
     // Learning mode: toolbar button opens hub (project list)

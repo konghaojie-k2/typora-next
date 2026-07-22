@@ -62,3 +62,7 @@ resvg = "0.44"
 usvg = "0.44"
 fontdb = "0.22"
 tiny-skia = { version = "0.11", features = ["png"] }
+
+# Auto-update via GitHub Releases
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"
