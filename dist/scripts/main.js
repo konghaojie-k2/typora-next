@@ -215,6 +215,9 @@ window.agentBridge = {
           md_content: '# Mock URL Paper\n\nThis was imported from URL.',
           title: 'Mock URL Paper'
         });
+      case 'export_pdf':
+        // Mock: 浏览器预览环境回退 window.print()
+        return Promise.resolve('window-print');
       default:
         return Promise.resolve(null);
     }
@@ -3772,8 +3775,39 @@ window.agentBridge = {
   // ============================================
   // PDF Export
   // ============================================
-  function exportToPDF() {
-    setTimeout(() => window.print(), 100);
+  // 统一入口：macOS 走 Rust 原生 WKWebView createPDF（window.print 在 WKWebView
+  // 静默无效，issue #4），其他平台由 Rust 返回 'window-print' 回退系统打印对话框。
+  async function exportToPDF() {
+    const tab = state.tabs[state.activeTab];
+    const baseName = tab && tab.path
+      ? (tab.path.split(/[\\/]/).pop() || 'document').replace(/\.[^.]+$/, '')
+      : 'document';
+
+    // 按打印布局测量内容尺寸：@media print 隐藏侧栏/工具栏后内容占满页宽，
+    // 这里临时把内容容器撑到视口宽度再量高度，避免导出的 PDF 尾部出现大段空白
+    const contentEl = document.getElementById('contentArea');
+    const prevWidth = contentEl.style.width;
+    contentEl.style.width = window.innerWidth + 'px';
+    const width = window.innerWidth;
+    const height = contentEl.scrollHeight;
+    contentEl.style.width = prevWidth;
+
+    try {
+      const result = await invoke('export_pdf', {
+        suggestedName: baseName + '.pdf',
+        contentWidth: width,
+        contentHeight: height,
+      });
+      if (result === 'window-print') {
+        setTimeout(() => window.print(), 100);
+      } else if (result === 'cancelled') {
+        // 用户取消保存，静默
+      } else if (result) {
+        showToast('PDF 已导出：' + result, 5000);
+      }
+    } catch (err) {
+      showError('PDF 导出失败: ' + err);
+    }
   }
 
   // ============================================

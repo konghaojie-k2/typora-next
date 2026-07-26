@@ -66,3 +66,12 @@ tiny-skia = { version = "0.11", features = ["png"] }
 # Auto-update via GitHub Releases
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# macOS 原生 PDF 导出（WKWebView createPDFWithConfiguration，issue #4）
+# 版本需与 Cargo.lock 中 wry 0.55 传递依赖保持一致
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-web-kit = { version = "0.3", features = ["WKPDFConfiguration", "block2"] }
+objc2-core-graphics = "0.3"
+block2 = "0.6"

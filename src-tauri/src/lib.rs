@@ -11,6 +11,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub mod ai_agent;
+pub mod mac_pdf;
 pub mod paper_import;
 mod docx_template;
 
@@ -4497,6 +4498,7 @@ pub fn run() {
             import_paper_from_pdf,
             import_paper_from_url,
             get_paper_import_status,
+            mac_pdf::export_pdf,
             create_project_subdir,
             get_demo_file,
             get_app_info
