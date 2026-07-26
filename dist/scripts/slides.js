@@ -14,7 +14,7 @@
   // ============================================
   var SLIDE_W = 1280;
   var SLIDE_H = 720;
-  var SLIDE_MARGIN = 0.06;
+  var SLIDE_MARGIN = 0.06; // 纵向最大化（margin 同时控 H/V，横向留白由 CSS padding 单独补）
 
   function contentBox() {
     return {
@@ -158,124 +158,169 @@
     return null;
   }
 
-  /** PRE 按行拆分（拆分后在外层重新 Prism 高亮） */
+  /** PRE 按行拆分（行高/字体/边距从原版缓存，克隆元素无 layout） */
   function splitPre(el, remainingH) {
-    var code = el.querySelector('code') || el;
-    var cs = getComputedStyle(code);
-    var lineH = parseFloat(cs.lineHeight) || ((parseFloat(cs.fontSize) || 20) * 1.4);
-    var ps = getComputedStyle(el);
-    var chrome = (parseFloat(ps.paddingTop) || 0) + (parseFloat(ps.paddingBottom) || 0)
-      + (parseFloat(ps.borderTopWidth) || 0) + (parseFloat(ps.borderBottomWidth) || 0);
-    var linesFit = Math.floor((remainingH - chrome - (nodeHeights.get(el) ? elementMargin(el).top + elementMargin(el).bottom : 0)) / lineH);
-    var lines = code.textContent.replace(/\n$/, '').split('\n');
+    var lineH, fontSize, paddingTop, paddingBottom, borderTop, borderBottom;
+    if (el._preMetrics) {
+      lineH = el._preMetrics.lineH;
+      paddingTop = el._preMetrics.paddingTop;
+      paddingBottom = el._preMetrics.paddingBottom;
+      borderTop = el._preMetrics.borderTop;
+      borderBottom = el._preMetrics.borderBottom;
+    } else {
+      var code = el.querySelector('code') || el;
+      var cs = getComputedStyle(code);
+      lineH = parseFloat(cs.lineHeight) || ((parseFloat(cs.fontSize) || 20) * 1.4);
+      fontSize = parseFloat(cs.fontSize);
+      var ps = getComputedStyle(el);
+      paddingTop = parseFloat(ps.paddingTop) || 0;
+      paddingBottom = parseFloat(ps.paddingBottom) || 0;
+      borderTop = parseFloat(ps.borderTopWidth) || 0;
+      borderBottom = parseFloat(ps.borderBottomWidth) || 0;
+      el._preMetrics = { lineH: lineH, paddingTop: paddingTop, paddingBottom: paddingBottom, borderTop: borderTop, borderBottom: borderBottom };
+    }
+    var chrome = paddingTop + paddingBottom + borderTop + borderBottom;
+    var totalH = nodeHeights.get(el) || el.offsetHeight || 0;
+    var linesFit = Math.floor((remainingH - chrome) / lineH);
+    var codeEl = el.querySelector('code') || el;
+    var lines = codeEl.textContent.replace(/\n$/, '').split('\n');
     if (linesFit < 1 || linesFit >= lines.length) return null;
 
     var part1 = el.cloneNode(false);
-    var c1 = code.cloneNode(false);
+    var c1 = (codeEl !== el ? codeEl.cloneNode(false) : part1);
     c1.textContent = lines.slice(0, linesFit).join('\n');
-    part1.appendChild(c1);
+    if (codeEl !== el) part1.appendChild(c1);
 
     var part2 = el.cloneNode(false);
-    var c2 = code.cloneNode(false);
+    part2._preMetrics = el._preMetrics; // 递归拆分复用缓存
+    var c2 = (codeEl !== el ? codeEl.cloneNode(false) : part2);
     c2.textContent = lines.slice(linesFit).join('\n');
-    part2.appendChild(c2);
+    if (codeEl !== el) part2.appendChild(c2);
 
-    var h1 = chrome + linesFit * lineH + elementMargin(el).top + elementMargin(el).bottom;
+    var h1 = chrome + linesFit * lineH;
     return [
       { height: h1, isHeading: false, h2Text: null, payload: part1, split: null },
-      { height: (nodeHeights.get(el) || el.offsetHeight) - h1 + chrome, isHeading: false, h2Text: null, payload: part2, split: function(r) { return splitPre(part2, r); } }
+      { height: Math.max(totalH - h1, chrome + (lines.length - linesFit) * lineH), isHeading: false, h2Text: null, payload: part2, split: function(r) { return splitPre(part2, r); } }
     ];
   }
 
-  /** TABLE 按行拆分（每片克隆表头） */
+  /** TABLE 按行拆分（每片克隆表头，LI 高度缓存借 same trick 防 clone offsetHeight=0） */
   function splitTable(el, remainingH) {
     var thead = el.querySelector('thead');
     var headH = thead ? (nodeHeights.get(thead) || thead.offsetHeight) : 0;
     var rows = Array.from(el.querySelectorAll('tbody tr'));
     if (rows.length === 0) return null;
 
+    var cached = el._rowHeights;
+    if (!cached) {
+      cached = rows.map(function(r) { return nodeHeights.get(r) || r.offsetHeight || 0; });
+      el._rowHeights = cached;
+    }
+
     var used = headH;
     var count = 0;
-    while (count < rows.length && used + (nodeHeights.get(rows[count]) || rows[count].offsetHeight) <= remainingH) {
-      used += nodeHeights.get(rows[count]) || rows[count].offsetHeight;
+    while (count < cached.length && used + cached[count] <= remainingH) {
+      used += cached[count];
       count++;
     }
-    if (count === 0 || count >= rows.length) return null;
+    if (count === 0 || count >= cached.length) return null;
 
-    function buildTable(subRows) {
+    function buildTable(subRows, heights) {
       var t = el.cloneNode(false);
       if (thead) t.appendChild(thead.cloneNode(true));
       var tb = document.createElement('tbody');
       subRows.forEach(function(r) { tb.appendChild(r.cloneNode(true)); });
       t.appendChild(tb);
+      if (heights) t._rowHeights = heights;
       return t;
     }
 
+    var margins = elementMargin(el).top + elementMargin(el).bottom;
     var part1Rows = rows.slice(0, count);
     var part2Rows = rows.slice(count);
-    var margins = elementMargin(el).top + elementMargin(el).bottom;
+    var part2Heights = cached.slice(count);
     return [
-      { height: headH + subHeight(part1Rows) + margins, isHeading: false, h2Text: null, payload: buildTable(part1Rows), split: null },
-      { height: headH + subHeight(part2Rows) + margins, isHeading: false, h2Text: null, payload: buildTable(part2Rows), split: function(r) { return splitTable(buildTable(part2Rows), r); } }
+      { height: headH + cached.slice(0, count).reduce(function(s, h) { return s + h; }, 0) + margins, isHeading: false, h2Text: null, payload: buildTable(part1Rows), split: null },
+      { height: headH + cached.slice(count).reduce(function(s, h) { return s + h; }, 0) + margins, isHeading: false, h2Text: null, payload: buildTable(part2Rows, part2Heights), split: function(r) { return splitTable(buildTable(part2Rows, part2Heights), r); } }
     ];
   }
 
-  /** UL/OL 按条目拆分（OL 续片保持编号连续：start 属性顺延） */
+  /** UL/OL 按条目拆分（OL 续片保持编号连续） */
   function splitList(el, remainingH) {
+    // 优先用缓存的 LI 高度数组（克隆节点 offsetHeight=0，需从原版读）
+    var cached = el._liHeights;
     var lis = Array.from(el.children).filter(function(n) { return n.tagName === 'LI'; });
     if (lis.length <= 1) return null;
+
+    // 首调用：记录每个 LI 高度 + 缓存到元素属性（后续递归拆分复用）
+    if (!cached) {
+      cached = lis.map(function(li) { return nodeHeights.get(li) || li.offsetHeight || 0; });
+      el._liHeights = cached;
+    }
+
     var used = 0;
     var count = 0;
-    while (count < lis.length && used + (nodeHeights.get(lis[count]) || lis[count].offsetHeight) <= remainingH) {
-      used += nodeHeights.get(lis[count]) || lis[count].offsetHeight;
+    while (count < cached.length && used + cached[count] <= remainingH) {
+      used += cached[count];
       count++;
     }
-    if (count === 0 || count >= lis.length) return null;
+    if (count === 0 || count >= cached.length) return null;
 
     var isOrdered = el.tagName === 'OL';
     var startNum = isOrdered ? (parseInt(el.getAttribute('start') || '1', 10) || 1) : 0;
+    var margins = elementMargin(el).top + elementMargin(el).bottom;
 
-    function buildList(subLis, start) {
-      var l = el.cloneNode(false); // 复制 start 等属性
+    function buildList(subLis, start, heights) {
+      var l = el.cloneNode(false);
       if (isOrdered && start != null) l.setAttribute('start', String(start));
       subLis.forEach(function(li) { l.appendChild(li.cloneNode(true)); });
+      if (heights) l._liHeights = heights; // 传递高度给递归拆分
       return l;
     }
 
-    var margins = elementMargin(el).top + elementMargin(el).bottom;
     var part1Lis = lis.slice(0, count);
     var part2Lis = lis.slice(count);
-    var part2List = buildList(part2Lis, startNum + count);
+    var part2Heights = cached.slice(count);
+    var part2List = buildList(part2Lis, startNum + count, part2Heights);
     return [
-      { height: subHeight(part1Lis) + margins, isHeading: false, h2Text: null, payload: buildList(part1Lis, startNum), split: null },
-      { height: subHeight(part2Lis) + margins, isHeading: false, h2Text: null, payload: part2List, split: function(r) { return splitList(part2List, r); } }
+      { height: used + margins, isHeading: false, h2Text: null, payload: buildList(part1Lis, startNum), split: null },
+      { height: cached.reduce(function(s, h) { return s + h; }, 0) - used + margins, isHeading: false, h2Text: null, payload: part2List, split: function(r) { return splitList(part2List, r); } }
     ];
   }
 
-  /** BLOCKQUOTE 按子元素拆分 */
+  /** BLOCKQUOTE 按子元素拆分（高度缓存防 clone offsetHeight=0） */
   function splitChildren(el, remainingH) {
     var kids = Array.from(el.children);
     if (kids.length <= 1) return null;
+
+    var cached = el._childHeights;
+    if (!cached) {
+      cached = kids.map(function(k) { return nodeHeights.get(k) || k.offsetHeight || 0; });
+      el._childHeights = cached;
+    }
+
     var used = 0;
     var count = 0;
-    while (count < kids.length && used + (nodeHeights.get(kids[count]) || kids[count].offsetHeight) <= remainingH) {
-      used += nodeHeights.get(kids[count]) || kids[count].offsetHeight;
+    while (count < cached.length && used + cached[count] <= remainingH) {
+      used += cached[count];
       count++;
     }
-    if (count === 0 || count >= kids.length) return null;
+    if (count === 0 || count >= cached.length) return null;
 
-    function buildBox(subKids) {
+    function buildBox(subKids, heights) {
       var b = el.cloneNode(false);
       subKids.forEach(function(k) { b.appendChild(k.cloneNode(true)); });
+      if (heights) b._childHeights = heights;
       return b;
     }
 
     var margins = elementMargin(el).top + elementMargin(el).bottom;
     var part1Kids = kids.slice(0, count);
     var part2Kids = kids.slice(count);
+    var part2Heights = cached.slice(count);
     return [
-      { height: subHeight(part1Kids) + margins, isHeading: false, h2Text: null, payload: buildBox(part1Kids), split: null },
-      { height: subHeight(part2Kids) + margins, isHeading: false, h2Text: null, payload: buildBox(part2Kids), split: function(r) { return splitChildren(buildBox(part2Kids), r); } }
+      { height: cached.slice(0, count).reduce(function(s, h) { return s + h; }, 0) + margins, isHeading: false, h2Text: null, payload: buildBox(part1Kids), split: null },
+      { height: cached.slice(count).reduce(function(s, h) { return s + h; }, 0) + margins, isHeading: false, h2Text: null, payload: buildBox(part2Kids, part2Heights), split: function(r) { return splitChildren(buildBox(part2Kids, part2Heights), r); } }
     ];
   }
 
@@ -286,7 +331,11 @@
     var box = contentBox();
     var div = document.createElement('div');
     div.className = 'slides-measure';
-    div.style.cssText = 'position:absolute;visibility:hidden;left:-99999px;top:0;width:' + box.width + 'px;';
+    // 测量容器宽度与 section 对齐（含 padding），确保装箱高度准确
+    div.style.cssText = 'position:absolute;visibility:hidden;left:-99999px;top:0;'
+      + 'width:' + box.width + 'px;'
+      + 'padding-left:2%;padding-right:2%;'
+      + 'box-sizing:border-box;';
     document.getElementById('slidesContainer').appendChild(div);
     return div;
   }
