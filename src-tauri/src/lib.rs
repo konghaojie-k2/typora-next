@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod agent_sdk_probe;
 pub mod ai_agent;
 pub mod mac_pdf;
 pub mod paper_import;
@@ -4461,6 +4462,7 @@ pub fn run() {
             ai_agent::evaluate_quiz,
             ai_agent::explain_selection,
             ai_agent::check_agent_sdk,
+            ai_agent::probe_agent_sdk,
             ai_agent::ensure_extra_questions,
             ai_agent::load_extra_questions,
             create_learning_project,

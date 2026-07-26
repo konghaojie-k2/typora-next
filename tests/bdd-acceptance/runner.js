@@ -196,6 +196,16 @@ async function runAcceptanceTests() {
   totalPassed += onboardingResult.passed;
   totalFailed += onboardingResult.failed;
 
+  // Issue #2: Agent SDK startup guidance
+  console.log(`\n${YELLOW}▶ Issue #2: Agent SDK Startup Guidance${RESET}`);
+  const agentSdkGuidanceSteps = require('./sprint10_agent_sdk_guidance.steps');
+  const agentSdkGuidanceResult = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'agent_sdk_guidance.feature'),
+    agentSdkGuidanceSteps
+  );
+  totalPassed += agentSdkGuidanceResult.passed;
+  totalFailed += agentSdkGuidanceResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

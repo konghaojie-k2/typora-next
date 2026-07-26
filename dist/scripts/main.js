@@ -193,6 +193,9 @@ window.agentBridge = {
       case 'check_agent_sdk':
         // Mock: in web preview, pretend SDK is available
         return Promise.resolve({ available: true, error: null });
+      case 'probe_agent_sdk':
+        // Mock: in web preview, pretend SDK exists (no guidance toast)
+        return Promise.resolve({ found: true, location: '/mock/project/node_modules' });
       case 'open_folder_dialog':
         return Promise.resolve('/mock/project');
       case 'list_directory':
@@ -3634,6 +3637,9 @@ window.agentBridge = {
     missing: 'Agent 未安装'
   };
 
+  // "不再提示"的持久化标记（localStorage），SDK 检测成功后清除
+  const AGENT_MISSING_DISMISS_KEY = 'agent-missing-dismissed';
+
   function updateAgentStatusChip(status, errorMessage) {
     const chip = elements.agentStatusChip;
     const dot = elements.agentStatusDot;
@@ -3668,24 +3674,33 @@ window.agentBridge = {
           <div class="agent-missing-toast-title">未检测到 Claude Code Agent</div>
           <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Agent SDK 才能使用。</div>
           <div class="agent-missing-toast-install">
-            <p>打开终端执行：</p>
+            <p>或打开终端手动执行：</p>
             <code>npm install -g @anthropic-ai/claude-agent-sdk</code>
             <button class="agent-missing-toast-copy" id="agentMissingCopyBtn">复制</button>
           </div>
           <div class="agent-missing-toast-actions">
-            <button class="agent-missing-toast-btn primary" id="agentMissingRetryBtn">重新检测</button>
-            <button class="agent-missing-toast-btn" id="agentMissingDismissBtn">忽略</button>
+            <button class="agent-missing-toast-btn primary" id="agentMissingRetryBtn">自动安装</button>
+            <button class="agent-missing-toast-btn" id="agentMissingDismissBtn">不再提示</button>
           </div>
         </div>
         <button class="agent-missing-toast-close" id="agentMissingCloseBtn">×</button>
       `;
       document.body.appendChild(toast);
 
-      toast.querySelector('#agentMissingRetryBtn').addEventListener('click', () => {
-        hideAgentMissingToast();
-        checkAgentSdk();
+      // 自动安装：完整检测会尝试 npm 自动安装（可能耗时几分钟）
+      toast.querySelector('#agentMissingRetryBtn').addEventListener('click', async () => {
+        const btn = toast.querySelector('#agentMissingRetryBtn');
+        btn.disabled = true;
+        btn.textContent = '安装中，可能需要几分钟…';
+        await checkAgentSdk();
+        btn.disabled = false;
+        btn.textContent = '自动安装';
       });
-      toast.querySelector('#agentMissingDismissBtn').addEventListener('click', hideAgentMissingToast);
+      // 不再提示：持久化忽略标记，之后可通过工具栏 Agent 芯片随时重新检测
+      toast.querySelector('#agentMissingDismissBtn').addEventListener('click', () => {
+        localStorage.setItem(AGENT_MISSING_DISMISS_KEY, '1');
+        hideAgentMissingToast();
+      });
       toast.querySelector('#agentMissingCloseBtn').addEventListener('click', hideAgentMissingToast);
       toast.querySelector('#agentMissingCopyBtn').addEventListener('click', () => {
         navigator.clipboard.writeText('npm install -g @anthropic-ai/claude-agent-sdk').catch(() => {});
@@ -3718,6 +3733,8 @@ window.agentBridge = {
       if (result && result.available) {
         updateAgentStatusChip('ready');
         hideAgentMissingToast();
+        // SDK 已就绪：清除"不再提示"标记，将来真正缺失时能再次引导
+        localStorage.removeItem(AGENT_MISSING_DISMISS_KEY);
       } else {
         const error = (result && result.error) ? String(result.error) : '未检测到 @anthropic-ai/claude-agent-sdk';
         updateAgentStatusChip('missing', error);
@@ -3731,6 +3748,20 @@ window.agentBridge = {
     }
   }
 
+  // 启动引导（issue #2）：轻量探测 SDK 是否存在于已知目录，纯文件系统检查，
+  // 不 spawn node、不触发 npm 自动安装，所以可以安全地在启动时运行。
+  // 只有"确定缺失"且用户未点过"不再提示"时才显示引导 toast。
+  async function probeAgentSdkAtStartup() {
+    try {
+      const result = await invoke('probe_agent_sdk');
+      if (result && result.found) return;
+      if (localStorage.getItem(AGENT_MISSING_DISMISS_KEY) === '1') return;
+      showAgentMissingToast(null);
+    } catch (err) {
+      console.warn('[AgentStatus] startup probe failed:', err);
+    }
+  }
+
   function initAgentStatusIndicator() {
     const chip = elements.agentStatusChip;
     if (!chip) return;
@@ -3741,10 +3772,10 @@ window.agentBridge = {
       checkAgentSdk();
     });
 
-    // Initial check is now gated behind entering learning mode; we only set up
-    // the click-to-refresh handler here so ordinary md-file opens don't spawn
-    // agent-bridge and write logs into the document directory.
+    // Full check stays gated behind entering learning mode (it may auto-install
+    // via npm); startup only runs the lightweight filesystem probe.
     updateAgentStatusChip('idle');
+    probeAgentSdkAtStartup();
   }
 
   // ============================================

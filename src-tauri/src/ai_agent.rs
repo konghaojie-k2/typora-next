@@ -1240,36 +1240,23 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
     }
 }
 
-/// Get the platform-appropriate directory for auto-installing the Agent SDK.
-fn agent_app_data_dir() -> Option<std::path::PathBuf> {
-    if cfg!(windows) {
-        let appdata = std::env::var("APPDATA").ok()?;
-        Some(
-            std::path::PathBuf::from(&appdata)
-                .join("TyporaNext")
-                .join("agent"),
-        )
-    } else if cfg!(target_os = "macos") {
-        let home = std::env::var("HOME").ok()?;
-        Some(
-            std::path::PathBuf::from(&home)
-                .join("Library")
-                .join("Application Support")
-                .join("com.typora-next.app")
-                .join("agent"),
-        )
-    } else {
-        // Linux / other Unix
-        let home = std::env::var("HOME").ok()?;
-        Some(
-            std::path::PathBuf::from(&home)
-                .join(".local")
-                .join("share")
-                .join("typora-next")
-                .join("agent"),
-        )
-    }
+/// Lightweight filesystem-only probe for Agent SDK presence (GitHub issue #2).
+///
+/// Unlike `check_agent_sdk`, this spawns no processes and never installs
+/// anything, so it is safe to call at app startup to decide whether to show
+/// the "SDK missing" guidance toast. Trade-off: SDKs installed under a custom
+/// npm prefix are missed here (the full check covers them via `npm root -g`);
+/// a false negative only costs one dismissible toast.
+#[tauri::command]
+pub async fn probe_agent_sdk() -> Result<serde_json::Value, String> {
+    let bridge_path = get_agent_bridge_path().ok();
+    let result = crate::agent_sdk_probe::probe_agent_sdk_fs(bridge_path.as_deref());
+    Ok(serde_json::json!({
+        "found": result.found,
+        "location": result.location.map(|p| p.to_string_lossy().to_string())
+    }))
 }
+
 
 /// Resolve the NODE_PATH that makes `@anthropic-ai/claude-agent-sdk` available.
 ///
@@ -1342,7 +1329,7 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
 
     // 3. Auto-install to platform-appropriate app data directory
     log::info!("[agent_path] SDK not found, installing...");
-    let target_dir = agent_app_data_dir()?;
+    let target_dir = crate::agent_sdk_probe::agent_app_data_dir()?;
     std::fs::create_dir_all(&target_dir).ok()?;
 
     // Copy agent-bridge.js
