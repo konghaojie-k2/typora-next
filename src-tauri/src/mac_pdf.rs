@@ -97,7 +97,7 @@ mod macos {
 
                 let handler = RcBlock::new(move |data: *mut NSData, error: *mut NSError| {
                     let result = if !data.is_null() {
-                        Ok(unsafe { &*data }.as_bytes_unchecked().to_vec())
+                        Ok(unsafe { (&*data).as_bytes_unchecked().to_vec() })
                     } else if !error.is_null() {
                         Err(format!(
                             "PDF 生成失败: {}",
