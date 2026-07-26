@@ -206,6 +206,16 @@ async function runAcceptanceTests() {
   totalPassed += agentSdkGuidanceResult.passed;
   totalFailed += agentSdkGuidanceResult.failed;
 
+  // Slides auto-split (design 2026-07-26)
+  console.log(`\n${YELLOW}▶ Slides Auto-Split${RESET}`);
+  const slidesAutoSplitSteps = require('./sprint10_slides_auto_split.steps');
+  const slidesAutoSplitResult = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'slides_auto_split.feature'),
+    slidesAutoSplitSteps
+  );
+  totalPassed += slidesAutoSplitResult.passed;
+  totalFailed += slidesAutoSplitResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

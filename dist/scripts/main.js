@@ -2801,81 +2801,135 @@ window.agentBridge = {
   }
 
   /**
-   * Parse markdown into slide sections.
-   * --- = horizontal slide separator
-   * --  = vertical slide separator (within a horizontal section)
+   * Parse markdown into slide structure groups (v3)。
+   *
+   * 源码层只做结构切分，分页装箱由 slides iframe 渲染后按真实
+   * DOM 高度测量完成（slides-pack-core / slides.js）：
+   * - 显式模式：--- = 横页硬边界，-- = 纵页硬边界
+   * - 自动模式：H1 分章（封面页），H2 及内容保留在章节单元内
+   *
    * Skips YAML frontmatter and code blocks.
    */
-  function parseMarkdownSections(content) {
-    const lines = content.split('\n');
-    const sections = [];
-    let currentSlideLines = [];
-    let currentVerticalSlides = [];
+  function slidesIsFenceLine(t) {
+    return t.startsWith('```') || t.startsWith('~~~');
+  }
+
+  function slidesIsExplicitSeparator(lines, i) {
+    // `---` 前必须是空行或文档开头（排除 Setext 二级标题）
+    if (lines[i].trim() !== '---') return false;
+    if (i === 0) return true;
+    return lines[i - 1].trim() === '';
+  }
+
+  function slidesSkipYaml(lines) {
+    if (lines.length > 0 && lines[0].trim() === '---') {
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim() === '---') return i + 1;
+      }
+    }
+    return 0;
+  }
+
+  function slidesHasExplicitSeparators(lines) {
+    let inCode = false;
+    const start = slidesSkipYaml(lines);
+    for (let i = start; i < lines.length; i++) {
+      const t = lines[i].trim();
+      if (slidesIsFenceLine(t)) { inCode = !inCode; continue; }
+      if (inCode) continue;
+      if (slidesIsExplicitSeparator(lines, i)) return true;
+    }
+    return false;
+  }
+
+  function parseExplicitStructure(lines) {
+    const groups = [];
+    let currentUnit = [];
+    let currentUnits = [];
     let inCodeBlock = false;
     let inYaml = false;
     let yamlStarted = false;
 
-    function flushVerticalSlide() {
-      if (currentSlideLines.length > 0) {
-        currentVerticalSlides.push(currentSlideLines.join('\n'));
-        currentSlideLines = [];
-      }
+    function flushUnit() {
+      const text = currentUnit.join('\n').trim();
+      if (text) currentUnits.push(currentUnit.join('\n'));
+      currentUnit = [];
     }
 
-    function flushHorizontalSection() {
-      flushVerticalSlide();
-      if (currentVerticalSlides.length === 1) {
-        sections.push({ type: 'horizontal', content: currentVerticalSlides[0] });
-      } else if (currentVerticalSlides.length > 1) {
-        sections.push({ type: 'vertical', children: currentVerticalSlides.map(function(c) { return { content: c }; }) });
+    function flushGroup() {
+      flushUnit();
+      if (currentUnits.length > 0) {
+        groups.push({ cover: null, units: currentUnits });
       }
-      currentVerticalSlides = [];
+      currentUnits = [];
     }
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      const trimmed = line.trim();
+      const t = line.trim();
 
-      if (trimmed.startsWith('```')) {
-        inCodeBlock = !inCodeBlock;
-        currentSlideLines.push(line);
-        continue;
-      }
+      if (slidesIsFenceLine(t)) { inCodeBlock = !inCodeBlock; currentUnit.push(line); continue; }
+      if (inCodeBlock) { currentUnit.push(line); continue; }
 
-      if (inCodeBlock) {
-        currentSlideLines.push(line);
-        continue;
-      }
-
-      // YAML frontmatter: only at the very beginning of the file (no content yet)
-      if (!yamlStarted && trimmed === '---' && currentSlideLines.length === 0 && currentVerticalSlides.length === 0) {
+      if (!yamlStarted && t === '---' && currentUnit.length === 0 && currentUnits.length === 0 && groups.length === 0) {
         inYaml = true;
         yamlStarted = true;
         continue;
       }
-      if (inYaml && trimmed === '---') {
-        inYaml = false;
-        continue;
-      }
-      if (inYaml) {
-        continue;
-      }
+      if (inYaml && t === '---') { inYaml = false; continue; }
+      if (inYaml) continue;
 
-      if (trimmed === '---') {
-        flushHorizontalSection();
-        continue;
-      }
+      if (slidesIsExplicitSeparator(lines, i)) { flushGroup(); continue; }
+      if (t === '--') { flushUnit(); continue; }
+      currentUnit.push(line);
+    }
+    flushGroup();
+    return groups;
+  }
 
-      if (trimmed === '--') {
-        flushVerticalSlide();
-        continue;
-      }
+  function parseAutoStructure(lines) {
+    const groups = [];
+    let currentContent = [];
+    let inCodeBlock = false;
+    const start = slidesSkipYaml(lines);
 
-      currentSlideLines.push(line);
+    function flushGroup(cover) {
+      const text = currentContent.join('\n').trim();
+      if (text) {
+        groups.push({ cover: cover, units: [currentContent.join('\n')] });
+      } else if (cover) {
+        groups.push({ cover: cover, units: [] });
+      }
+      currentContent = [];
     }
 
-    flushHorizontalSection();
-    return sections;
+    let pendingCover = null;
+    for (let i = start; i < lines.length; i++) {
+      const line = lines[i];
+      const t = line.trim();
+      if (slidesIsFenceLine(t)) { inCodeBlock = !inCodeBlock; currentContent.push(line); continue; }
+      if (inCodeBlock) { currentContent.push(line); continue; }
+
+      if (/^#\s/.test(t)) {
+        flushGroup(pendingCover);
+        pendingCover = t;
+        continue;
+      }
+      currentContent.push(line);
+    }
+    flushGroup(pendingCover);
+    return groups;
+  }
+
+  /**
+   * 返回 [{ cover: string|null, units: string[] }]
+   */
+  function parseMarkdownStructure(content) {
+    const lines = content.split('\n');
+    if (slidesHasExplicitSeparators(lines)) {
+      return parseExplicitStructure(lines);
+    }
+    return parseAutoStructure(lines);
   }
 
   async function openSlides() {
@@ -2887,30 +2941,25 @@ window.agentBridge = {
 
     if (document.getElementById('slides-overlay')) return;
 
-    // Parse markdown into sections (--- horizontal, -- vertical)
-    const sections = parseMarkdownSections(tab.content);
-    if (sections.length === 0) {
+    // Parse markdown into structure groups（v3：结构层切分，分页由 iframe 测量装箱）
+    const groups = parseMarkdownStructure(tab.content);
+    if (groups.length === 0) {
       showToast('未能解析出幻灯片内容');
       return;
     }
 
-    // Render each section individually via Rust backend
-    const renderedSections = [];
+    // Render cover + units via Rust backend（并行，大文档更快）
+    let renderedGroups;
     try {
-      for (let i = 0; i < sections.length; i++) {
-        const section = sections[i];
-        if (section.type === 'horizontal') {
-          const html = await invoke('render_markdown', { content: section.content });
-          renderedSections.push({ type: 'horizontal', html: html });
-        } else if (section.type === 'vertical') {
-          const children = [];
-          for (let j = 0; j < section.children.length; j++) {
-            const html = await invoke('render_markdown', { content: section.children[j].content });
-            children.push(html);
-          }
-          renderedSections.push({ type: 'vertical', children: children });
-        }
-      }
+      renderedGroups = await Promise.all(groups.map(async function(group) {
+        const cover = group.cover
+          ? await invoke('render_markdown', { content: group.cover })
+          : null;
+        const units = await Promise.all(group.units.map(function(unit) {
+          return invoke('render_markdown', { content: unit });
+        }));
+        return { cover: cover, units: units };
+      }));
     } catch (err) {
       console.error('Failed to render markdown for slides:', err);
       showToast('幻灯片渲染失败');
@@ -2929,7 +2978,7 @@ window.agentBridge = {
       try {
         const cw = iframe.contentWindow;
         if (cw) {
-          cw.__slides_sections = renderedSections;
+          cw.__slides_groups = renderedGroups;
           cw.__slides_baseDir = tab.baseDir || '';
           cw.__slides_filePath = tab.path || '';
           if (typeof cw.__reloadSlides === 'function') {

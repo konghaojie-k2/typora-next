@@ -1,79 +1,426 @@
 /**
- * Typora Next - Slides Mode
+ * Typora Next - Slides Mode (v3)
  * Reveal.js integration with Rust-backed markdown rendering
+ *
+ * v3 (2026-07-26): 分页装箱不再在源码层猜行数，而是在 iframe 内
+ * 真实排版后测量 DOM 高度（px）装箱——见 docs/plans/2026-07-26-slides-auto-split-design.md
  */
 
 (function() {
   'use strict';
 
-  var TEST_HTML = '<h1>Welcome to Typora Next Slides</h1>';
-  var revealReady = false;
+  // ============================================
+  // 布局常量（与 Reveal.initialize 配置保持一致）
+  // ============================================
+  var SLIDE_W = 1280;
+  var SLIDE_H = 720;
+  var SLIDE_MARGIN = 0.06;
 
-  /**
-   * Split pre-rendered HTML by <hr> tags (which pulldown-cmark renders from ---).
-   * Fallback for old behavior.
-   */
-  function splitHtmlIntoSlides(html) {
-    var parts = html.split(/<hr\s*\/?>/gi);
-    var slides = [];
-    for (var i = 0; i < parts.length; i++) {
-      var trimmed = parts[i].trim();
-      if (trimmed.length > 0) {
-        slides.push(trimmed);
-      }
-    }
-    return slides;
+  function contentBox() {
+    return {
+      width: Math.round(SLIDE_W * (1 - 2 * SLIDE_MARGIN)),
+      height: Math.round(SLIDE_H * (1 - 2 * SLIDE_MARGIN))
+    };
   }
 
-  function doInit() {
-    var container = document.getElementById('slidesContainer');
+  // ============================================
+  // 装箱核心（镜像 tests/shared/slides-pack-core.js，保持同步）
+  // ============================================
+  function packItems(items, availH) {
+    var pages = [];
+    var cur = [];
+    var curH = 0;
+    var currentH2 = null;
+    var nextContinuedH2 = null;
 
-    // New: structured sections from main window (supports vertical slides)
-    var sections = window.__slides_sections;
-    if (sections && sections.length > 0) {
-      container.innerHTML = '';
-      for (var i = 0; i < sections.length; i++) {
-        var section = sections[i];
-        if (section.type === 'horizontal') {
-          var sec = document.createElement('section');
-          sec.innerHTML = section.html;
-          container.appendChild(sec);
-        } else if (section.type === 'vertical') {
-          var sec = document.createElement('section');
-          for (var j = 0; j < section.children.length; j++) {
-            var childSec = document.createElement('section');
-            childSec.innerHTML = section.children[j];
-            sec.appendChild(childSec);
-          }
-          container.appendChild(sec);
+    function flush() {
+      if (cur.length > 0) {
+        pages.push({ items: cur, continuedH2: nextContinuedH2 });
+        cur = [];
+        curH = 0;
+        nextContinuedH2 = null;
+      }
+    }
+
+    function headingChainNeed(idx) {
+      var need = 0;
+      var j = idx;
+      while (j < items.length && items[j].isHeading) {
+        need += items[j].height;
+        j++;
+      }
+      if (j < items.length) need += items[j].height;
+      return need;
+    }
+
+    var i = 0;
+    while (i < items.length) {
+      var item = items[i];
+
+      if (item.isHeading && cur.length > 0) {
+        var loneHeading = cur.length === 1 && cur[0].isHeading;
+        if (!loneHeading && curH + headingChainNeed(i) > availH) {
+          flush();
         }
       }
-    } else {
-      // Fallback: old single-html behavior
-      var html = window.__slides_html || '';
-      if (!html) {
-        html = TEST_HTML;
+
+      // 放得下：直接装入
+      if (curH + item.height <= availH) {
+        cur.push(item);
+        curH += item.height;
+        if (item.h2Text) currentH2 = item.h2Text;
+        i++;
+        continue;
       }
 
-      var slideParts;
+      // 放不下：尝试拆分（空页时用整页高度，故翻页后会自然重试）
+      if (item.split) {
+        var parts = item.split(availH - curH);
+        if (parts) {
+          cur.push(parts[0]);
+          flush();
+          nextContinuedH2 = currentH2;
+          items[i] = parts[1];
+          continue;
+        }
+      }
+
+      if (cur.length === 0) {
+        // 空页 + 拆不动 + 超高 → 独占一页（设计允许的溢出）
+        cur.push(item);
+        curH += item.height;
+        if (item.h2Text) currentH2 = item.h2Text;
+        i++;
+        continue;
+      }
+
+      // 非空页：翻页，循环用整页高度重试（修复：拆分不再因剩余空间小而被跳过）
+      var continuedFrom = currentH2;
+      flush();
+      nextContinuedH2 = item.isHeading ? null : continuedFrom;
+    }
+
+    flush();
+    return pages;
+  }
+
+  // ============================================
+  // DOM 测量与拆分
+  // ============================================
+  var nodeHeights = new WeakMap(); // 拆分部分的高度估算依据
+
+  function elementMargin(el) {
+    var cs = getComputedStyle(el);
+    return {
+      top: parseFloat(cs.marginTop) || 0,
+      bottom: parseFloat(cs.marginBottom) || 0
+    };
+  }
+
+  function measureItems(div) {
+    var items = [];
+    var prevMarginBottom = 0;
+    var children = Array.from(div.children);
+    for (var k = 0; k < children.length; k++) {
+      var el = children[k];
+      var m = elementMargin(el);
+      var gap = Math.max(0, m.top - prevMarginBottom); // margin 合并
+      var h = gap + el.offsetHeight + m.bottom;
+      prevMarginBottom = m.bottom;
+      nodeHeights.set(el, h);
+
+      var tag = el.tagName;
+      var isHeading = /^H[1-6]$/.test(tag);
+      items.push({
+        height: h,
+        isHeading: isHeading,
+        h2Text: tag === 'H2' ? el.textContent.trim() : null,
+        payload: el,
+        split: splitFactory(el, tag)
+      });
+    }
+    return items;
+  }
+
+  function subHeight(nodes) {
+    var h = 0;
+    for (var i = 0; i < nodes.length; i++) {
+      h += nodeHeights.get(nodes[i]) || nodes[i].offsetHeight || 0;
+    }
+    return h;
+  }
+
+  function splitFactory(el, tag) {
+    if (tag === 'PRE') return function(remainingH) { return splitPre(el, remainingH); };
+    if (tag === 'TABLE') return function(remainingH) { return splitTable(el, remainingH); };
+    if (tag === 'UL' || tag === 'OL') return function(remainingH) { return splitList(el, remainingH); };
+    if (tag === 'BLOCKQUOTE') return function(remainingH) { return splitChildren(el, remainingH); };
+    return null;
+  }
+
+  /** PRE 按行拆分（拆分后在外层重新 Prism 高亮） */
+  function splitPre(el, remainingH) {
+    var code = el.querySelector('code') || el;
+    var cs = getComputedStyle(code);
+    var lineH = parseFloat(cs.lineHeight) || ((parseFloat(cs.fontSize) || 20) * 1.4);
+    var ps = getComputedStyle(el);
+    var chrome = (parseFloat(ps.paddingTop) || 0) + (parseFloat(ps.paddingBottom) || 0)
+      + (parseFloat(ps.borderTopWidth) || 0) + (parseFloat(ps.borderBottomWidth) || 0);
+    var linesFit = Math.floor((remainingH - chrome - (nodeHeights.get(el) ? elementMargin(el).top + elementMargin(el).bottom : 0)) / lineH);
+    var lines = code.textContent.replace(/\n$/, '').split('\n');
+    if (linesFit < 1 || linesFit >= lines.length) return null;
+
+    var part1 = el.cloneNode(false);
+    var c1 = code.cloneNode(false);
+    c1.textContent = lines.slice(0, linesFit).join('\n');
+    part1.appendChild(c1);
+
+    var part2 = el.cloneNode(false);
+    var c2 = code.cloneNode(false);
+    c2.textContent = lines.slice(linesFit).join('\n');
+    part2.appendChild(c2);
+
+    var h1 = chrome + linesFit * lineH + elementMargin(el).top + elementMargin(el).bottom;
+    return [
+      { height: h1, isHeading: false, h2Text: null, payload: part1, split: null },
+      { height: (nodeHeights.get(el) || el.offsetHeight) - h1 + chrome, isHeading: false, h2Text: null, payload: part2, split: function(r) { return splitPre(part2, r); } }
+    ];
+  }
+
+  /** TABLE 按行拆分（每片克隆表头） */
+  function splitTable(el, remainingH) {
+    var thead = el.querySelector('thead');
+    var headH = thead ? (nodeHeights.get(thead) || thead.offsetHeight) : 0;
+    var rows = Array.from(el.querySelectorAll('tbody tr'));
+    if (rows.length === 0) return null;
+
+    var used = headH;
+    var count = 0;
+    while (count < rows.length && used + (nodeHeights.get(rows[count]) || rows[count].offsetHeight) <= remainingH) {
+      used += nodeHeights.get(rows[count]) || rows[count].offsetHeight;
+      count++;
+    }
+    if (count === 0 || count >= rows.length) return null;
+
+    function buildTable(subRows) {
+      var t = el.cloneNode(false);
+      if (thead) t.appendChild(thead.cloneNode(true));
+      var tb = document.createElement('tbody');
+      subRows.forEach(function(r) { tb.appendChild(r.cloneNode(true)); });
+      t.appendChild(tb);
+      return t;
+    }
+
+    var part1Rows = rows.slice(0, count);
+    var part2Rows = rows.slice(count);
+    var margins = elementMargin(el).top + elementMargin(el).bottom;
+    return [
+      { height: headH + subHeight(part1Rows) + margins, isHeading: false, h2Text: null, payload: buildTable(part1Rows), split: null },
+      { height: headH + subHeight(part2Rows) + margins, isHeading: false, h2Text: null, payload: buildTable(part2Rows), split: function(r) { return splitTable(buildTable(part2Rows), r); } }
+    ];
+  }
+
+  /** UL/OL 按条目拆分（OL 续片保持编号连续：start 属性顺延） */
+  function splitList(el, remainingH) {
+    var lis = Array.from(el.children).filter(function(n) { return n.tagName === 'LI'; });
+    if (lis.length <= 1) return null;
+    var used = 0;
+    var count = 0;
+    while (count < lis.length && used + (nodeHeights.get(lis[count]) || lis[count].offsetHeight) <= remainingH) {
+      used += nodeHeights.get(lis[count]) || lis[count].offsetHeight;
+      count++;
+    }
+    if (count === 0 || count >= lis.length) return null;
+
+    var isOrdered = el.tagName === 'OL';
+    var startNum = isOrdered ? (parseInt(el.getAttribute('start') || '1', 10) || 1) : 0;
+
+    function buildList(subLis, start) {
+      var l = el.cloneNode(false); // 复制 start 等属性
+      if (isOrdered && start != null) l.setAttribute('start', String(start));
+      subLis.forEach(function(li) { l.appendChild(li.cloneNode(true)); });
+      return l;
+    }
+
+    var margins = elementMargin(el).top + elementMargin(el).bottom;
+    var part1Lis = lis.slice(0, count);
+    var part2Lis = lis.slice(count);
+    var part2List = buildList(part2Lis, startNum + count);
+    return [
+      { height: subHeight(part1Lis) + margins, isHeading: false, h2Text: null, payload: buildList(part1Lis, startNum), split: null },
+      { height: subHeight(part2Lis) + margins, isHeading: false, h2Text: null, payload: part2List, split: function(r) { return splitList(part2List, r); } }
+    ];
+  }
+
+  /** BLOCKQUOTE 按子元素拆分 */
+  function splitChildren(el, remainingH) {
+    var kids = Array.from(el.children);
+    if (kids.length <= 1) return null;
+    var used = 0;
+    var count = 0;
+    while (count < kids.length && used + (nodeHeights.get(kids[count]) || kids[count].offsetHeight) <= remainingH) {
+      used += nodeHeights.get(kids[count]) || kids[count].offsetHeight;
+      count++;
+    }
+    if (count === 0 || count >= kids.length) return null;
+
+    function buildBox(subKids) {
+      var b = el.cloneNode(false);
+      subKids.forEach(function(k) { b.appendChild(k.cloneNode(true)); });
+      return b;
+    }
+
+    var margins = elementMargin(el).top + elementMargin(el).bottom;
+    var part1Kids = kids.slice(0, count);
+    var part2Kids = kids.slice(count);
+    return [
+      { height: subHeight(part1Kids) + margins, isHeading: false, h2Text: null, payload: buildBox(part1Kids), split: null },
+      { height: subHeight(part2Kids) + margins, isHeading: false, h2Text: null, payload: buildBox(part2Kids), split: function(r) { return splitChildren(buildBox(part2Kids), r); } }
+    ];
+  }
+
+  // ============================================
+  // 测量容器流水线
+  // ============================================
+  function createMeasureDiv() {
+    var box = contentBox();
+    var div = document.createElement('div');
+    div.className = 'slides-measure';
+    div.style.cssText = 'position:absolute;visibility:hidden;left:-99999px;top:0;width:' + box.width + 'px;';
+    document.getElementById('slidesContainer').appendChild(div);
+    return div;
+  }
+
+  function waitForImages(div, timeoutMs) {
+    var imgs = Array.from(div.querySelectorAll('img'));
+    return Promise.all(imgs.map(function(img) {
+      if (img.complete) return Promise.resolve();
+      return Promise.race([
+        new Promise(function(res) {
+          img.addEventListener('load', res, { once: true });
+          img.addEventListener('error', res, { once: true });
+        }),
+        new Promise(function(res) { setTimeout(res, timeoutMs || 1500); })
+      ]);
+    }));
+  }
+
+  /**
+   * GFM Alerts styling: > [!NOTE] / [!TIP] / [!IMPORTANT] / [!WARNING] / [!CAUTION]
+   * Mirrors main.js initGFMAlerts（主视图同款渲染，否则幻灯片里只显示原始 [!NOTE] 文本）。
+   */
+  function styleGfmAlerts(container) {
+    var icons = {
+      'NOTE': 'ℹ️',
+      'TIP': '💡',
+      'IMPORTANT': '❗',
+      'WARNING': '⚠️',
+      'CAUTION': '🔥'
+    };
+
+    var blockquotes = container.querySelectorAll('blockquote');
+    for (var i = 0; i < blockquotes.length; i++) {
+      var bq = blockquotes[i];
+      var firstP = bq.querySelector('p');
+      if (!firstP) continue;
+
+      var text = firstP.textContent.trim();
+      var alertMatch = text.match(/^\[\!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]/i);
+      if (!alertMatch) continue;
+
+      var alertType = alertMatch[1].toUpperCase();
+      bq.classList.add('gfm-alert', 'gfm-alert-' + alertType.toLowerCase());
+
+      firstP.textContent = firstP.textContent.replace(alertMatch[0], '').trim();
+
+      var iconSpan = document.createElement('span');
+      iconSpan.className = 'gfm-alert-icon';
+      iconSpan.textContent = icons[alertType] || 'ℹ️';
+      firstP.insertBefore(iconSpan, firstP.firstChild);
+
+      if (!firstP.textContent.trim()) {
+        firstP.remove();
+      }
+    }
+  }
+
+  /**
+   * 渲染并测量一个内容单元，返回分页后的节点数组（每页一个节点数组）。
+   */
+  async function measureAndPack(unitHtml, baseDir, filePath) {
+    var div = createMeasureDiv();
+    div.innerHTML = unitHtml;
+
+    // 1. 注释属性（fragment / .slide）
+    processFragments(div);
+
+    // 1.5 GFM alerts（与主视图一致的渲染）
+    styleGfmAlerts(div);
+
+    // 2. 图片路径（WikiLink / 相对路径）
+    processWikiLinkImages(div, baseDir);
+    processStandardImages(div, baseDir, filePath);
+
+    // 3. KaTeX（影响高度，必须在测量前）
+    if (typeof renderMathInElement !== 'undefined') {
       try {
-        slideParts = splitHtmlIntoSlides(html);
+        renderMathInElement(div, {
+          delimiters: [
+            { left: '$$', right: '$$', display: true },
+            { left: '\\[', right: '\\]', display: true },
+            { left: '$', right: '$', display: false },
+            { left: '\\(', right: '\\)', display: false }
+          ],
+          throwOnError: false
+        });
       } catch (err) {
-        container.innerHTML = '<section><h1>解析错误</h1><p>' + err.message + '</p></section>';
-        return;
+        console.error('KaTeX render failed:', err);
       }
+    }
 
-      container.innerHTML = '';
-      if (slideParts.length === 0) {
-        container.innerHTML = '<section><h1>无内容</h1></section>';
-        return;
-      }
+    // 4. Mermaid（异步渲染完成后再测量）
+    await renderMermaidBlocks(div);
 
-      for (var i = 0; i < slideParts.length; i++) {
-        var section = document.createElement('section');
-        section.innerHTML = slideParts[i];
-        container.appendChild(section);
+    // 5. 图片加载完成（高度才可靠）
+    await waitForImages(div);
+
+    // 6. 测量 + 装箱
+    var items = measureItems(div);
+    var availH = contentBox().height;
+    var pages = packItems(items, availH);
+
+    // 7. 物化：把节点从测量容器移出（随后容器销毁）
+    var result = pages.map(function(page) {
+      var nodes = [];
+      if (page.continuedH2) {
+        var h = document.createElement('h2');
+        h.textContent = page.continuedH2 + '（续）';
+        nodes.push(h);
       }
+      page.items.forEach(function(item) { nodes.push(item.payload); });
+      return nodes;
+    });
+
+    div.parentNode.removeChild(div);
+    return result;
+  }
+
+  // ============================================
+  // 初始化
+  // ============================================
+  var revealReady = false;
+
+  async function doInit() {
+    var container = document.getElementById('slidesContainer');
+    container.innerHTML = '';
+
+    var groups = window.__slides_groups || [];
+    var baseDir = window.__slides_baseDir || '';
+    var filePath = window.__slides_filePath || '';
+
+    if (groups.length === 0) {
+      container.innerHTML = '<section><h1>无内容</h1></section>';
+      return;
     }
 
     if (typeof Reveal === 'undefined') {
@@ -82,13 +429,39 @@
     }
 
     try {
+      for (var g = 0; g < groups.length; g++) {
+        var group = groups[g];
+        var hSec = document.createElement('section');
+
+        if (group.cover) {
+          var cov = document.createElement('section');
+          cov.innerHTML = group.cover;
+          hSec.appendChild(cov);
+        }
+
+        for (var u = 0; u < group.units.length; u++) {
+          var pages = await measureAndPack(group.units[u], baseDir, filePath);
+          for (var p = 0; p < pages.length; p++) {
+            var sec = document.createElement('section');
+            pages[p].forEach(function(n) { sec.appendChild(n); });
+            hSec.appendChild(sec);
+          }
+        }
+
+        // 空组保底（如章节只有封面）
+        if (hSec.children.length === 0) {
+          hSec.appendChild(document.createElement('section'));
+        }
+        container.appendChild(hSec);
+      }
+
       if (revealReady && Reveal.isReady && Reveal.isReady()) {
         Reveal.destroy();
       }
       Reveal.initialize({
-        width: 1280,
-        height: 720,
-        margin: 0.22,
+        width: SLIDE_W,
+        height: SLIDE_H,
+        margin: SLIDE_MARGIN,
         minScale: 0.2,
         maxScale: 2.0,
         transition: 'slide',
@@ -105,10 +478,31 @@
       });
       revealReady = true;
 
-      // Post-process: math, code highlighting, mermaid diagrams, fragments
-      postProcessSlides();
+      // Prism 在最终 section 上高亮（拆分后的代码块也能正确着色）
+      highlightCodeBlocks(container);
     } catch (err) {
-      container.innerHTML = '<section><h1>Reveal.js 初始化失败</h1><p>' + err.message + '</p></section>';
+      console.error('[slides] init failed:', err);
+      container.innerHTML = '<section><h1>初始化失败</h1><p>' + err.message + '</p></section>';
+    }
+  }
+
+  function highlightCodeBlocks(container) {
+    if (typeof Prism === 'undefined') return;
+    var codeBlocks = container.querySelectorAll('pre code[class*="language-"]');
+    for (var i = 0; i < codeBlocks.length; i++) {
+      var code = codeBlocks[i];
+      var cls = code.className || '';
+      var langMatch = cls.match(/language-(\w+)/);
+      var language = langMatch ? langMatch[1].toLowerCase() : null;
+      if (language && language !== 'mermaid') {
+        var pre = code.parentElement;
+        if (pre) pre.setAttribute('data-language', language);
+        try {
+          Prism.highlightElement(code);
+        } catch (err) {
+          console.error('Prism highlight failed:', err);
+        }
+      }
     }
   }
 
@@ -139,13 +533,11 @@
         var isImage = imageExtensions.indexOf(ext) !== -1;
 
         if (isImage) {
-          // Resolve path (same logic as main.js initObsidianEmbeds)
           var resolvedPath = target;
           if (baseDir) {
             var baseParts = baseDir.replace(/\\/g, '/').split('/');
             var targetParts = target.replace(/\\/g, '/').split('/');
 
-            // Check if target's first segment matches any part of baseDir
             var overlapIndex = -1;
             for (var i = baseParts.length - 1; i >= 0; i--) {
               if (baseParts[i] === targetParts[0]) {
@@ -172,13 +564,10 @@
             }
           }
 
-          // Use Tauri convertFileSrc for local file access
           var finalSrc = convertFileSrc ? convertFileSrc(resolvedPath) : resolvedPath;
-          // Fix double-encoding issue (%25 indicates % was encoded again)
           if (finalSrc && finalSrc.includes('%25')) {
             finalSrc = decodeURIComponent(finalSrc);
           }
-          console.log('[slides WikiLink] target:', target, 'resolvedPath:', resolvedPath, 'finalSrc:', finalSrc);
 
           var imgWrapper = document.createElement('div');
           imgWrapper.className = 'obsidian-embed obsidian-image-embed';
@@ -224,32 +613,25 @@
    * Process standard Markdown images: ![alt](path) - already rendered as <img>
    * Convert relative paths to Tauri convertFileSrc for local file access.
    */
-  function processStandardImages(container, baseDir) {
+  function processStandardImages(container, baseDir, filePath) {
     var convertFileSrc = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc;
     if (!convertFileSrc) return;
 
     var imgs = container.querySelectorAll('img');
-    var mdPath = window.__slides_filePath || '';
-    var mdDir = mdPath ? mdPath.replace(/\\/g, '/').split('/').slice(0, -1).join('/') : baseDir;
+    var mdDir = filePath ? filePath.replace(/\\/g, '/').split('/').slice(0, -1).join('/') : baseDir;
 
     for (var i = 0; i < imgs.length; i++) {
       var img = imgs[i];
       var src = img.getAttribute('src');
       if (!src) continue;
 
-      // Skip http/https URLs
       if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) continue;
-
-      // Skip already converted Tauri URLs
       if (src.startsWith('asset://') || src.startsWith('tauri://')) continue;
 
-      // Resolve relative path
       var resolvedPath;
       if (src.startsWith('/') || src.match(/^[A-Za-z]:\\/)) {
-        // Absolute path
         resolvedPath = src;
       } else {
-        // Relative path - resolve from md file directory
         if (mdDir) {
           resolvedPath = mdDir + '/' + src;
         } else if (baseDir) {
@@ -259,16 +641,13 @@
         }
       }
 
-      // Normalize path
       resolvedPath = resolvedPath.replace(/\\/g, '/');
 
       var finalSrc = convertFileSrc(resolvedPath);
-      // Fix double-encoding issue
       if (finalSrc && finalSrc.includes('%25')) {
         finalSrc = decodeURIComponent(finalSrc);
       }
 
-      console.log('[slides stdImg] src:', src, 'resolved:', resolvedPath, 'finalSrc:', finalSrc);
       img.src = finalSrc;
 
       img.onerror = function() {
@@ -279,247 +658,135 @@
   }
 
   /**
-   * Post-process slide content: KaTeX math, Prism code highlighting, Mermaid diagrams, fragments, WikiLink images.
+   * Mermaid 渲染（Promise 版）：渲染容器内所有 mermaid 块，完成后 resolve。
+   * 保留 v2 的 SVG 后处理（字号/foreignObject/暗色边线）。
    */
-  function postProcessSlides() {
-    var container = document.getElementById('slidesContainer');
-    if (!container) return;
+  function renderMermaidBlocks(container) {
+    if (typeof mermaid === 'undefined') return Promise.resolve();
 
-    // 1. Process fragment comments: <!-- .element: class="fragment" -->
-    processFragments(container);
+    try {
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'dark',
+        securityLevel: 'loose',
+        themeVariables: {
+          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
+          fontSize: '16px',
+          // 暗底可读配色：节点深蓝灰填充 + 亮边 + 浅字（替代硬编码白色补丁）
+          primaryColor: '#33415c',
+          primaryTextColor: '#e2e8f0',
+          primaryBorderColor: '#60a5fa',
+          lineColor: '#cbd5e1',
+          secondaryColor: '#2d3748',
+          tertiaryColor: '#1f2937',
+          classText: '#e2e8f0'
+        }
+      });
+    } catch (err) {
+      console.error('Mermaid setup failed:', err);
+      return Promise.resolve();
+    }
 
-    // 2. WikiLink images: ![[image.png]]
-    var baseDir = window.__slides_baseDir || '';
-    processWikiLinkImages(container, baseDir);
+    // <pre class="mermaid"> → <div class="mermaid">（pre 样式干扰 SVG 尺寸）
+    var preMermaids = container.querySelectorAll('pre.mermaid');
+    for (var k = 0; k < preMermaids.length; k++) {
+      var pre = preMermaids[k];
+      var div = document.createElement('div');
+      div.className = 'mermaid';
+      div.textContent = pre.textContent;
+      pre.parentNode.replaceChild(div, pre);
+    }
 
-    // 2.5 Standard Markdown images: ![alt](path) - already rendered as <img>
-    // Need to convert relative paths to Tauri convertFileSrc
-    processStandardImages(container, baseDir);
+    var blocks = container.querySelectorAll('.mermaid:not([data-mermaid-rendered])');
+    var jobs = [];
+    for (var j = 0; j < blocks.length; j++) {
+      (function(block) {
+        var code = block.textContent.trim();
+        if (!code) return;
+        var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
+        jobs.push(
+          mermaid.render(id, code).then(function(result) {
+            block.innerHTML = result.svg;
+            block.setAttribute('data-mermaid-rendered', 'true');
+            var svg = block.querySelector('svg');
+            if (svg) postProcessMermaidSvg(svg);
+          }).catch(function(err) {
+            console.error('[slides] Mermaid render failed:', err);
+            block.innerHTML = '<div style="color:#f44;padding:8px;border:1px dashed #f44;border-radius:4px;">' +
+              '<strong>Mermaid 渲染失败</strong><br>' + String(err.message || err) + '</div>';
+          })
+        );
+      })(blocks[j]);
+    }
+    return Promise.all(jobs);
+  }
 
-    // 3. KaTeX math rendering
-    if (typeof renderMathInElement !== 'undefined') {
-      try {
-        renderMathInElement(container, {
-          delimiters: [
-            { left: '$$', right: '$$', display: true },
-            { left: '\\[', right: '\\]', display: true },
-            { left: '$', right: '$', display: false },
-            { left: '\\(', right: '\\)', display: false }
-          ],
-          throwOnError: false
-        });
-      } catch (err) {
-        console.error('KaTeX render failed:', err);
+  /** Mermaid SVG 后处理：尺寸策略 + 字号修复（颜色由 themeVariables 接管） */
+  function postProcessMermaidSvg(svg) {
+    var vb = svg.getAttribute('viewBox') || '';
+    var vbParts = vb.split(/\s+/).map(parseFloat);
+    var vbW = vbParts[2] || 1;
+    var vbH = vbParts[3] || 1;
+    if (vbW > 0 && vbH > 0) {
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      // 尺寸策略：宽度一律适应最大宽度（小图放大、宽图收缩）；
+      // 高度封顶可用高度，超长图等比缩放整页展示（preserveAspectRatio 留白不变形）
+      svg.style.width = '100%';
+      svg.style.height = 'auto';
+      svg.style.maxHeight = contentBox().height + 'px';
+      svg.style.aspectRatio = vbW + ' / ' + vbH;
+    }
+    var texts = svg.querySelectorAll('text');
+    for (var t = 0; t < texts.length; t++) {
+      texts[t].setAttribute('font-size', '18px');
+      texts[t].style.fontSize = '18px';
+    }
+
+    var foreignObjects = svg.querySelectorAll('foreignObject');
+    for (var f = 0; f < foreignObjects.length; f++) {
+      var fo = foreignObjects[f];
+      fo.style.fontSize = '16px';
+      var innerDiv = fo.querySelector('div');
+      if (innerDiv) {
+        innerDiv.style.fontSize = '16px';
+        innerDiv.style.overflow = 'visible';
+        var divW = parseFloat(innerDiv.style.width) || 0;
+        var divH = parseFloat(innerDiv.style.height) || 0;
+        if (divW > 0) innerDiv.style.width = (divW + 24) + 'px';
+        if (divH > 0) innerDiv.style.height = (divH + 12) + 'px';
+        var spans = innerDiv.querySelectorAll('span, p, b, i, strong, em');
+        for (var s = 0; s < spans.length; s++) {
+          spans[s].style.fontSize = '16px';
+        }
       }
     }
 
-    // 4. Prism code highlighting (skip mermaid blocks)
-    if (typeof Prism !== 'undefined') {
-      var codeBlocks = container.querySelectorAll('pre code[class*="language-"]');
-      for (var i = 0; i < codeBlocks.length; i++) {
-        var code = codeBlocks[i];
-        var cls = code.className || '';
-        var langMatch = cls.match(/language-(\w+)/);
-        var language = langMatch ? langMatch[1].toLowerCase() : null;
-        if (language && language !== 'mermaid') {
-          var pre = code.parentElement;
-          if (pre) pre.setAttribute('data-language', language);
-          try {
-            Prism.highlightElement(code);
-          } catch (err) {
-            console.error('Prism highlight failed:', err);
-          }
-        }
-      }
+    var nodeForeignObjects = svg.querySelectorAll('.node foreignObject');
+    for (var f2 = 0; f2 < nodeForeignObjects.length; f2++) {
+      var fo2 = nodeForeignObjects[f2];
+      var oh = parseFloat(fo2.getAttribute('height')) || 0;
+      var ow = parseFloat(fo2.getAttribute('width')) || 0;
+      if (oh > 0) fo2.setAttribute('height', (oh + 12).toString());
+      if (ow > 0) fo2.setAttribute('width', (ow + 24).toString());
     }
 
-    // 5. Mermaid diagrams
-    // Convert <pre class="mermaid"> to <div class="mermaid"> before rendering
-    // <pre> default styles interfere with SVG height calculation
-    // Reveal hides inactive slides with display:none, which breaks Mermaid sizing.
-    if (typeof mermaid !== 'undefined' && typeof Reveal !== 'undefined') {
-      try {
-        mermaid.initialize({
-          startOnLoad: false,
-          theme: 'dark',
-          securityLevel: 'loose',
-          themeVariables: {
-            fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
-            fontSize: '16px'
-          }
-        });
+    var edgeLabels = svg.querySelectorAll('.edgeLabel foreignObject');
+    for (var e = 0; e < edgeLabels.length; e++) {
+      var fo3 = edgeLabels[e];
+      var eh = parseFloat(fo3.getAttribute('height')) || 0;
+      var ew = parseFloat(fo3.getAttribute('width')) || 0;
+      if (eh > 0) fo3.setAttribute('height', (eh + 10).toString());
+      if (ew > 0) fo3.setAttribute('width', (ew + 20).toString());
+    }
 
-        // Convert <pre class="mermaid"> to <div class="mermaid">
-        var preMermaids = container.querySelectorAll('pre.mermaid');
-        for (var k = 0; k < preMermaids.length; k++) {
-          var pre = preMermaids[k];
-          var div = document.createElement('div');
-          div.className = 'mermaid';
-          div.textContent = pre.textContent;
-          pre.parentNode.replaceChild(div, pre);
-        }
-
-        function renderMermaidForSlide(slide) {
-          if (!slide) return;
-          var blocks = slide.querySelectorAll('.mermaid:not([data-mermaid-rendered])');
-          for (var j = 0; j < blocks.length; j++) {
-            (function(block) {
-              var code = block.textContent.trim();
-              if (!code) return;
-              var id = 'mermaid-' + Date.now() + '-' + Math.random().toString(36).substr(2, 9);
-
-              mermaid.render(id, code).then(function(result) {
-                block.innerHTML = result.svg;
-                block.setAttribute('data-mermaid-rendered', 'true');
-                var svg = block.querySelector('svg');
-                if (svg) {
-                  var vb = svg.getAttribute('viewBox') || '';
-                  var vbParts = vb.split(/\s+/).map(parseFloat);
-                  var vbW = vbParts[2] || 1;
-                  var vbH = vbParts[3] || 1;
-                  if (vbW > 0 && vbH > 0) {
-                    svg.removeAttribute('width');
-                    svg.removeAttribute('height');
-                    svg.style.width = '100%';
-                    svg.style.height = 'auto';
-                    svg.style.maxWidth = vbW + 'px';
-                    svg.style.aspectRatio = vbW + ' / ' + vbH;
-                  }
-                  // Force correct font-size on all text elements
-                  var texts = svg.querySelectorAll('text');
-                  for (var t = 0; t < texts.length; t++) {
-                    texts[t].setAttribute('font-size', '18px');
-                    texts[t].style.fontSize = '18px';
-                  }
-
-                  // Fix font-size inheritance inside foreignObject and sync inner div dimensions
-                  var foreignObjects = svg.querySelectorAll('foreignObject');
-                  for (var f = 0; f < foreignObjects.length; f++) {
-                    var fo = foreignObjects[f];
-                    fo.style.fontSize = '16px';
-                    var innerDiv = fo.querySelector('div');
-                    if (innerDiv) {
-                      innerDiv.style.fontSize = '16px';
-                      innerDiv.style.overflow = 'visible';
-                      // Mermaid sets fixed inline width/height on inner div; must sync with FO expansion
-                      var divW = parseFloat(innerDiv.style.width) || 0;
-                      var divH = parseFloat(innerDiv.style.height) || 0;
-                      if (divW > 0) innerDiv.style.width = (divW + 24) + 'px';
-                      if (divH > 0) innerDiv.style.height = (divH + 12) + 'px';
-                      var spans = innerDiv.querySelectorAll('span, p, b, i, strong, em');
-                      for (var s = 0; s < spans.length; s++) {
-                        spans[s].style.fontSize = '16px';
-                      }
-                    }
-                  }
-
-                  // Increase node dimensions for HTML content (foreignObject)
-                  var nodeForeignObjects = svg.querySelectorAll('.node foreignObject');
-                  for (var f = 0; f < nodeForeignObjects.length; f++) {
-                    var fo = nodeForeignObjects[f];
-                    var origHeight = parseFloat(fo.getAttribute('height')) || 0;
-                    var origWidth = parseFloat(fo.getAttribute('width')) || 0;
-                    if (origHeight > 0) {
-                      fo.setAttribute('height', (origHeight + 12).toString());
-                    }
-                    if (origWidth > 0) {
-                      fo.setAttribute('width', (origWidth + 24).toString());
-                    }
-                  }
-
-                  // Increase edge label dimensions
-                  var edgeLabels = svg.querySelectorAll('.edgeLabel foreignObject');
-                  for (var e = 0; e < edgeLabels.length; e++) {
-                    var fo = edgeLabels[e];
-                    var origHeight = parseFloat(fo.getAttribute('height')) || 0;
-                    var origWidth = parseFloat(fo.getAttribute('width')) || 0;
-                    if (origHeight > 0) {
-                      fo.setAttribute('height', (origHeight + 10).toString());
-                    }
-                    if (origWidth > 0) {
-                      fo.setAttribute('width', (origWidth + 20).toString());
-                    }
-                  }
-
-                  // Also increase surrounding rect
-                  var rects = svg.querySelectorAll('.node rect');
-                  for (var r = 0; r < rects.length; r++) {
-                    var rect = rects[r];
-                    var origHeight = parseFloat(rect.getAttribute('height')) || 0;
-                    var origWidth = parseFloat(rect.getAttribute('width')) || 0;
-                    if (origHeight > 0) {
-                      rect.setAttribute('height', (origHeight + 12).toString());
-                    }
-                    if (origWidth > 0) {
-                      rect.setAttribute('width', (origWidth + 24).toString());
-                    }
-                  }
-
-                  // Fix arrow/edge colors for dark theme - force white
-                  // Fix all edge/connection paths
-                  var edgePaths = svg.querySelectorAll('.edgePath path, .edges path, g[class*="edge"] path');
-                  for (var p = 0; p < edgePaths.length; p++) {
-                    edgePaths[p].setAttribute('stroke', '#ffffff');
-                    edgePaths[p].style.stroke = '#ffffff';
-                  }
-                  // Also fix any path that looks like a connection (not inside .node)
-                  var allPaths = svg.querySelectorAll('path');
-                  for (var p = 0; p < allPaths.length; p++) {
-                    var path = allPaths[p];
-                    var parent = path.parentElement;
-                    if (parent && !parent.classList.contains('node') && !parent.closest('.node')) {
-                      path.setAttribute('stroke', '#ffffff');
-                      path.style.stroke = '#ffffff';
-                    }
-                  }
-
-                  // Fix arrow markers (defs)
-                  var markers = svg.querySelectorAll('marker');
-                  for (var m = 0; m < markers.length; m++) {
-                    var markerPaths = markers[m].querySelectorAll('path, polygon');
-                    for (var mp = 0; mp < markerPaths.length; mp++) {
-                      markerPaths[mp].setAttribute('fill', '#ffffff');
-                      markerPaths[mp].style.fill = '#ffffff';
-                    }
-                  }
-
-                  // Fix edge label rect background
-                  var edgeRects = svg.querySelectorAll('.edgeLabel rect');
-                  for (var er = 0; er < edgeRects.length; er++) {
-                    edgeRects[er].setAttribute('fill', '#1e1e2e');
-                    edgeRects[er].setAttribute('stroke', '#ffffff');
-                  }
-                }
-              }).catch(function(err) {
-                console.error('[slides] Mermaid render failed:', err);
-                block.innerHTML = '<div style="color:#f44;padding:8px;border:1px dashed #f44;border-radius:4px;">' +
-                  '<strong>Mermaid 渲染失败</strong><br>' + String(err.message || err) + '</div>';
-              });
-            })(blocks[j]);
-          }
-        }
-
-        function tryRenderCurrentSlide() {
-          var slide = Reveal.getCurrentSlide ? Reveal.getCurrentSlide() : null;
-          if (slide) {
-            renderMermaidForSlide(slide);
-          }
-        }
-
-        // Try immediately, then again after Reveal layout settles
-        tryRenderCurrentSlide();
-        setTimeout(tryRenderCurrentSlide, 200);
-        setTimeout(tryRenderCurrentSlide, 600);
-
-        // Render on slide change
-        Reveal.on('slidechanged', function(event) {
-          setTimeout(function() {
-            renderMermaidForSlide(event.currentSlide);
-          }, 100);
-        });
-      } catch (err) {
-        console.error('Mermaid setup failed:', err);
-      }
+    var rects = svg.querySelectorAll('.node rect');
+    for (var r = 0; r < rects.length; r++) {
+      var rect = rects[r];
+      var rh = parseFloat(rect.getAttribute('height')) || 0;
+      var rw = parseFloat(rect.getAttribute('width')) || 0;
+      if (rh > 0) rect.setAttribute('height', (rh + 12).toString());
+      if (rw > 0) rect.setAttribute('width', (rw + 24).toString());
     }
   }
 
@@ -541,12 +808,10 @@
       var comment = walker.currentNode;
       var value = comment.nodeValue.trim();
 
-      // .element: class="fragment" data-fragment-index="1"
       if (value.indexOf('.element:') === 0) {
         var attrString = value.substring('.element:'.length).trim();
         var prev = comment.previousElementSibling;
         if (!prev && comment.previousSibling) {
-          // previousSibling might be a text node; find nearest element before it
           var node = comment.previousSibling;
           while (node && node.nodeType !== Node.ELEMENT_NODE) {
             node = node.previousSibling;
@@ -569,23 +834,22 @@
         }
       }
 
-      // .slide: data-background="#ff0000"
       if (value.indexOf('.slide:') === 0) {
-        var attrString = value.substring('.slide:'.length).trim();
+        var attrString2 = value.substring('.slide:'.length).trim();
         var section = comment.parentElement;
         while (section && section.tagName !== 'SECTION') {
           section = section.parentElement;
         }
         if (section) {
-          var div = document.createElement('div');
-          div.innerHTML = '<span ' + attrString + '></span>';
-          var attrs = div.firstChild.attributes;
-          for (var i = 0; i < attrs.length; i++) {
-            var existing = section.getAttribute(attrs[i].name);
-            if (existing && attrs[i].name === 'class') {
-              section.setAttribute(attrs[i].name, existing + ' ' + attrs[i].value);
+          var div2 = document.createElement('div');
+          div2.innerHTML = '<span ' + attrString2 + '></span>';
+          var attrs2 = div2.firstChild.attributes;
+          for (var i2 = 0; i2 < attrs2.length; i2++) {
+            var existing2 = section.getAttribute(attrs2[i2].name);
+            if (existing2 && attrs2[i2].name === 'class') {
+              section.setAttribute(attrs2[i2].name, existing2 + ' ' + attrs2[i2].value);
             } else {
-              section.setAttribute(attrs[i].name, attrs[i].value);
+              section.setAttribute(attrs2[i2].name, attrs2[i2].value);
             }
           }
           commentsToRemove.push(comment);
@@ -593,8 +857,8 @@
       }
     }
 
-    for (var i = 0; i < commentsToRemove.length; i++) {
-      var c = commentsToRemove[i];
+    for (var i3 = 0; i3 < commentsToRemove.length; i3++) {
+      var c = commentsToRemove[i3];
       if (c.parentNode) {
         c.parentNode.removeChild(c);
       }
@@ -614,11 +878,10 @@
   }
 
   function init() {
-    waitForReveal(doInit);
+    waitForReveal(function() { doInit(); });
   }
 
   window.__reloadSlides = function() {
-    // Fully reset container DOM to prevent Reveal.js state corruption on re-init
     var container = document.getElementById('slidesContainer');
     if (container) {
       container.innerHTML = '';
@@ -650,10 +913,7 @@
   }, true);
 
   // Only auto-init if content is already injected (e.g. direct page open).
-  // When opened via iframe, parent window calls __reloadSlides() after injecting
-  // __slides_sections, so we skip init() here to avoid a flash of placeholder
-  // content and duplicate Reveal.initialize() calls that corrupt slide counting.
-  if (window.__slides_sections || window.__slides_html) {
+  if (window.__slides_groups) {
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', init);
     } else {

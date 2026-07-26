@@ -91,16 +91,19 @@
   background: #1e1e2e;
   border-radius: 8px;
   padding: 0.8em;
-  margin: 0.5em 0;
+  margin: 0.5em auto;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   overflow-x: auto;
-  max-height: 45vh;
+  max-height: 60vh;
+  width: 96%;
+  /* 覆盖 black.css 的 0.55em：与 code 的 0.9em 叠加后约 21px，保证可读性 */
+  font-size: 0.85em;
 }
 
 .reveal pre code {
   background: transparent;
   padding: 0;
-  font-size: 0.7em;
+  font-size: 0.9em;
   line-height: 1.4;
   color: #cdd6f4;
 }
@@ -114,6 +117,15 @@
   border-radius: 0 8px 8px 0;
   font-style: italic;
   color: #cbd5e1;
+}
+
+/* 长不可断片段（如 节点A→节点B→… 链路）允许任意位置断行，防横向溢出 */
+.reveal section p,
+.reveal section li,
+.reveal section td,
+.reveal section th,
+.reveal section blockquote {
+  overflow-wrap: anywhere;
 }
 
 .reveal blockquote p:last-child {
@@ -252,4 +264,82 @@
 .reveal .mermaid svg foreignObject div,
 .reveal .mermaid svg foreignObject span {
   font-size: 16px !important;
+}
+
+/* GFM Alerts (dark-adapted, mirrors main.css light variants) */
+.reveal .gfm-alert {
+  margin: 0.6em 0;
+  padding: 0.5em 0.8em;
+  border-radius: 6px;
+  border-left: 4px solid;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3em;
+  text-align: left;
+  font-size: 0.7em;
+}
+
+.reveal .gfm-alert p {
+  margin: 0;
+}
+
+.reveal .gfm-alert p:first-child {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  font-weight: 600;
+}
+
+.reveal .gfm-alert-icon {
+  font-size: 1.1em;
+  line-height: 1;
+}
+
+.reveal .gfm-alert-note {
+  background: rgba(59, 130, 246, 0.18);
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+
+.reveal .gfm-alert-tip {
+  background: rgba(34, 197, 94, 0.18);
+  border-color: #22c55e;
+  color: #bbf7d0;
+}
+
+.reveal .gfm-alert-important {
+  background: rgba(168, 85, 247, 0.18);
+  border-color: #a855f7;
+  color: #e9d5ff;
+}
+
+.reveal .gfm-alert-warning {
+  background: rgba(245, 158, 11, 0.18);
+  border-color: #f59e0b;
+  color: #fde68a;
+}
+
+.reveal .gfm-alert-caution {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #fecaca;
+}
+
+/* Task list inside slides: checkbox 对齐与间距 */
+.reveal .task-list-item,
+.reveal li:has(> input[type="checkbox"]) {
+  list-style: none;
+}
+
+.reveal input[type="checkbox"] {
+  margin-right: 0.4em;
+  transform: scale(1.4);
+  vertical-align: middle;
+}
+
+/* black.css 把 blockquote 首尾 p 设为 inline-block（为单段引用居中设计），
+   引用块内含列表等多块内容时会并排错位（标题行与列表左右分布）→ 还原块级 */
+.reveal blockquote p:first-child,
+.reveal blockquote p:last-child {
+  display: block;
 }
