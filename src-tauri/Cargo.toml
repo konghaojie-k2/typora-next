@@ -73,5 +73,4 @@ tauri-plugin-process = "2"
 objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-web-kit = { version = "0.3", features = ["WKPDFConfiguration", "block2"] }
-objc2-core-graphics = "0.3"
 block2 = "0.6"

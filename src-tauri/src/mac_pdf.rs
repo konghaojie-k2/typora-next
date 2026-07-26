@@ -68,8 +68,7 @@ mod macos {
                 use block2::RcBlock;
                 use objc2::runtime::NSObjectProtocol;
                 use objc2::{sel, MainThreadMarker};
-                use objc2_core_graphics::{CGPoint, CGRect, CGSize};
-                use objc2_foundation::{NSData, NSError};
+                use objc2_foundation::{NSData, NSError, NSPoint, NSRect, NSSize};
                 use objc2_web_kit::{WKPDFConfiguration, WKWebView};
 
                 let wk = unsafe { &*(webview.inner() as *const WKWebView) };
@@ -90,9 +89,9 @@ mod macos {
                 // 显式指定完整内容区域：config 传 nil 时只捕获当前可视范围
                 let config = unsafe { WKPDFConfiguration::new(mtm) };
                 unsafe {
-                    config.setRect(CGRect::new(
-                        CGPoint::new(0.0, 0.0),
-                        CGSize::new(content_width, content_height),
+                    config.setRect(NSRect::new(
+                        NSPoint::new(0.0, 0.0),
+                        NSSize::new(content_width, content_height),
                     ));
                 }
 
