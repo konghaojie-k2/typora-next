@@ -713,6 +713,7 @@
   function renderMermaidBlocks(container) {
     if (typeof mermaid === 'undefined') return Promise.resolve();
 
+    var P = readPalette();
     try {
       mermaid.initialize({
         startOnLoad: false,
@@ -720,29 +721,37 @@
         securityLevel: 'loose',
         fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
         themeVariables: {
-          primaryColor: '#4a6491',
-          primaryTextColor: '#ffffff',
-          primaryBorderColor: '#8899bb',
-          lineColor: '#ccd5e0',
-          secondaryColor: '#5c7cfa',
-          tertiaryColor: '#3b5aa0',
-          textColor: '#e8ecf1',
-          nodeBorder: '#8899bb',
-          nodeTextColor: '#ffffff',
-          // 强制 SVG 背景为浅色，确保节点和暗底对比强烈
-          background: '#3b4a66',
-          // 主节点填充：明确指定明亮色，避免 dark 主题默认 #2D2D2D 与 #111 背景融合
-          primaryColor: '#5c7cfa',
+          // 第一道防线：颜色统一取自调色板 P（readPalette 读自 CSS :root 的 --mm-*）。
+          // 注意 dark theme 对 actor/note/section 等做硬赋值会盖过此处，最终仍由
+          // applyDarkPalette + slides.css 兜底，故此处仅尽力而为、不押宝。
+          primaryColor: P.node,
+          primaryTextColor: P.text,
+          primaryBorderColor: P.border,
+          lineColor: P.line,
+          secondaryColor: P.nodeAlt,
+          tertiaryColor: P.nodeAlt,
+          textColor: P.text,
+          nodeBorder: P.border,
+          nodeTextColor: P.text,
+          background: 'transparent',
           clusterBkg: 'rgba(74,100,145,0.15)',
-          clusterBorder: '#8899bb',
-          actorBkg: '#4a6491',
-          actorBorder: '#8899bb',
-          actorTextColor: '#ffffff',
-          signalColor: '#ccd5e0',
-          signalTextColor: '#e8ecf1',
-          labelBackgroundColor: '#1a2744',
-          labelTextColor: '#ccd5e0',
-          classText: '#ccd5e0'
+          clusterBorder: P.border,
+          actorBkg: P.node,
+          actorBorder: P.border,
+          actorTextColor: P.text,
+          signalColor: P.text,
+          signalTextColor: P.text,
+          labelBackgroundColor: P.dim,
+          labelTextColor: P.line,
+          classText: P.line,
+          noteBkgColor: P.nodeAlt,
+          noteTextColor: P.text,
+          noteBorderColor: P.border,
+          sectionBkgColor: P.dim,
+          sectionBkgColor2: P.dim,
+          taskBkgColor: P.node,
+          taskTextColor: P.text,
+          taskBorderColor: P.border
         }
       });
     } catch (err) {
@@ -772,7 +781,7 @@
             block.innerHTML = result.svg;
             block.setAttribute('data-mermaid-rendered', 'true');
             var svg = block.querySelector('svg');
-            if (svg) postProcessMermaidSvg(svg);
+            if (svg) postProcessMermaidSvg(svg, P);
           }).catch(function(err) {
             console.error('[slides] Mermaid render failed:', err);
             block.innerHTML = '<div style="color:#f44;padding:8px;border:1px dashed #f44;border-radius:4px;">' +
@@ -784,8 +793,8 @@
     return Promise.all(jobs);
   }
 
-  /** Mermaid SVG 后处理：尺寸自适应 + foreignObject/文本可见性（颜色由 themeVariables 接管） */
-  function postProcessMermaidSvg(svg) {
+  /** Mermaid SVG 后处理：布局（尺寸/字号/foreignObject/透明底）+ 调用 applyDarkPalette 配色 */
+  function postProcessMermaidSvg(svg, P) {
     var vb = svg.getAttribute('viewBox') || '';
     var vbParts = vb.split(/\s+/).map(parseFloat);
     var vbW = vbParts[2] || 1;
@@ -820,21 +829,24 @@
       }
     }
 
-    // v11 dark 主题节点渲染成近黑色：JS 强制重写 fill/stroke（CSS !important
-    // 覆盖不到 inline 属性锁定的 marker path/arrowhead）
-    // Mermaid 部分形状（cylinder/database/hexagon 等 path 元素）的 inline style
-    // 带 !important（"fill: ... !important"），setAttribute 改的是 presentation
-    // 属性（弱于 inline style !important），必须用 setProperty + 'important' 后写后赢。
-    var FG = '#5c7cfa';
-    var BD = '#a8b8e8';
-    var LN = '#d8dde6';
-    // 节点形状（白名单，只覆盖"应是节点"的元素，避免污染 Gantt .section/.task-line、
-    // ER .attributeBoxOdd/.relationshipLabelBox、pie chart 切片等需要差异化颜色的元素）：
-    //   - .node rect/circle/ellipse/polygon/path  → flowchart + state 节点（path 覆盖 cylinder）
-    //   - .classGroup rect                          → class diagram 类体
-    //   - .entityBox                                → ER 图实体
-    //   - .task                                     → Gantt 任务条
-    // 用 setProperty + 'important' 覆盖 Mermaid v11 的 inline !important style
+    // SVG 背景保持透明，让 slide 背景（#111）透出来，避免形成大色块
+    svg.style.background = 'transparent';
+
+    // 配色（节点/边/差异化/标题栏），颜色取自调色板 P
+    applyDarkPalette(svg, P);
+  }
+
+  /**
+   * Mermaid 暗色配色（单一入口）。颜色全部取自调色板 P（readPalette 读自 CSS :root 的
+   * --mm-* 变量），与 slides.css 的 var() 规则同源——改颜色只改 slides.css 一处。
+   * 五段：① 节点白名单 ② 箭头 marker ③ 边线 + sequence 消息线 ④ 差异化元素（note）
+   * ⑤ class 标题栏注入。actor/section/grid/today/edgeLabel 等由 slides.css var() 接管，
+   * 不在此双设；.classGroup rect/.entityBox/.task 与 CSS 同色重叠（互为兜底，有意保留）。
+   */
+  function applyDarkPalette(svg, P) {
+    // ① 节点白名单：只覆盖"应是节点"的元素，避免污染 Gantt .section/.task-line、
+    //    ER .attributeBoxOdd/.relationshipLabelBox、pie chart 切片等需差异化颜色的元素。
+    //    setProperty + 'important' 覆盖 Mermaid v11 inline style 的 !important。
     var nodeShapes = svg.querySelectorAll(
       '.node rect, .node circle, .node ellipse, .node polygon, .node path, ' +
       '.classGroup rect, ' +
@@ -844,42 +856,46 @@
     for (var s = 0; s < nodeShapes.length; s++) {
       var sh = nodeShapes[s];
       if (sh.closest('defs') || sh.closest('marker')) continue;
-      // 边线组内的 path 不是节点（但 .edgePath 路径已在边缘 loop 处理，这里双保险跳过）
+      // 边线组内的 path 不是节点（双保险跳过）
       if (sh.closest('.transition, .relationshipLine, .relation, .edgePath, .flowchart-link, .edges, .messageLine0, .messageLine1')) continue;
       var cls = sh.getAttribute('class') || '';
       if (/arrowhead/i.test(cls)) {
-        sh.style.setProperty('fill', LN, 'important');
-        sh.style.setProperty('stroke', LN, 'important');
+        sh.style.setProperty('fill', P.line, 'important');
+        sh.style.setProperty('stroke', P.line, 'important');
         continue;
       }
-      // Gantt 任务状态变体（done/crit/active）让 CSS 差异化接管，不填亮蓝
+      // Gantt 任务状态变体（done/crit/active）让 CSS 差异化接管，不填主色
       if (/\btask\b/.test(cls) && /\b(done|crit|active)\b/.test(cls)) continue;
-      // 默认节点：填充亮蓝 + 描边
-      sh.style.setProperty('fill', FG, 'important');
-      sh.style.setProperty('stroke', BD, 'important');
+      sh.style.setProperty('fill', P.node, 'important');
+      sh.style.setProperty('stroke', P.border, 'important');
     }
-    // 箭头 marker：直接改 fill/stroke（绕过 context-stroke）
+    // ② 箭头 marker：直接改 fill/stroke（绕过 context-stroke）
     var markerShapes = svg.querySelectorAll('marker path, marker polygon, defs marker path, defs marker polygon');
     for (var m = 0; m < markerShapes.length; m++) {
-      markerShapes[m].style.setProperty('fill', LN, 'important');
-      markerShapes[m].style.setProperty('stroke', LN, 'important');
+      markerShapes[m].style.setProperty('fill', P.line, 'important');
+      markerShapes[m].style.setProperty('stroke', P.line, 'important');
     }
-    // 边线（节点边框除外，含 flowchart + class + state + ER）
+    // ③ 边线（节点边框除外，含 flowchart + class + state + ER）
     var edgePaths = svg.querySelectorAll('.edgePath path, .edges path, .flowchart-link, .transition, .relationshipLine, .relation');
     for (var p = 0; p < edgePaths.length; p++) {
-      edgePaths[p].style.setProperty('stroke', LN, 'important');
+      edgePaths[p].style.setProperty('stroke', P.line, 'important');
       edgePaths[p].style.setProperty('fill', 'none', 'important');
     }
-    // Sequence diagram 箭头主体（messageLine0/1）在 flowchart 规则外，单独强制白色 stroke
+    // ③ sequence 消息线（messageLine0/1 在通用 edge 规则外，强制白）
     var seqLines = svg.querySelectorAll('.messageLine0, .messageLine1');
     for (var q = 0; q < seqLines.length; q++) {
-      seqLines[q].style.setProperty('stroke', '#ffffff', 'important');
+      seqLines[q].style.setProperty('stroke', P.text, 'important');
       seqLines[q].style.setProperty('fill', 'none', 'important');
     }
-
-    // Class diagram 标题栏：每个 .classGroup 顶部注入深一档蓝 rect（Mermaid v11
-    // classTitle 是 text 元素不是 rect，CSS fill 无效；classGroup line 不一定存在）。
-    // 用 JS 直接画一个覆盖标题文字高度的 rect，背景色 #4a6491 区分于类体 #5c7cfa。
+    // ④ note：Mermaid v11 用 SVG 内嵌 <style> 设黄底，外部 CSS 特异性难稳赢，
+    //    JS setProperty 后写后赢覆盖为暗底 + 留白字。
+    var noteRects = svg.querySelectorAll('.note-cluster rect, .statediagram-note rect, rect.note, g.note rect');
+    for (var n = 0; n < noteRects.length; n++) {
+      noteRects[n].style.setProperty('fill', P.nodeAlt, 'important');
+      noteRects[n].style.setProperty('stroke', P.border, 'important');
+    }
+    // ⑤ class 标题栏：每个 .classGroup 顶部注入深一档 rect（Mermaid classTitle 是 text
+    //    元素不是 rect，CSS fill 无效；classGroup line 不一定存在）。用 JS 直接画。
     var classGroups = svg.querySelectorAll('g.classGroup');
     var SVG_NS = 'http://www.w3.org/2000/svg';
     for (var g = 0; g < classGroups.length; g++) {
@@ -897,8 +913,8 @@
       titleBar.setAttribute('width', rb.width);
       titleBar.setAttribute('height', barH);
       titleBar.setAttribute('class', 'class-title-bar');  // 标识，CSS 用更高优先级覆盖
-      titleBar.style.setProperty('fill', '#4a6491', 'important');
-      titleBar.style.setProperty('stroke', '#a8b8e8', 'important');
+      titleBar.style.setProperty('fill', P.nodeAlt, 'important');
+      titleBar.style.setProperty('stroke', P.border, 'important');
       titleBar.style.setProperty('stroke-width', '1.5', 'important');
       // 插入到 group 最前面（在 bodyRect 之下，但在视觉上覆盖 rect 顶部）
       group.insertBefore(titleBar, group.firstChild);
@@ -906,21 +922,29 @@
       titleText.setAttribute('font-weight', 'bold');
       titleText.setAttribute('font-size', '17');
     }
+  }
 
-    // SVG 背景保持透明，让 slide 背景（#111）透出来，避免形成大色块
-    svg.style.background = 'transparent';
-
-    // Sequence / State note 方块：Mermaid v11 用内嵌 <style> 标签里的 CSS 设置
-    // .note { fill: ${noteBkgColor} }（黄底），CSS 选择器特异性比我外部 CSS 低，
-    // 但 Mermaid 内嵌 <style> 在 SVG 内部、document order 在后，所以它的 !important
-    // 会赢。直接 JS setProperty 后写后赢覆盖：note 底色改暗，noteText 留白。
-    var NOTE_BG = '#4a6491';
-    var noteRects = svg.querySelectorAll('.note-cluster rect, .statediagram-note rect, rect.note, g.note rect');
-    for (var n = 0; n < noteRects.length; n++) {
-      noteRects[n].style.setProperty('fill', NOTE_BG, 'important');
-      noteRects[n].style.setProperty('stroke', '#a8b8e8', 'important');
-    }
-    // note 文字保持白色（全局 text rule 已覆盖）
+  /**
+   * 从 CSS :root 读 --mm-* 调色板（slides.css 定义），保证 JS setProperty 与
+   * CSS var() 同一颜色来源。若 iframe 读不到（理论不会，slides.css 已证在 iframe
+   * 加载），返回空字符串会使 setProperty 失效——实现期曾用 console.log 验证 11 值非空。
+   */
+  function readPalette() {
+    var cs = getComputedStyle(document.documentElement);
+    var g = function (n) { return cs.getPropertyValue(n).trim(); };
+    return {
+      node: g('--mm-node'),
+      nodeAlt: g('--mm-node-alt'),
+      border: g('--mm-border'),
+      line: g('--mm-line'),
+      lifeline: g('--mm-lifeline'),
+      text: g('--mm-text'),
+      dim: g('--mm-dim'),
+      muted: g('--mm-muted'),
+      crit: g('--mm-crit'),
+      critLight: g('--mm-crit-light'),
+      sectionStroke: g('--mm-section-stroke')
+    };
   }
 
   /**
