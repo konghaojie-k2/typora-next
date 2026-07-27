@@ -1,8 +1,8 @@
 name: Build
 
+# 只在 PR 与手动触发时运行。master push 已由 release.yml 覆盖（含签名编译 + 发布），
+# 此处再跑一遍 3 平台 cargo tauri build 属于重复编译、浪费 CI 时长。
 on:
-  push:
-    branches: [master]
   pull_request:
     branches: [master]
   workflow_dispatch:
