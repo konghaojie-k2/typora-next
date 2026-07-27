@@ -351,3 +351,236 @@
 .reveal blockquote p:last-child {
   display: block;
 }
+
+
+/* ==============================
+   Mermaid 字体与布局（颜色由 themeVariables 管控，不改绘）
+   ============================== */
+
+/* 防 Reveal 级联 28px 污染 SVG 文本 */
+.reveal .mermaid svg text {
+  font-size: 16px !important;
+}
+
+/* foreignObject 内 HTML 同样防级联 */
+.reveal .mermaid svg foreignObject,
+.reveal .mermaid svg foreignObject div,
+.reveal .mermaid svg foreignObject span,
+.reveal .mermaid svg foreignObject p {
+  font-size: 16px !important;
+  overflow: visible !important;
+}
+
+/* ==============================
+   Mermaid dark 主题节点过暗修复
+   v11 dark 主题 primaryColor 渲染成近黑 #262626，与 #111 slide 背景
+   融为一体。强制覆盖节点填充为亮蓝，边框亮灰。
+   ============================== */
+.reveal .mermaid svg .node rect,
+.reveal .mermaid svg .node circle,
+.reveal .mermaid svg .node ellipse,
+.reveal .mermaid svg .node polygon {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .node.default polygon,
+.reveal .mermaid svg .node.default rect {
+  fill: #5c7cfa !important;
+}
+/* 流程图判定菱形、聚合菱形 */
+.reveal .mermaid svg .node .basic,
+.reveal .mermaid svg .node .polygon {
+  fill: #5c7cfa !important;
+}
+/* 类图/状态图/ER 图所有填充元素 */
+.reveal .mermaid svg rect,
+.reveal .mermaid svg circle,
+.reveal .mermaid svg ellipse,
+.reveal .mermaid svg polygon {
+  stroke: #a8b8e8 !important;
+}
+/* 边线（节点边框除外） */
+.reveal .mermaid svg .edgePath path,
+.reveal .mermaid svg .edges path,
+.reveal .mermaid svg .flowchart-link {
+  stroke: #d8dde6 !important;
+  stroke-width: 1.5px !important;
+}
+/* 箭头填充（v11 marker 在 defs 内，含 path/polygon） */
+.reveal .mermaid svg marker path,
+.reveal .mermaid svg marker polygon,
+.reveal .mermaid svg defs marker path,
+.reveal .mermaid svg defs marker polygon {
+  fill: #d8dde6 !important;
+  stroke: #d8dde6 !important;
+}
+.reveal .mermaid svg .arrowheadPath,
+.reveal .mermaid svg [class*="arrowhead"] {
+  fill: #d8dde6 !important;
+}
+/* 文本 */
+.reveal .mermaid svg text {
+  fill: #ffffff !important;
+  font-size: 16px !important;
+}
+/* 关系标签底色 */
+.reveal .mermaid svg .edgeLabel rect,
+.reveal .mermaid svg .labelBkg {
+  fill: #1a2744 !important;
+}
+.reveal .mermaid svg .edgeLabel text {
+  fill: #d8dde6 !important;
+}
+
+/* ==============================
+   Sequence diagram 暗色修复
+   flowchart 规则不覆盖 messageLine / actor-line / loopLine，
+   在 dark 主题下默认 stroke 不可见，强制白色。
+   ============================== */
+.reveal .mermaid svg .messageLine0,
+.reveal .mermaid svg .messageLine1 {
+  stroke: #ffffff !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .actor-line,
+.reveal .mermaid svg .actorLine {
+  stroke: #ccd5e0 !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .actor rect,
+.reveal .mermaid svg rect.actor {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .labelBox rect {
+  fill: #1a2744 !important;
+  stroke: #8899bb !important;
+}
+.reveal .mermaid svg .loopLine {
+  stroke: #8899bb !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+/* Sequence note：Mermaid 默认浅黄底 + 暗字，但全局 text rule 强制白字 → 黄底白字不可读。
+   改为暗底 + 留白字，与整体风格一致。 */
+.reveal .mermaid svg .note rect,
+.reveal .mermaid svg .note-cluster rect {
+  fill: #4a6491 !important;
+  stroke: #a8b8e8 !important;
+}
+
+/* ==============================
+   Class diagram 暗色修复
+   .classGroup rect 在通用 rect 规则下只有 stroke，缺 fill；
+   .classTitle 标题栏需深一档蓝，否则与类体融合；
+   .relation 关系箭头（Mermaid v11 classDiagram 专用，非 .edgePath）默认黑色不可见。
+   ============================== */
+.reveal .mermaid svg .classGroup rect {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+  stroke-width: 1.5px !important;
+}
+/* JS 注入的标题栏 rect：class 提升优先级，避免被上方 .classGroup rect 通用规则压回 #5c7cfa */
+.reveal .mermaid svg .classGroup rect.class-title-bar {
+  fill: #4a6491 !important;
+}
+.reveal .mermaid svg .classTitle {
+  /* fill 留给全局 text rule（白色），只强调字号 + 字重 */
+  font-weight: bold !important;
+  font-size: 17px !important;
+}
+.reveal .mermaid svg .relation,
+.reveal .mermaid svg .relation.dashed-line,
+.reveal .mermaid svg .relation.dotted-line {
+  stroke: #d8dde6 !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+
+/* ==============================
+   State diagram 暗色修复
+   .transition 路径在 flowchart edge 规则外（flowchart 用 .edgePath），
+   stateDiagram-v2 用 .transition，必须单独覆盖。
+   ============================== */
+.reveal .mermaid svg .transition {
+  stroke: #d8dde6 !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+
+/* ==============================
+   ER diagram 暗色修复
+   .entityBox 通用 rect 规则只有 stroke，缺 fill；
+   .relationshipLine 边线规则外；
+   .relationshipLabelBox 关系标签底深色；
+   .attributeBoxOdd/Even 属性行交替深浅。
+   ============================== */
+.reveal .mermaid svg .entityBox {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .relationshipLine {
+  stroke: #d8dde6 !important;
+  stroke-width: 1.5px !important;
+  fill: none !important;
+}
+.reveal .mermaid svg .relationshipLabelBox rect {
+  fill: #1a2744 !important;
+  stroke: #8899bb !important;
+}
+.reveal .mermaid svg .attributeBoxOdd rect {
+  fill: #4a6491 !important;
+  stroke: #a8b8e8 !important;
+}
+.reveal .mermaid svg .attributeBoxEven rect {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+}
+
+/* ==============================
+   Gantt chart 暗色修复
+   .task-line 时间线背景透明；
+   .task 任务条亮蓝 + 描边；
+   .task.done/.crit/.active 状态变体（done 灰，crit/active 红橙）；
+   .section 章节深一档蓝；
+   .grid 网格线浅灰可见；
+   .tick 日期刻度文字（全局 text rule 已覆盖白色）；
+   .today 今日标记红橙色。
+   ============================== */
+.reveal .mermaid svg .task-line {
+  fill: transparent !important;
+  stroke: #8899bb !important;
+  stroke-width: 1px !important;
+}
+.reveal .mermaid svg .task {
+  fill: #5c7cfa !important;
+  stroke: #a8b8e8 !important;
+  stroke-width: 1.5px !important;
+}
+.reveal .mermaid svg .task.done {
+  fill: #8899bb !important;
+  stroke: #a8b8e8 !important;
+}
+.reveal .mermaid svg .task.crit,
+.reveal .mermaid svg .task.active {
+  fill: #ff6b6b !important;
+  stroke: #ffaaaa !important;
+}
+.reveal .mermaid svg .section,
+.reveal .mermaid svg .section section0 {
+  fill: #1a2744 !important;
+  stroke: #2a3a5e !important;
+}
+.reveal .mermaid svg .grid {
+  stroke: #8899bb !important;
+  stroke-width: 1px !important;
+  opacity: 0.6;
+}
+.reveal .mermaid svg .today {
+  fill: #ff6b6b !important;
+  stroke: #ff6b6b !important;
+  stroke-width: 2px !important;
+}

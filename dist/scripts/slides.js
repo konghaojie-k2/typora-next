@@ -718,17 +718,31 @@
         startOnLoad: false,
         theme: 'dark',
         securityLevel: 'loose',
+        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
         themeVariables: {
-          fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", Roboto, sans-serif',
-          fontSize: '16px',
-          // 暗底可读配色：节点深蓝灰填充 + 亮边 + 浅字（替代硬编码白色补丁）
-          primaryColor: '#33415c',
-          primaryTextColor: '#e2e8f0',
-          primaryBorderColor: '#60a5fa',
-          lineColor: '#cbd5e1',
-          secondaryColor: '#2d3748',
-          tertiaryColor: '#1f2937',
-          classText: '#e2e8f0'
+          primaryColor: '#4a6491',
+          primaryTextColor: '#ffffff',
+          primaryBorderColor: '#8899bb',
+          lineColor: '#ccd5e0',
+          secondaryColor: '#5c7cfa',
+          tertiaryColor: '#3b5aa0',
+          textColor: '#e8ecf1',
+          nodeBorder: '#8899bb',
+          nodeTextColor: '#ffffff',
+          // 强制 SVG 背景为浅色，确保节点和暗底对比强烈
+          background: '#3b4a66',
+          // 主节点填充：明确指定明亮色，避免 dark 主题默认 #2D2D2D 与 #111 背景融合
+          primaryColor: '#5c7cfa',
+          clusterBkg: 'rgba(74,100,145,0.15)',
+          clusterBorder: '#8899bb',
+          actorBkg: '#4a6491',
+          actorBorder: '#8899bb',
+          actorTextColor: '#ffffff',
+          signalColor: '#ccd5e0',
+          signalTextColor: '#e8ecf1',
+          labelBackgroundColor: '#1a2744',
+          labelTextColor: '#ccd5e0',
+          classText: '#ccd5e0'
         }
       });
     } catch (err) {
@@ -770,7 +784,7 @@
     return Promise.all(jobs);
   }
 
-  /** Mermaid SVG 后处理：尺寸策略 + 字号修复（颜色由 themeVariables 接管） */
+  /** Mermaid SVG 后处理：尺寸自适应 + foreignObject/文本可见性（颜色由 themeVariables 接管） */
   function postProcessMermaidSvg(svg) {
     var vb = svg.getAttribute('viewBox') || '';
     var vbParts = vb.split(/\s+/).map(parseFloat);
@@ -779,64 +793,134 @@
     if (vbW > 0 && vbH > 0) {
       svg.removeAttribute('width');
       svg.removeAttribute('height');
-      // 尺寸策略：宽度一律适应最大宽度（小图放大、宽图收缩）；
-      // 高度封顶可用高度，超长图等比缩放整页展示（preserveAspectRatio 留白不变形）
       svg.style.width = '100%';
       svg.style.height = 'auto';
       svg.style.maxHeight = contentBox().height + 'px';
       svg.style.aspectRatio = vbW + ' / ' + vbH;
     }
+
+    // 统一字号（CSS .reveal .mermaid text 也设了，这里加 inline 双保险防 Reveal 覆盖）
     var texts = svg.querySelectorAll('text');
     for (var t = 0; t < texts.length; t++) {
-      texts[t].setAttribute('font-size', '18px');
-      texts[t].style.fontSize = '18px';
+      texts[t].style.fontSize = '16px';
     }
 
+    // foreignObject 内容可见性与溢出保护（CSS 兜底，这里加 inline 双保险）
     var foreignObjects = svg.querySelectorAll('foreignObject');
     for (var f = 0; f < foreignObjects.length; f++) {
       var fo = foreignObjects[f];
-      fo.style.fontSize = '16px';
+      fo.setAttribute('overflow', 'visible');
       var innerDiv = fo.querySelector('div');
       if (innerDiv) {
-        innerDiv.style.fontSize = '16px';
         innerDiv.style.overflow = 'visible';
-        var divW = parseFloat(innerDiv.style.width) || 0;
-        var divH = parseFloat(innerDiv.style.height) || 0;
-        if (divW > 0) innerDiv.style.width = (divW + 24) + 'px';
-        if (divH > 0) innerDiv.style.height = (divH + 12) + 'px';
-        var spans = innerDiv.querySelectorAll('span, p, b, i, strong, em');
-        for (var s = 0; s < spans.length; s++) {
-          spans[s].style.fontSize = '16px';
-        }
+        var dw = parseFloat(innerDiv.style.width) || 0;
+        var dh = parseFloat(innerDiv.style.height) || 0;
+        if (dw > 0) innerDiv.style.width = (dw + 8) + 'px';
+        if (dh > 0) innerDiv.style.height = (dh + 4) + 'px';
       }
     }
 
-    var nodeForeignObjects = svg.querySelectorAll('.node foreignObject');
-    for (var f2 = 0; f2 < nodeForeignObjects.length; f2++) {
-      var fo2 = nodeForeignObjects[f2];
-      var oh = parseFloat(fo2.getAttribute('height')) || 0;
-      var ow = parseFloat(fo2.getAttribute('width')) || 0;
-      if (oh > 0) fo2.setAttribute('height', (oh + 12).toString());
-      if (ow > 0) fo2.setAttribute('width', (ow + 24).toString());
+    // v11 dark 主题节点渲染成近黑色：JS 强制重写 fill/stroke（CSS !important
+    // 覆盖不到 inline 属性锁定的 marker path/arrowhead）
+    // Mermaid 部分形状（cylinder/database/hexagon 等 path 元素）的 inline style
+    // 带 !important（"fill: ... !important"），setAttribute 改的是 presentation
+    // 属性（弱于 inline style !important），必须用 setProperty + 'important' 后写后赢。
+    var FG = '#5c7cfa';
+    var BD = '#a8b8e8';
+    var LN = '#d8dde6';
+    // 节点形状（白名单，只覆盖"应是节点"的元素，避免污染 Gantt .section/.task-line、
+    // ER .attributeBoxOdd/.relationshipLabelBox、pie chart 切片等需要差异化颜色的元素）：
+    //   - .node rect/circle/ellipse/polygon/path  → flowchart + state 节点（path 覆盖 cylinder）
+    //   - .classGroup rect                          → class diagram 类体
+    //   - .entityBox                                → ER 图实体
+    //   - .task                                     → Gantt 任务条
+    // 用 setProperty + 'important' 覆盖 Mermaid v11 的 inline !important style
+    var nodeShapes = svg.querySelectorAll(
+      '.node rect, .node circle, .node ellipse, .node polygon, .node path, ' +
+      '.classGroup rect, ' +
+      '.entityBox, ' +
+      '.task'
+    );
+    for (var s = 0; s < nodeShapes.length; s++) {
+      var sh = nodeShapes[s];
+      if (sh.closest('defs') || sh.closest('marker')) continue;
+      // 边线组内的 path 不是节点（但 .edgePath 路径已在边缘 loop 处理，这里双保险跳过）
+      if (sh.closest('.transition, .relationshipLine, .relation, .edgePath, .flowchart-link, .edges, .messageLine0, .messageLine1')) continue;
+      var cls = sh.getAttribute('class') || '';
+      if (/arrowhead/i.test(cls)) {
+        sh.style.setProperty('fill', LN, 'important');
+        sh.style.setProperty('stroke', LN, 'important');
+        continue;
+      }
+      // Gantt 任务状态变体（done/crit/active）让 CSS 差异化接管，不填亮蓝
+      if (/\btask\b/.test(cls) && /\b(done|crit|active)\b/.test(cls)) continue;
+      // 默认节点：填充亮蓝 + 描边
+      sh.style.setProperty('fill', FG, 'important');
+      sh.style.setProperty('stroke', BD, 'important');
+    }
+    // 箭头 marker：直接改 fill/stroke（绕过 context-stroke）
+    var markerShapes = svg.querySelectorAll('marker path, marker polygon, defs marker path, defs marker polygon');
+    for (var m = 0; m < markerShapes.length; m++) {
+      markerShapes[m].style.setProperty('fill', LN, 'important');
+      markerShapes[m].style.setProperty('stroke', LN, 'important');
+    }
+    // 边线（节点边框除外，含 flowchart + class + state + ER）
+    var edgePaths = svg.querySelectorAll('.edgePath path, .edges path, .flowchart-link, .transition, .relationshipLine, .relation');
+    for (var p = 0; p < edgePaths.length; p++) {
+      edgePaths[p].style.setProperty('stroke', LN, 'important');
+      edgePaths[p].style.setProperty('fill', 'none', 'important');
+    }
+    // Sequence diagram 箭头主体（messageLine0/1）在 flowchart 规则外，单独强制白色 stroke
+    var seqLines = svg.querySelectorAll('.messageLine0, .messageLine1');
+    for (var q = 0; q < seqLines.length; q++) {
+      seqLines[q].style.setProperty('stroke', '#ffffff', 'important');
+      seqLines[q].style.setProperty('fill', 'none', 'important');
     }
 
-    var edgeLabels = svg.querySelectorAll('.edgeLabel foreignObject');
-    for (var e = 0; e < edgeLabels.length; e++) {
-      var fo3 = edgeLabels[e];
-      var eh = parseFloat(fo3.getAttribute('height')) || 0;
-      var ew = parseFloat(fo3.getAttribute('width')) || 0;
-      if (eh > 0) fo3.setAttribute('height', (eh + 10).toString());
-      if (ew > 0) fo3.setAttribute('width', (ew + 20).toString());
+    // Class diagram 标题栏：每个 .classGroup 顶部注入深一档蓝 rect（Mermaid v11
+    // classTitle 是 text 元素不是 rect，CSS fill 无效；classGroup line 不一定存在）。
+    // 用 JS 直接画一个覆盖标题文字高度的 rect，背景色 #4a6491 区分于类体 #5c7cfa。
+    var classGroups = svg.querySelectorAll('g.classGroup');
+    var SVG_NS = 'http://www.w3.org/2000/svg';
+    for (var g = 0; g < classGroups.length; g++) {
+      var group = classGroups[g];
+      var titleText = group.querySelector('text.classTitle');
+      var bodyRect = group.querySelector('rect');
+      if (!titleText || !bodyRect) continue;
+      var rb = bodyRect.getBBox();
+      var tb = titleText.getBBox();
+      // 标题栏高度 = 顶部 padding + 标题文字高 + 底部 padding
+      var barH = (tb.y - rb.y) + tb.height + 4;
+      var titleBar = document.createElementNS(SVG_NS, 'rect');
+      titleBar.setAttribute('x', rb.x);
+      titleBar.setAttribute('y', rb.y);
+      titleBar.setAttribute('width', rb.width);
+      titleBar.setAttribute('height', barH);
+      titleBar.setAttribute('class', 'class-title-bar');  // 标识，CSS 用更高优先级覆盖
+      titleBar.style.setProperty('fill', '#4a6491', 'important');
+      titleBar.style.setProperty('stroke', '#a8b8e8', 'important');
+      titleBar.style.setProperty('stroke-width', '1.5', 'important');
+      // 插入到 group 最前面（在 bodyRect 之下，但在视觉上覆盖 rect 顶部）
+      group.insertBefore(titleBar, group.firstChild);
+      // 标题文字加粗 + 略大（防 classText 字号统一把标题压扁）
+      titleText.setAttribute('font-weight', 'bold');
+      titleText.setAttribute('font-size', '17');
     }
 
-    var rects = svg.querySelectorAll('.node rect');
-    for (var r = 0; r < rects.length; r++) {
-      var rect = rects[r];
-      var rh = parseFloat(rect.getAttribute('height')) || 0;
-      var rw = parseFloat(rect.getAttribute('width')) || 0;
-      if (rh > 0) rect.setAttribute('height', (rh + 12).toString());
-      if (rw > 0) rect.setAttribute('width', (rw + 24).toString());
+    // SVG 背景保持透明，让 slide 背景（#111）透出来，避免形成大色块
+    svg.style.background = 'transparent';
+
+    // Sequence / State note 方块：Mermaid v11 用内嵌 <style> 标签里的 CSS 设置
+    // .note { fill: ${noteBkgColor} }（黄底），CSS 选择器特异性比我外部 CSS 低，
+    // 但 Mermaid 内嵌 <style> 在 SVG 内部、document order 在后，所以它的 !important
+    // 会赢。直接 JS setProperty 后写后赢覆盖：note 底色改暗，noteText 留白。
+    var NOTE_BG = '#4a6491';
+    var noteRects = svg.querySelectorAll('.note-cluster rect, .statediagram-note rect, rect.note, g.note rect');
+    for (var n = 0; n < noteRects.length; n++) {
+      noteRects[n].style.setProperty('fill', NOTE_BG, 'important');
+      noteRects[n].style.setProperty('stroke', '#a8b8e8', 'important');
     }
+    // note 文字保持白色（全局 text rule 已覆盖）
   }
 
   /**
