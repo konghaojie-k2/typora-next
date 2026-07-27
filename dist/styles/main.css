@@ -2156,6 +2156,49 @@ mark {
 }
 
 /* ============================================
+   PDF 导出（issue #5）：.pdf-exporting class
+   JS 导出前给 body 加此类。不依赖 @media print 媒体查询生效（WebView2 window.print
+   与 macOS createPDF 均按 screen 媒体捕获当前渲染，print 媒体可能不切换），改用普通
+   class 在 screen 媒体下隐藏 sidebar/toolbar 等 UI，并把滚动容器展开为完整内容高度，
+   使 PDF 只含内容且导全。与下方 @media print 规则并行（后者作 print 媒体时的后备）。
+   ============================================ */
+body.pdf-exporting {
+  overflow: visible !important;
+  height: auto !important;
+}
+body.pdf-exporting .sidebar,
+body.pdf-exporting .toolbar,
+body.pdf-exporting .tabs-bar,
+body.pdf-exporting .code-block-actions,
+body.pdf-exporting .btn-icon,
+body.pdf-exporting .btn-toggle,
+body.pdf-exporting .download-btn,
+body.pdf-exporting .refresh-prompt,
+body.pdf-exporting .settings-modal,
+body.pdf-exporting .sidebar-minimap,
+body.pdf-exporting .toolbar-tooltip {
+  display: none !important;
+}
+body.pdf-exporting .app-container {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+}
+body.pdf-exporting .content-area {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+  padding: 0 !important;
+}
+body.pdf-exporting .markdown-body {
+  display: block !important;
+  height: auto !important;
+  overflow: visible !important;
+  max-width: none !important;
+  padding: 0 !important;
+}
+
+/* ============================================
    Print Styles
    ============================================ */
 @media print {
@@ -2167,7 +2210,9 @@ mark {
   .btn-toggle,
   .download-btn,
   .refresh-prompt,
-  .settings-modal {
+  .settings-modal,
+  .sidebar-minimap,
+  .toolbar-tooltip {
     display: none !important;
   }
 

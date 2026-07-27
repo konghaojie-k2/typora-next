@@ -3863,29 +3863,46 @@ window.agentBridge = {
       ? (tab.path.split(/[\\/]/).pop() || 'document').replace(/\.[^.]+$/, '')
       : 'document';
 
-    // 按打印布局测量内容尺寸：@media print 隐藏侧栏/工具栏后内容占满页宽，
-    // 这里临时把内容容器撑到视口宽度再量高度，避免导出的 PDF 尾部出现大段空白
+    // issue #5：不依赖 @media print 媒体查询生效（WebView2 window.print 与 macOS
+    // createPDF 均按 screen 媒体捕获当前渲染，print 媒体可能不切换）。改为给 body 加
+    // .pdf-exporting class，用普通 CSS 隐藏 sidebar/toolbar 并把滚动容器展开为完整内容
+    // 高度，使 PDF 只含内容且导全。导出完成后移除。
     const contentEl = document.getElementById('contentArea');
-    const prevWidth = contentEl.style.width;
-    contentEl.style.width = window.innerWidth + 'px';
-    const width = window.innerWidth;
-    const height = contentEl.scrollHeight;
-    contentEl.style.width = prevWidth;
+    document.body.classList.add('pdf-exporting');
+
+    const cleanup = () => document.body.classList.remove('pdf-exporting');
+    // Windows window.print 关闭对话框后触发 afterprint；macOS createPDF / 取消 / 出错
+    // 走下方手动 cleanup。
+    window.addEventListener('afterprint', cleanup, { once: true });
 
     try {
+      // 等样式应用后再量内容尺寸（隐藏 sidebar 后内容占满页宽，此时 scrollHeight 才是
+      // 内容真实全高，供 macOS createPDF 设置捕获区域，解决"导出不全"）
+      await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+      const width = window.innerWidth;
+      const height = contentEl.scrollHeight;
+
       const result = await invoke('export_pdf', {
         suggestedName: baseName + '.pdf',
         contentWidth: width,
         contentHeight: height,
       });
       if (result === 'window-print') {
+        // 页面已是"隐藏 UI + 展开内容"状态，打印对话框捕获此状态；afterprint 触发 cleanup
         setTimeout(() => window.print(), 100);
       } else if (result === 'cancelled') {
-        // 用户取消保存，静默
+        // 用户取消保存（macOS），不会触发 afterprint，手动清理
+        window.removeEventListener('afterprint', cleanup);
+        cleanup();
       } else if (result) {
+        // macOS createPDF 完成，不会触发 afterprint，手动清理
+        window.removeEventListener('afterprint', cleanup);
+        cleanup();
         showToast('PDF 已导出：' + result, 5000);
       }
     } catch (err) {
+      window.removeEventListener('afterprint', cleanup);
+      cleanup();
       showError('PDF 导出失败: ' + err);
     }
   }
