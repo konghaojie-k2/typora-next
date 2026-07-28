@@ -7,6 +7,11 @@
 //!   createPDF 直存，但只能产出单页、无边距 PDF（issue #5 留白问题），故弃用。
 //!   已知限制：macOS 11 以下 WKWebView 打印分页有历史 bug，建议 macOS 11+。
 //! - 其他平台：返回 "window-print"，由前端回退 `window.print()`。
+//!
+//! 健壮性：整段 AppKit 调用包在 `objc2::exception::catch` 里。ObjC 异常
+//! （NSException）若穿过 Rust 帧，Rust 无法展开 → 整个 app 直接 abort
+//! （2026-07-28 macOS 26.5.2 实机闪退根因）。catch 住后转成错误文本经
+//! 前端 toast 展示，既保活进程，也把诊断信息带回给测试者。
 
 use tauri::AppHandle;
 
@@ -38,34 +43,65 @@ pub async fn export_pdf(
 
 #[cfg(target_os = "macos")]
 mod macos {
+    use std::ffi::{c_char, CStr};
+    use std::panic::AssertUnwindSafe;
     use std::sync::mpsc;
 
+    use objc2::msg_send;
+    use objc2::runtime::AnyObject;
     use tauri::{AppHandle, Manager};
+
+    /// 提取 NSException 的描述文本（不依赖 objc2-foundation，直接走
+    /// description → UTF8String 消息发送）。
+    fn exception_description(exc: &AnyObject) -> String {
+        unsafe {
+            let desc: *mut AnyObject = msg_send![exc, description];
+            if desc.is_null() {
+                return "NSException（无法获取描述）".to_string();
+            }
+            let utf8: *const c_char = msg_send![desc, UTF8String];
+            if utf8.is_null() {
+                "NSException（无法获取描述）".to_string()
+            } else {
+                CStr::from_ptr(utf8).to_string_lossy().into_owned()
+            }
+        }
+    }
 
     pub async fn export_pdf(app: &AppHandle) -> Result<String, String> {
         let window = app.get_webview_window("main").ok_or("主窗口不存在")?;
         let (tx, rx) = mpsc::channel::<Result<bool, String>>();
 
-        // with_webview 的闭包在主线程执行；-runModal 在闭包内运行模态打印面板，
-        // 面板关闭后才返回（模态 runloop 期间 UI 事件正常处理），结果经 channel 传回。
+        // with_webview 的闭包在主线程执行；打印面板流程阻塞其中，
+        // 面板关闭后结果经 channel 传回。
         window
             .with_webview(move |webview| {
-                use objc2::msg_send;
+                use objc2::exception;
                 use objc2_app_kit::NSPrintOperation;
                 use objc2_web_kit::WKWebView;
 
                 let wk = unsafe { &*(webview.inner() as *const WKWebView) };
 
-                // WKWebView 实现了 NSView 分页协议（knowsPageRange:/rectForPage:），
+                // WKWebView 实现 NSView 分页协议（knowsPageRange:/rectForPage:），
                 // NSPrintOperation 据此自动分页；页边距来自系统默认打印设置。
-                let op = NSPrintOperation::printOperationWithView(wk);
-                op.setShowsPrintPanel(true);
-                op.setShowsProgressPanel(false);
-
-                // objc2-app-kit 0.3 未绑定 -runModal（运行时存在），直接消息发送。
-                // 返回 YES = 用户执行了打印/存储，NO = 取消。
-                let ok: bool = unsafe { msg_send![&*op, runModal] };
-                let _ = tx.send(Ok(ok));
+                //
+                // 不用 -runModal：objc2-app-kit 0.3 绑定缺失（按新版 SDK 生成，
+                // 疑似 macOS 26 已移除），msg_send 直发触发 "unrecognized
+                // selector" NSException = 2026-07-28 闪退主嫌疑。改用绑定内、
+                // 文档在列的 runOperation（同步运行，显示面板，阻塞至关闭）。
+                let result = exception::catch(AssertUnwindSafe(|| {
+                    let op = NSPrintOperation::printOperationWithView(wk);
+                    op.setShowsPrintPanel(true);
+                    op.setShowsProgressPanel(false);
+                    op.runOperation()
+                }));
+                let outcome = match result {
+                    Ok(ok) => Ok(ok),
+                    // catch 住 NSException：转成错误文本，避免 app abort
+                    Err(Some(exc)) => Err(exception_description(&exc)),
+                    Err(None) => Err("PDF 导出被中断（未获取异常对象）".to_string()),
+                };
+                let _ = tx.send(outcome);
             })
             .map_err(|e| format!("无法访问 WebView: {}", e))?;
 
