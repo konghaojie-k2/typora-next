@@ -25,6 +25,8 @@ pub async fn export_pdf(
 ) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
+        // 打印面板方案不需要前端测量的尺寸（WebKit 打印管线自行分页布局）
+        let _ = (suggested_name, content_width, content_height);
         macos::export_pdf(&app).await
     }
     #[cfg(not(target_os = "macos"))]
