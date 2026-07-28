@@ -3855,18 +3855,20 @@ window.agentBridge = {
   // ============================================
   // PDF Export
   // ============================================
-  // 统一入口：macOS 走 Rust 原生 WKWebView createPDF（window.print 在 WKWebView
-  // 静默无效，issue #4），其他平台由 Rust 返回 'window-print' 回退系统打印对话框。
+  // 统一入口：macOS 走 Rust 原生 NSPrintOperation 系统打印面板（WebKit 打印管线：
+  // 自动分页 + 系统页边距，issue #4/#5；window.print 在 WKWebView 静默无效），
+  // 其他平台由 Rust 返回 'window-print' 回退系统打印对话框。
   async function exportToPDF() {
     const tab = state.tabs[state.activeTab];
     const baseName = tab && tab.path
       ? (tab.path.split(/[\\/]/).pop() || 'document').replace(/\.[^.]+$/, '')
       : 'document';
 
-    // issue #5：不依赖 @media print 媒体查询生效（WebView2 window.print 与 macOS
-    // createPDF 均按 screen 媒体捕获当前渲染，print 媒体可能不切换）。改为给 body 加
-    // .pdf-exporting class，用普通 CSS 隐藏 sidebar/toolbar 并把滚动容器展开为完整内容
-    // 高度，使 PDF 只含内容且导全。导出完成后移除。
+    // issue #5：Windows window.print 不依赖 @media print 媒体查询生效（WebView2 按
+    // screen 媒体捕获当前渲染，print 媒体可能不切换）。给 body 加 .pdf-exporting
+    // class，用普通 CSS 隐藏 sidebar/toolbar 并把滚动容器展开为完整内容高度，使 PDF
+    // 只含内容且导全。macOS 打印面板走 print 媒体（@media print 规则已生效），此
+    // class 作双重保险。导出完成后移除。
     const contentEl = document.getElementById('contentArea');
     document.body.classList.add('pdf-exporting');
 
@@ -3891,11 +3893,16 @@ window.agentBridge = {
         // 页面已是"隐藏 UI + 展开内容"状态，打印对话框捕获此状态；afterprint 触发 cleanup
         setTimeout(() => window.print(), 100);
       } else if (result === 'cancelled') {
-        // 用户取消保存（macOS），不会触发 afterprint，手动清理
+        // 用户取消打印面板（macOS），不会触发 afterprint，手动清理
         window.removeEventListener('afterprint', cleanup);
         cleanup();
+      } else if (result === 'printed') {
+        // macOS 系统打印面板完成（打印或在面板内"存储为 PDF"），手动清理
+        window.removeEventListener('afterprint', cleanup);
+        cleanup();
+        showToast('已通过系统打印面板导出 PDF', 4000);
       } else if (result) {
-        // macOS createPDF 完成，不会触发 afterprint，手动清理
+        // 兼容兜底：返回文件路径的旧实现
         window.removeEventListener('afterprint', cleanup);
         cleanup();
         showToast('PDF 已导出：' + result, 5000);

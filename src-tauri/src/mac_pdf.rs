@@ -1,8 +1,11 @@
 //! PDF 导出（跨平台统一入口）。
 //!
-//! - macOS：调用 WKWebView 原生 `createPDFWithConfiguration:completionHandler:`
-//!   生成矢量 PDF（走 `@media print` 样式），保存对话框由 tauri-plugin-dialog 提供。
-//!   背景：WKWebView 不支持 `window.print()`，调用静默无效（GitHub issue #4）。
+//! - macOS：用 NSPrintOperation 走 WebKit 原生打印管线，弹出系统打印面板。
+//!   WebKit 打印管线提供自动分页（A4/信纸）、系统页边距与 @media print 样式，
+//!   输出效果与 Windows 的 window.print 对齐；用户可在面板左下角选"存储为 PDF"。
+//!   背景：WKWebView 不支持 `window.print()`（静默无效，issue #4）；此前改用
+//!   createPDF 直存，但只能产出单页、无边距 PDF（issue #5 留白问题），故弃用。
+//!   已知限制：macOS 11 以下 WKWebView 打印分页有历史 bug，建议 macOS 11+。
 //! - 其他平台：返回 "window-print"，由前端回退 `window.print()`。
 
 use tauri::AppHandle;
@@ -11,8 +14,8 @@ use tauri::AppHandle;
 ///
 /// 返回值约定：
 /// - `"window-print"`：当前平台无原生实现，前端应回退 `window.print()`
-/// - `"cancelled"`：用户取消了保存对话框
-/// - 其他字符串：保存成功的文件绝对路径
+/// - `"cancelled"`：用户取消了打印面板
+/// - `"printed"`：打印面板流程完成（已发送打印任务或在面板内存储为 PDF）
 #[tauri::command]
 pub async fn export_pdf(
     app: AppHandle,
@@ -22,7 +25,7 @@ pub async fn export_pdf(
 ) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
-        macos::export_pdf(&app, &suggested_name, content_width, content_height).await
+        macos::export_pdf(&app).await
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -36,87 +39,37 @@ mod macos {
     use std::sync::mpsc;
 
     use tauri::{AppHandle, Manager};
-    use tauri_plugin_dialog::DialogExt;
 
-    pub async fn export_pdf(
-        app: &AppHandle,
-        suggested_name: &str,
-        content_width: f64,
-        content_height: f64,
-    ) -> Result<String, String> {
-        // 保存对话框（blocking API 要求从非主线程调用，内部自行切回主线程；
-        // async command 运行在后台线程，满足要求）
-        let file_path = app
-            .dialog()
-            .file()
-            .add_filter("PDF", &["pdf"])
-            .set_file_name(suggested_name)
-            .blocking_save_file();
-        let Some(file_path) = file_path else {
-            return Ok("cancelled".to_string());
-        };
-        let path = file_path
-            .into_path()
-            .map_err(|e| format!("无效的保存路径: {}", e))?;
-
+    pub async fn export_pdf(app: &AppHandle) -> Result<String, String> {
         let window = app.get_webview_window("main").ok_or("主窗口不存在")?;
-        let (tx, rx) = mpsc::channel::<Result<Vec<u8>, String>>();
+        let (tx, rx) = mpsc::channel::<Result<bool, String>>();
 
-        // with_webview 的闭包在主线程执行；createPDF 完成后经 channel 把字节传回
+        // with_webview 的闭包在主线程执行；-runModal 在闭包内运行模态打印面板，
+        // 面板关闭后才返回（模态 runloop 期间 UI 事件正常处理），结果经 channel 传回。
         window
             .with_webview(move |webview| {
-                use block2::RcBlock;
-                use objc2::runtime::NSObjectProtocol;
-                use objc2::{sel, MainThreadMarker};
-                use objc2_foundation::{NSData, NSError, NSPoint, NSRect, NSSize};
-                use objc2_web_kit::{WKPDFConfiguration, WKWebView};
+                use objc2::msg_send;
+                use objc2_app_kit::NSPrintOperation;
+                use objc2_web_kit::WKWebView;
 
                 let wk = unsafe { &*(webview.inner() as *const WKWebView) };
 
-                // createPDF 与 WKPDFConfiguration 均为 macOS 11+ 引入，
-                // 老系统（minimumSystemVersion 10.13）优雅降级
-                if !wk.respondsToSelector(sel!(createPDFWithConfiguration:completionHandler:)) {
-                    let _ = tx.send(Err(
-                        "PDF 导出需要 macOS 11 或更高版本，请升级系统".to_string()
-                    ));
-                    return;
-                }
-                let Some(mtm) = MainThreadMarker::new() else {
-                    let _ = tx.send(Err("无法访问主线程".to_string()));
-                    return;
-                };
+                // WKWebView 实现了 NSView 分页协议（knowsPageRange:/rectForPage:），
+                // NSPrintOperation 据此自动分页；页边距来自系统默认打印设置。
+                let op = NSPrintOperation::printOperationWithView(wk);
+                op.setShowsPrintPanel(true);
+                op.setShowsProgressPanel(false);
 
-                // 显式指定完整内容区域：config 传 nil 时只捕获当前可视范围
-                let config = unsafe { WKPDFConfiguration::new(mtm) };
-                unsafe {
-                    config.setRect(NSRect::new(
-                        NSPoint::new(0.0, 0.0),
-                        NSSize::new(content_width, content_height),
-                    ));
-                }
-
-                let handler = RcBlock::new(move |data: *mut NSData, error: *mut NSError| {
-                    let result = if !data.is_null() {
-                        Ok(unsafe { (&*data).as_bytes_unchecked().to_vec() })
-                    } else if !error.is_null() {
-                        Err(format!(
-                            "PDF 生成失败: {}",
-                            unsafe { &*error }.localizedDescription().to_string()
-                        ))
-                    } else {
-                        Err("PDF 生成失败: 未知错误".to_string())
-                    };
-                    let _ = tx.send(result);
-                });
-                unsafe {
-                    wk.createPDFWithConfiguration_completionHandler(Some(&config), &handler);
-                }
+                // objc2-app-kit 0.3 未绑定 -runModal（运行时存在），直接消息发送。
+                // 返回 YES = 用户执行了打印/存储，NO = 取消。
+                let ok: bool = unsafe { msg_send![&*op, runModal] };
+                let _ = tx.send(Ok(ok));
             })
             .map_err(|e| format!("无法访问 WebView: {}", e))?;
 
-        // 后台线程阻塞等待主线程的 createPDF 回调，无死锁
-        let bytes = rx.recv().map_err(|_| "PDF 生成被中断".to_string())??;
-        std::fs::write(&path, &bytes).map_err(|e| format!("写入文件失败: {}", e))?;
-        Ok(path.to_string_lossy().to_string())
+        match rx.recv().map_err(|_| "打印流程被中断")?? {
+            true => Ok("printed".to_string()),
+            false => Ok("cancelled".to_string()),
+        }
     }
 }
