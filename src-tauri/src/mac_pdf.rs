@@ -109,7 +109,7 @@ mod macos {
 
     /// Chromium 打印管线：写临时 HTML → 启动 headless Chrome → printToPDF（A4 + 边距 + 分页）
     fn export_via_chrome(html: &str) -> Result<Vec<u8>, String> {
-        use headless_chrome::protocol::page::PrintToPdfOptions;
+        use headless_chrome::types::PrintToPdfOptions;
         use headless_chrome::Browser;
 
         // 写临时文件（Chrome 通过 file:// 加载）
@@ -148,7 +148,7 @@ mod macos {
                 }))
                 .map_err(|e| format!("PDF 生成失败: {}", e))?;
 
-            browser.close().ok();
+            drop(browser);
             Ok(pdf)
         })();
 
@@ -167,6 +167,8 @@ mod macos {
                 use objc2_web_kit::WKWebView;
 
                 let wk = unsafe { &*(webview.inner() as *const WKWebView) };
+                // block 内捕获 tx 的 clone，保留原始 tx 给 exception 路径
+                let tx_block = tx.clone();
 
                 let block = block2::RcBlock::new(
                     move |data: *mut AnyObject, error: *mut AnyObject| {
@@ -176,9 +178,9 @@ mod macos {
                                 let length: usize = msg_send![data, length];
                                 if !bytes.is_null() && length > 0 {
                                     let slice = std::slice::from_raw_parts(bytes, length);
-                                    let _ = tx.send(Ok(slice.to_vec()));
+                                    let _ = tx_block.send(Ok(slice.to_vec()));
                                 } else {
-                                    let _ = tx.send(Err("PDF 数据为空".to_string()));
+                                    let _ = tx_block.send(Err("PDF 数据为空".to_string()));
                                 }
                             }
                         } else {
@@ -200,7 +202,7 @@ mod macos {
                             } else {
                                 "PDF 创建失败（无错误信息）".to_string()
                             };
-                            let _ = tx.send(Err(msg));
+                            let _ = tx_block.send(Err(msg));
                         }
                     },
                 );
