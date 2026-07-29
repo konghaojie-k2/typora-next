@@ -3858,51 +3858,128 @@ window.agentBridge = {
   // 统一入口：macOS 走 Rust 原生 NSPrintOperation 系统打印面板（WebKit 打印管线：
   // 自动分页 + 系统页边距，issue #4/#5；window.print 在 WKWebView 静默无效），
   // 其他平台由 Rust 返回 'window-print' 回退系统打印对话框。
+  /**
+   * 生成自包含 HTML（mac headless_chrome 路径用）。
+   * 内联所有 CSS + 将 @font-face / url() 资源转 base64 data URI，
+   * 使 Chrome 无需访问外部文件即可正确渲染（含 KaTeX 字体）。
+   */
+  async function generatePrintHtml() {
+    // 1. 收集所有 CSS 规则
+    let cssText = '';
+    for (const sheet of document.styleSheets) {
+      try {
+        for (const rule of sheet.cssRules) {
+          cssText += rule.cssText + '\n';
+        }
+      } catch (e) { /* 跨域样式表跳过 */ }
+    }
+
+    // 2. 将 url() 资源（字体/图片）内联为 base64 data URI
+    const urlPattern = /url\(\s*['"]?([^'")\s]+)['"]?\s*\)/g;
+    const cache = {};
+    let m;
+    while ((m = urlPattern.exec(cssText)) !== null) {
+      const url = m[1];
+      if (url.startsWith('data:') || url.startsWith('#')) continue;
+      if (!(url in cache)) {
+        try {
+          const resp = await fetch(url);
+          if (!resp.ok) throw new Error(resp.status);
+          const blob = await resp.blob();
+          cache[url] = await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          });
+        } catch (e) {
+          cache[url] = url; // 失败保留原始 URL
+        }
+      }
+    }
+    for (const [url, dataUri] of Object.entries(cache)) {
+      if (dataUri !== url) {
+        cssText = cssText.split(url).join(dataUri);
+      }
+    }
+
+    // 3. 内联内容区域的图片（相对路径 → base64）
+    const contentEl = document.getElementById('contentArea');
+    const clone = contentEl.cloneNode(true);
+    const imgs = clone.querySelectorAll('img[src]');
+    for (const img of imgs) {
+      const src = img.getAttribute('src');
+      if (src && !src.startsWith('data:') && !src.startsWith('http')) {
+        try {
+          const resp = await fetch(src);
+          if (!resp.ok) continue;
+          const blob = await resp.blob();
+          img.setAttribute('src', await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.readAsDataURL(blob);
+          }));
+        } catch (e) { /* 保留原始 src */ }
+      }
+    }
+
+    // 4. 组装完整 HTML
+    const theme = document.documentElement.getAttribute('data-theme') || 'light';
+    return '<!DOCTYPE html>\n<html data-theme="' + theme + '">\n<head>\n'
+      + '<meta charset="utf-8">\n'
+      + '<style>\n' + cssText + '\n</style>\n'
+      + '</head>\n<body class="pdf-exporting">\n'
+      + clone.innerHTML
+      + '\n</body>\n</html>';
+  }
+
   async function exportToPDF() {
     const tab = state.tabs[state.activeTab];
     const baseName = tab && tab.path
       ? (tab.path.split(/[\\/]/).pop() || 'document').replace(/\.[^.]+$/, '')
       : 'document';
 
-    // issue #5：Windows window.print 不依赖 @media print 媒体查询生效（WebView2 按
-    // screen 媒体捕获当前渲染，print 媒体可能不切换）。给 body 加 .pdf-exporting
-    // class，用普通 CSS 隐藏 sidebar/toolbar 并把滚动容器展开为完整内容高度，使 PDF
-    // 只含内容且导全。macOS 打印面板走 print 媒体（@media print 规则已生效），此
-    // class 作双重保险。导出完成后移除。
+    // issue #5：给 body 加 .pdf-exporting class 隐藏 sidebar/toolbar 并展开内容。
+    // macOS createPDF 回退路径额外加 .pdf-exporting-mac（CSS padding 模拟边距）。
     const contentEl = document.getElementById('contentArea');
+    const isMac = /Mac|iPhone|iPad/.test(navigator.userAgent);
     document.body.classList.add('pdf-exporting');
+    if (isMac) document.body.classList.add('pdf-exporting-mac');
 
-    const cleanup = () => document.body.classList.remove('pdf-exporting');
-    // Windows window.print 关闭对话框后触发 afterprint；macOS createPDF / 取消 / 出错
-    // 走下方手动 cleanup。
+    const cleanup = () => {
+      document.body.classList.remove('pdf-exporting');
+      document.body.classList.remove('pdf-exporting-mac');
+    };
     window.addEventListener('afterprint', cleanup, { once: true });
 
     try {
-      // 等样式应用后再量内容尺寸（隐藏 sidebar 后内容占满页宽，此时 scrollHeight 才是
-      // 内容真实全高，供 macOS createPDF 设置捕获区域，解决"导出不全"）
       await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
       const width = window.innerWidth;
       const height = contentEl.scrollHeight;
+
+      // mac：生成自包含 HTML 供 headless_chrome 打印（分页+边距）；
+      // 失败则 html=null，Rust 回退 createPDF。
+      let html = null;
+      if (isMac) {
+        try { html = await generatePrintHtml(); }
+        catch (e) { console.warn('[pdf] HTML 生成失败，回退 createPDF:', e); }
+      }
 
       const result = await invoke('export_pdf', {
         suggestedName: baseName + '.pdf',
         contentWidth: width,
         contentHeight: height,
+        html,
       });
       if (result === 'window-print') {
-        // 页面已是"隐藏 UI + 展开内容"状态，打印对话框捕获此状态；afterprint 触发 cleanup
         setTimeout(() => window.print(), 100);
       } else if (result === 'cancelled') {
-        // 用户取消打印面板（macOS），不会触发 afterprint，手动清理
         window.removeEventListener('afterprint', cleanup);
         cleanup();
       } else if (result === 'printed') {
-        // macOS 系统打印面板完成（打印或在面板内"存储为 PDF"），手动清理
         window.removeEventListener('afterprint', cleanup);
         cleanup();
         showToast('已通过系统打印面板导出 PDF', 4000);
       } else if (result) {
-        // 兼容兜底：返回文件路径的旧实现
         window.removeEventListener('afterprint', cleanup);
         cleanup();
         showToast('PDF 已导出：' + result, 5000);

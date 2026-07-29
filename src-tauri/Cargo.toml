@@ -67,9 +67,14 @@ tiny-skia = { version = "0.11", features = ["png"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
-# macOS 原生 PDF 导出（NSPrintOperation 系统打印面板，issue #4/#5）
+# macOS 原生 PDF 导出（WKWebView.createPDF，issue #4/#5）
+# NSPrintOperation 在 macOS 26 打印渲染空白（预览也空），改用 createPDF + 文件对话框
 # 版本需与 Cargo.lock 中 wry 0.55 传递依赖保持一致
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = { version = "0.6", features = ["exception"] }
 objc2-web-kit = { version = "0.3", features = ["WKWebView"] }
-objc2-app-kit = { version = "0.3", features = ["NSPrintOperation", "NSView"] }
+objc2-app-kit = { version = "0.3", features = ["NSView"] }
+block2 = "0.6"
+# Chromium 打印管线（与 Windows WebView2 同引擎）：分页 + 边距 + 打印级输出
+# 主路径；Chrome 未安装时回退 WKWebView.createPDF
+headless_chrome = "1"

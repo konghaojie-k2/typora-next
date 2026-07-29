@@ -2198,6 +2198,13 @@ body.pdf-exporting .markdown-body {
   padding: 0 !important;
 }
 
+/* macOS createPDF 无系统边距 API，用 CSS padding 模拟 A4 页边距。
+   Windows window.print 由系统打印对话框处理边距，不需要此类。
+   JS 仅 mac 时添加 body.pdf-exporting-mac。 */
+body.pdf-exporting-mac .markdown-body {
+  padding: 15mm 20mm !important;
+}
+
 /* ============================================
    Print Styles
    ============================================ */
