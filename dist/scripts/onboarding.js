@@ -26,9 +26,7 @@
     { target: '#paperReaderBtn', title: '论文导读', description: '导入 PDF / ArXiv 论文，生成 AI 导读' },
     { target: '#translateBtn', title: '翻译', description: '调用 AI 翻译当前文档' },
     { target: '#slidesBtn', title: '幻灯片模式', description: '将文档切换为幻灯片演示' },
-    { target: '#exportWordBtn', title: '导出 Word', description: '将文档导出为 .docx 格式' },
-    { target: '#exportPdfBtn', title: '导出 PDF', description: '将文档导出为 PDF（Ctrl+P）' },
-    { target: '#shareBtn', title: '分享打包', description: '将当前文档与引用的图片等资源打包为 ZIP，方便分享' },
+    { target: '#exportMenuBtn', title: '导出 / 分享', description: '点击展开菜单：导出 Word、导出 PDF（Ctrl+P）、分享打包为 ZIP', openMenu: '#exportMenu' },
     { target: '#settingsBtn', title: '设置', description: '配置 API Key、主题、光标样式等' },
     { target: '#themeToggle', title: '切换主题', description: '在浅色 / 深色主题间切换（Ctrl+Shift+L）' },
     { target: '#agentStatusChip', title: 'Agent 状态', description: '显示 Claude Code Agent 连接状态' }
@@ -49,6 +47,7 @@
     let currentStep = 0;
     let container = null;
     let card = null;
+    let openedMenuTrigger = null; // trigger whose openMenu dropdown is currently shown
 
     // Build combined steps array
     const sections = [
@@ -249,13 +248,39 @@
     skipBtn.textContent = '跳过引导';
     nextBtn.textContent = '开始';
 
+    closeStepMenu();
     container.style.display = 'flex';
   }
+
+    // ============================================
+    // openMenu support: a step may auto-open a dropdown
+    // (e.g. the export menu) so the guide can show its items.
+    // The menu is display-only here — the overlay blocks clicks.
+    // ============================================
+    function openStepMenu(step) {
+      if (!step.openMenu) return;
+      const menu = document.querySelector(step.openMenu);
+      const trigger = document.querySelector(step.target);
+      if (!menu || !trigger) return;
+      menu.classList.add('open');
+      trigger.setAttribute('aria-expanded', 'true');
+      openedMenuTrigger = { menu, trigger };
+    }
+
+    function closeStepMenu() {
+      if (!openedMenuTrigger) return;
+      openedMenuTrigger.menu.classList.remove('open');
+      openedMenuTrigger.trigger.setAttribute('aria-expanded', 'false');
+      openedMenuTrigger = null;
+    }
 
     function updateTourStep() {
       const steps = getCurrentSteps();
       const step = steps[currentStep];
       const spotlight = container.querySelector('.onboarding-spotlight');
+
+      // Close the previous step's openMenu dropdown (if any)
+      closeStepMenu();
 
       const title = card.querySelector('.onboarding-card-title');
       const desc = card.querySelector('.onboarding-card-desc');
@@ -281,6 +306,7 @@
         positionSpotlight(target, !!step.spotlightArea);
         requestAnimationFrame(() => positionCard(target));
         spotlight.style.display = 'block';
+        openStepMenu(step);
       } else {
         spotlight.style.display = 'none';
         // Center card
@@ -342,6 +368,7 @@
     }
 
     function hide() {
+      closeStepMenu();
       if (container) container.style.display = 'none';
     }
 

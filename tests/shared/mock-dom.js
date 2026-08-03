@@ -81,6 +81,11 @@ function buildMockDOM() {
         if (c._parent === el) c._parent = null;
       },
 
+      contains(target) {
+        if (target === el) return true;
+        return el._children.some(c => c.contains(target));
+      },
+
       remove() {
         if (el._parent) el._parent.removeChild(el);
         el._removed = true;

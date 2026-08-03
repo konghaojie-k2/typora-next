@@ -6461,6 +6461,19 @@ window.agentBridge = {
   initToolbarTooltips();
 
   // ============================================
+  // Export dropdown (导出 Word / 导出 PDF / 分享打包)
+  // Item buttons keep their original ids, so their click
+  // handlers (registered above) work unchanged.
+  // ============================================
+  if (window.ToolbarDropdown) {
+    const exportMenuBtn = document.getElementById('exportMenuBtn');
+    const exportMenu = document.getElementById('exportMenu');
+    if (exportMenuBtn && exportMenu) {
+      ToolbarDropdown.create({ trigger: exportMenuBtn, menu: exportMenu, doc: document });
+    }
+  }
+
+  // ============================================
   // First-time onboarding guide
   // ============================================
   let onboardingManager = null;

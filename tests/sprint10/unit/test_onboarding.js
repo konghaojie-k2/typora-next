@@ -28,6 +28,8 @@ function createOnboardingManager(options = {}) {
   let currentStep = 0;
   let container = null;
   let card = null;
+  let openedMenuTrigger = null;
+  const sections = options.sections || SECTIONS;
 
   function hasSeen() { try { return storage.getItem(ONBOARDING_STORAGE_KEY) === 'true'; } catch (e) { return false; } }
   function markSeen() { try { storage.setItem(ONBOARDING_STORAGE_KEY, 'true'); } catch (e) {} }
@@ -110,7 +112,24 @@ function createOnboardingManager(options = {}) {
     container.style.display = 'flex';
   }
 
-  function hide() { if (container) container.style.display = 'none'; }
+  function hide() { closeStepMenu(); if (container) container.style.display = 'none'; }
+
+  function openStepMenu(step) {
+    if (!step.openMenu) return;
+    const menu = document.querySelector(step.openMenu);
+    const trigger = document.querySelector(step.target);
+    if (!menu || !trigger) return;
+    menu.classList.add('open');
+    trigger.setAttribute('aria-expanded', 'true');
+    openedMenuTrigger = { menu, trigger };
+  }
+
+  function closeStepMenu() {
+    if (!openedMenuTrigger) return;
+    openedMenuTrigger.menu.classList.remove('open');
+    openedMenuTrigger.trigger.setAttribute('aria-expanded', 'false');
+    openedMenuTrigger = null;
+  }
 
   async function startTour() {
     phase = 'touring';
@@ -129,7 +148,7 @@ function createOnboardingManager(options = {}) {
     card.style.top = '';
     card.style.left = '';
     card.style.transform = '';
-    const section = SECTIONS[sectionIdx];
+    const section = sections[sectionIdx];
     const title = card.querySelector('.onboarding-card-title');
     const desc = card.querySelector('.onboarding-card-desc');
     const progress = card.querySelector('.onboarding-card-progress');
@@ -140,22 +159,24 @@ function createOnboardingManager(options = {}) {
     progress.textContent = `${section.steps.length} 个步骤`;
     prevBtn.style.display = sectionIdx > 0 ? '' : 'none';
     nextBtn.textContent = '开始';
+    closeStepMenu();
     container.style.display = 'flex';
   }
 
   function updateTourStep() {
-    const steps = SECTIONS[currentSection].steps;
+    const steps = sections[currentSection].steps;
     const step = steps[currentStep];
+    closeStepMenu();
     const title = card.querySelector('.onboarding-card-title');
     const desc = card.querySelector('.onboarding-card-desc');
     const progress = card.querySelector('.onboarding-card-progress');
     const nextBtn = card.querySelector('.onboarding-btn-next');
     title.textContent = step.title;
     desc.textContent = step.description;
-    const totalSteps = SECTIONS.reduce((s, sec) => s + sec.steps.length, 0);
-    const stepIndexBefore = SECTIONS.slice(0, currentSection).reduce((s, sec) => s + sec.steps.length, 0);
+    const totalSteps = sections.reduce((s, sec) => s + sec.steps.length, 0);
+    const stepIndexBefore = sections.slice(0, currentSection).reduce((s, sec) => s + sec.steps.length, 0);
     progress.textContent = `步骤 ${stepIndexBefore + currentStep + 1} / ${totalSteps}`;
-    nextBtn.textContent = (currentSection === SECTIONS.length - 1 && currentStep === steps.length - 1) ? '完成' : '下一步';
+    nextBtn.textContent = (currentSection === sections.length - 1 && currentStep === steps.length - 1) ? '完成' : '下一步';
 
     const target = document.querySelector(step.target);
     if (target) {
@@ -167,29 +188,30 @@ function createOnboardingManager(options = {}) {
       spotlight.style.width = `${rect.width + padding * 2}px`;
       spotlight.style.height = `${rect.height + padding * 2}px`;
       spotlight.style.display = 'block';
+      openStepMenu(step);
     }
   }
 
   function nextStep() {
     if (phase === 'welcome') { startTour(); return; }
     if (phase !== 'touring') return;
-    const steps = SECTIONS[currentSection].steps;
+    const steps = sections[currentSection].steps;
     if (currentStep === -1) { currentStep = 0; updateTourStep(); return; }
     if (currentStep < steps.length - 1) { currentStep++; updateTourStep(); }
-    else if (currentSection < SECTIONS.length - 1) { showSectionIntro(currentSection + 1); }
+    else if (currentSection < sections.length - 1) { showSectionIntro(currentSection + 1); }
     else { finish(); }
   }
 
   function prevStep() {
     if (phase !== 'touring') return;
     if (currentStep === -1) {
-      if (currentSection > 0) { currentSection--; currentStep = SECTIONS[currentSection].steps.length - 1; updateTourStep(); }
+      if (currentSection > 0) { currentSection--; currentStep = sections[currentSection].steps.length - 1; updateTourStep(); }
       return;
     }
     if (currentStep > 0) { currentStep--; updateTourStep(); }
     else if (currentSection > 0) {
       currentSection--;
-      currentStep = SECTIONS[currentSection].steps.length - 1;
+      currentStep = sections[currentSection].steps.length - 1;
       updateTourStep();
     }
   }
@@ -454,6 +476,67 @@ TestRunner.test('Finish on last step marks seen', async () => {
   TestRunner.assertEquals(nextBtn.textContent, '完成', 'should show "完成" on last step');
   nextBtn.click(); // finish
   TestRunner.assertEquals(om.hasSeen(), true, 'should mark seen after finish');
+});
+
+// ============================================
+// openMenu: auto-open a dropdown on step enter
+// ============================================
+function buildExportMenuSections() {
+  return [{ label: '工具栏', steps: [
+    { target: '#exportMenuBtn', title: '导出 / 分享', description: '菜单', openMenu: '#exportMenu' },
+    { target: '#settingsBtn', title: '设置', description: '配置偏好' }
+  ]}];
+}
+
+TestRunner.test('Step with openMenu opens the dropdown on enter', async () => {
+  const doc = createFakeDocument();
+  const trigger = doc.addButton('exportMenuBtn');
+  const menu = doc.addButton('exportMenu');
+  doc.addButton('settingsBtn');
+  const om = createOnboardingManager({
+    document: doc, storage: createFakeStorage(), sections: buildExportMenuSections()
+  });
+  om.start();
+  await om.startTour();
+  om.nextStep(); // section intro → step 0 (openMenu)
+
+  TestRunner.assertEquals(menu.classList.contains('open'), true, 'menu should be open on step enter');
+  TestRunner.assertEquals(trigger.getAttribute('aria-expanded'), 'true', 'aria-expanded should be true');
+});
+
+TestRunner.test('Advancing past the openMenu step closes the dropdown', async () => {
+  const doc = createFakeDocument();
+  const trigger = doc.addButton('exportMenuBtn');
+  const menu = doc.addButton('exportMenu');
+  doc.addButton('settingsBtn');
+  const om = createOnboardingManager({
+    document: doc, storage: createFakeStorage(), sections: buildExportMenuSections()
+  });
+  om.start();
+  await om.startTour();
+  om.nextStep(); // step 0 (openMenu)
+  om.nextStep(); // step 1 (no openMenu)
+
+  TestRunner.assertEquals(menu.classList.contains('open'), false, 'menu should close on next step');
+  TestRunner.assertEquals(trigger.getAttribute('aria-expanded'), 'false', 'aria-expanded should reset');
+});
+
+TestRunner.test('Skip while the dropdown is open closes it', async () => {
+  const doc = createFakeDocument();
+  const trigger = doc.addButton('exportMenuBtn');
+  const menu = doc.addButton('exportMenu');
+  doc.addButton('settingsBtn');
+  const om = createOnboardingManager({
+    document: doc, storage: createFakeStorage(), sections: buildExportMenuSections()
+  });
+  om.start();
+  await om.startTour();
+  om.nextStep(); // step 0 (openMenu)
+  TestRunner.assertEquals(menu.classList.contains('open'), true, 'menu open before skip');
+  om.skip();
+
+  TestRunner.assertEquals(menu.classList.contains('open'), false, 'skip should close the menu');
+  TestRunner.assertEquals(trigger.getAttribute('aria-expanded'), 'false', 'aria-expanded should reset after skip');
 });
 
 TestRunner.run();

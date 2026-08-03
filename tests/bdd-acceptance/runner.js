@@ -216,6 +216,16 @@ async function runAcceptanceTests() {
   totalPassed += slidesAutoSplitResult.passed;
   totalFailed += slidesAutoSplitResult.failed;
 
+  // Sprint 11: Toolbar export menu consolidation
+  console.log(`\n${YELLOW}▶ Sprint 11: Toolbar Export Menu Consolidation${RESET}`);
+  const toolbarExportMenuSteps = require('./sprint11_toolbar_export_menu.steps');
+  const toolbarExportMenuResult = await runFeatureFile(
+    path.join(__dirname, '../sprint11/features/toolbar_export_menu.feature'),
+    toolbarExportMenuSteps
+  );
+  totalPassed += toolbarExportMenuResult.passed;
+  totalFailed += toolbarExportMenuResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

@@ -1181,12 +1181,6 @@ main {
   color: white;
 }
 
-.toggle-hint {
-  font-size: var(--font-size-xs);
-  color: var(--color-text-muted);
-  margin-left: var(--spacing-xs);
-}
-
 /* ============================================
    Tabs Bar
    ============================================ */
@@ -1318,6 +1312,57 @@ main {
   height: 1px;
   background: var(--color-border);
   margin: var(--spacing-xs) var(--spacing-sm);
+}
+
+/* ============================================
+   Toolbar Dropdown (export menu)
+   ============================================ */
+.toolbar-dropdown-container {
+  position: relative;
+}
+
+.toolbar-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  display: none;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  padding: var(--spacing-xs) 0;
+  min-width: 160px;
+  z-index: 1000;
+  font-size: var(--font-size-sm);
+}
+
+.toolbar-dropdown.open {
+  display: block;
+}
+
+.toolbar-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-family: inherit;
+  text-align: left;
+}
+
+.toolbar-dropdown-item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.toolbar-dropdown-hint {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
 }
 
 /* ============================================
