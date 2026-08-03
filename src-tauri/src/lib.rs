@@ -1,5 +1,4 @@
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
@@ -15,6 +14,7 @@ pub mod ai_agent;
 pub mod learning_paths;
 pub mod mac_pdf;
 pub mod paper_import;
+pub mod share_images;
 mod docx_template;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
@@ -839,31 +839,6 @@ fn show_in_folder(path: String) -> Result<(), String> {
         .map_err(|e| format!("无法打开文件夹: {}", e))
 }
 
-/// Compute a relative path for an image within the share bundle
-fn compute_share_relative_path(source: &std::path::Path, base_dir: &str, md_dir: &str) -> String {
-    let source_str = source.to_string_lossy().replace("\\", "/");
-    let base_str = base_dir
-        .replace("\\", "/")
-        .trim_end_matches('/')
-        .to_string();
-    let md_dir_str = md_dir.replace("\\", "/").trim_end_matches('/').to_string();
-
-    if !base_str.is_empty() && source_str.starts_with(&base_str) {
-        source_str[base_str.len()..]
-            .trim_start_matches('/')
-            .to_string()
-    } else if !md_dir_str.is_empty() && source_str.starts_with(&md_dir_str) {
-        source_str[md_dir_str.len()..]
-            .trim_start_matches('/')
-            .to_string()
-    } else {
-        source
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "image".to_string())
-    }
-}
-
 /// SVG payload for a pre-rendered Mermaid diagram sent by the frontend.
 #[derive(Debug, Deserialize)]
 struct MermaidSvgInfo {
@@ -1093,38 +1068,37 @@ async fn share_document(
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| base_dir.clone());
 
-    // Extract image references from markdown
-    let md_img_re = Regex::new(r"!\[([^\]]*)\]\(([^)]+)\)").map_err(|e| e.to_string())?;
-    let wiki_img_re = Regex::new(r"!\[\[([^\]]+)\]\]").map_err(|e| e.to_string())?;
-
+    // Extract image references from markdown (share_images handles
+    // ![a](p "title") / <angle dests> / %20 / ![[w|300]] / <img> tags —
+    // the old regex silently dropped all of these from the ZIP)
     let mut image_refs: Vec<(String, String, String)> = Vec::new(); // (original, source_path, dest_relative)
 
-    // Standard markdown images: ![alt](path)
-    for cap in md_img_re.captures_iter(&content) {
-        let original = cap[0].to_string();
-        let path_str = cap[2].trim().to_string();
-        if path_str.starts_with("http://") || path_str.starts_with("https://") {
-            continue;
-        }
-        let source = if PathBuf::from(&path_str).is_absolute() {
-            PathBuf::from(&path_str)
-        } else {
-            PathBuf::from(&md_dir).join(&path_str)
+    for img_ref in share_images::extract_image_refs(&content) {
+        let source: Option<PathBuf> = match img_ref.kind {
+            share_images::ImageRefKind::Wiki => resolve_wikilink_path(&img_ref.target, &base_dir),
+            _ => {
+                if share_images::is_remote(&img_ref.target) {
+                    None
+                } else {
+                    let decoded = share_images::percent_decode(&img_ref.target);
+                    let p = PathBuf::from(&decoded);
+                    Some(if p.is_absolute() {
+                        p
+                    } else {
+                        PathBuf::from(&md_dir).join(&decoded)
+                    })
+                }
+            }
         };
-        if source.exists() {
-            let rel = compute_share_relative_path(&source, &base_dir, &md_dir);
-            image_refs.push((original, source.to_string_lossy().to_string(), rel));
-        }
-    }
-
-    // Obsidian WikiLink images: ![[path]]
-    for cap in wiki_img_re.captures_iter(&content) {
-        let original = cap[0].to_string();
-        let target = cap[1].trim().to_string();
-        if let Some(source) = resolve_wikilink_path(&target, &base_dir) {
+        if let Some(source) = source {
+            // Normalize BEFORE computing the bundle-relative path:
+            // a `../assets/x.png` reference joined onto md_dir otherwise
+            // yields a rel path starting with .. which escapes the temp
+            // dir → images silently missing from the ZIP (2026-08-03).
+            let source = share_images::normalize_path(&source);
             if source.exists() {
-                let rel = compute_share_relative_path(&source, &base_dir, &md_dir);
-                image_refs.push((original, source.to_string_lossy().to_string(), rel));
+                let rel = share_images::share_relative_path(&source, &base_dir, &md_dir);
+                image_refs.push((img_ref.original, source.to_string_lossy().to_string(), rel));
             }
         }
     }
