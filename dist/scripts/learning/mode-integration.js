@@ -1376,6 +1376,16 @@
     renderCue(cueData);
     updateSidebarHeader();
 
+    // 划词痕迹：立即在正文标出（loading 态即有痕迹）
+    const mdPane = document.getElementById('markdownBody');
+    if (mdPane && window.CornellTextMarks) {
+      window.CornellTextMarks.attachMarkInteractions(mdPane, {
+        getSidebarBody: () => document.getElementById('cornellSidebarBody'),
+        getCue: (id) => _cornellCues.find(c => c.id === id)
+      });
+      window.CornellTextMarks.injectCueMark(mdPane, { id: cueId, term: term });
+    }
+
     // Fetch explanation via explain_selection (Agent SDK with ureq fallback)
     try {
       // Build rich context: chapter title + chapter goal + surrounding text + course goal
@@ -1566,6 +1576,9 @@
 
   async function loadChapterExplanations() {
     if (!_projectPath || !_currentChapterFile) return;
+    // Snapshot for the race guard: the await below may resolve after the
+    // user already switched chapters — never inject stale marks then.
+    const chapterAtCall = _currentChapterFile;
     try {
       const data = await window.__TAURI__.core.invoke('load_chapter_explanations', {
         projectPath: _projectPath,
@@ -1606,6 +1619,18 @@
       if (empty) empty.style.display = 'none';
       updateSidebarHeader();
       updateExtraReviewButton();
+
+      // 划词痕迹：注入正文 marks（竞态守卫：await 期间切章则放弃）
+      if (chapterAtCall === _currentChapterFile && window.CornellTextMarks) {
+        const mdPaneLoad = document.getElementById('markdownBody');
+        if (mdPaneLoad) {
+          window.CornellTextMarks.attachMarkInteractions(mdPaneLoad, {
+            getSidebarBody: () => document.getElementById('cornellSidebarBody'),
+            getCue: (id) => _cornellCues.find(c => c.id === id)
+          });
+          window.CornellTextMarks.injectAllCueMarks(mdPaneLoad, _cornellCues);
+        }
+      }
     } catch (err) {
       console.warn('[Sprint6] loadChapterExplanations failed:', err);
     }
@@ -1648,6 +1673,12 @@
     // Remove from DOM
     const el = document.querySelector(`.cornell-cue[data-cue-id="${cueId}"]`);
     if (el) el.remove();
+
+    // 划词痕迹：移除正文 mark
+    const mdPaneDel = document.getElementById('markdownBody');
+    if (mdPaneDel && window.CornellTextMarks) {
+      window.CornellTextMarks.removeCueMark(mdPaneDel, cueId);
+    }
 
     // Re-persist the file without this cue
     try {
@@ -1722,6 +1753,13 @@
   }
 
   function teardownCornellSidebar() {
+    // 划词痕迹：退出课程模式（不重渲染正文）时清理 marks；
+    // 切章节时 innerHTML 重建，marks 本就自然消亡，这里多调一次无害
+    const mdPaneTd = document.getElementById('markdownBody');
+    if (mdPaneTd && window.CornellTextMarks) {
+      window.CornellTextMarks.removeAllCueMarks(mdPaneTd);
+    }
+
     if (_selectionChangeHandler) {
       document.removeEventListener('selectionchange', _selectionChangeHandler);
       _selectionChangeHandler = null;

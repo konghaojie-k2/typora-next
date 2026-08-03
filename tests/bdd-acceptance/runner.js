@@ -226,6 +226,16 @@ async function runAcceptanceTests() {
   totalPassed += toolbarExportMenuResult.passed;
   totalFailed += toolbarExportMenuResult.failed;
 
+  // Sprint 12: Cornell text marks (划词痕迹)
+  console.log(`\n${YELLOW}▶ Sprint 12: Cornell Text Marks${RESET}`);
+  const cornellTextMarksSteps = require('./sprint12_cornell_text_marks.steps');
+  const cornellTextMarksResult = await runFeatureFile(
+    path.join(__dirname, '../sprint12/features/cornell_text_marks.feature'),
+    cornellTextMarksSteps
+  );
+  totalPassed += cornellTextMarksResult.passed;
+  totalFailed += cornellTextMarksResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

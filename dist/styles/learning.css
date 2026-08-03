@@ -6331,6 +6331,76 @@ body.learning-mode .toolbar {
 
 }
 
+/* ============================================
+   Cornell Text Marks (划词痕迹)
+   Purple wavy underline on reading-pane text that
+   has a Cornell cue — distinct from the solid
+   underline of regular annotations.
+   ============================================ */
+:root {
+  --color-cue-mark: #7c3aed;
+  --color-cue-mark-bg: rgba(124, 58, 237, 0.08);
+}
+
+[data-theme="dark"] {
+  --color-cue-mark: #a78bfa;
+  --color-cue-mark-bg: rgba(167, 139, 250, 0.15);
+}
+
+.cornell-cue-mark {
+  text-decoration: underline wavy var(--color-cue-mark);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background-color 0.15s;
+}
+
+.cornell-cue-mark:hover {
+  background: var(--color-cue-mark-bg);
+}
+
+.cornell-cue-tooltip {
+  position: fixed;
+  z-index: 3000;
+  max-width: 320px;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary, #f8fafc);
+  color: var(--color-text-primary, #111827);
+  border: 1px solid var(--color-border, #e5e7eb);
+  border-radius: 6px;
+  box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+
+.cornell-cue-tooltip-title {
+  font-weight: 600;
+  color: var(--color-cue-mark);
+  margin-bottom: 4px;
+}
+
+.cornell-cue-tooltip-line {
+  color: var(--color-text-secondary, #4a4a68);
+}
+
+/* Sidebar card flash when a text mark is clicked */
+.cornell-cue.cue-flash {
+  animation: cueFlash 0.8s ease-in-out 2;
+}
+
+@keyframes cueFlash {
+  0%, 100% {
+    background: transparent;
+    box-shadow: none;
+  }
+  50% {
+    background: var(--color-cue-mark-bg);
+    box-shadow: 0 0 0 2px var(--color-cue-mark);
+  }
+}
+
 /* Cue Header */
 .cornell-cue-header {
   display: flex;

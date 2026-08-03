@@ -91,6 +91,20 @@ function buildMockDOM() {
         el._removed = true;
       },
 
+      replaceWith(...nodes) {
+        const parent = el._parent;
+        if (!parent) return;
+        const pos = parent._children.indexOf(el);
+        parent._children.splice(pos, 1, ...nodes);
+        nodes.forEach(n => { n._parent = parent; });
+        el._parent = null;
+      },
+
+      get childNodes() { return el._children.slice(); },
+      get firstChild() { return el._children[0] || null; },
+
+      scrollIntoView() { el._scrolledIntoView = (el._scrolledIntoView || 0) + 1; },
+
       get isConnected() { return el._parent !== null && !el._removed; },
 
       addEventListener(ev, fn) {
@@ -147,6 +161,12 @@ function buildMockDOM() {
     const notMatch = sel.match(/(.*):not\((.+)\)/);
     if (notMatch) {
       return matchesSelector(el, notMatch[1]) && !matchesSelector(el, notMatch[2]);
+    }
+
+    // Handle compound .class[attr="v"] (split and match each part)
+    const compound = sel.match(/^(\.[a-zA-Z-]+)(\[.+\])$/);
+    if (compound) {
+      return matchesSelector(el, compound[1]) && matchesSelector(el, compound[2]);
     }
 
     if (sel.startsWith('#')) return (el._attrs.id || el.id) === sel.slice(1);
