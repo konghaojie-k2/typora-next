@@ -2462,12 +2462,17 @@ window.agentBridge = {
 
       if (canValidate) {
         try {
-          const parseResult = mermaid.parse(content.trim(), { suppressErrors: true });
+          // 不传 suppressErrors：让 mermaid 抛出带行号/期望 token 的具体
+          // 解析错误（err.str 比 err.message 更详细）。suppressErrors 会把
+          // 错误细节吞掉，UI 和 LLM 都只能拿到笼统的"语法错误"
+          const parseResult = mermaid.parse(content.trim());
           if (parseResult && typeof parseResult.then === 'function') {
             const result = await parseResult;
             if (result === false || (result && result.valid === false)) {
               isValid = false;
-              parseError = result && result.error ? String(result.error) : '语法错误';
+              parseError = result && result.error
+                ? (result.error.str || result.error.message || String(result.error))
+                : '语法错误';
             }
           } else if (parseResult === false) {
             isValid = false;
@@ -2475,7 +2480,7 @@ window.agentBridge = {
           }
         } catch (err) {
           isValid = false;
-          parseError = err.message || String(err);
+          parseError = err.str || err.message || String(err);
         }
       }
 

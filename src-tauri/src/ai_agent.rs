@@ -96,7 +96,8 @@ fn kill_process_by_pid(pid: u32) {
 /// On MSI install → app_log_dir() (e.g. AppData\Local\<id>\logs).
 /// On dev / cargo run → falls back to the script's parent dir.
 /// agent-bridge.js reads TYPORA_NEXT_LOG_DIR from this.
-fn _agent_log_dir(app_handle: &AppHandle) -> std::path::PathBuf {
+/// Also used by fix_mermaid for its call log (mermaid-fix.log).
+pub(crate) fn _agent_log_dir(app_handle: &AppHandle) -> std::path::PathBuf {
     if let Ok(log_dir) = app_handle.path().app_log_dir() {
         let _ = std::fs::create_dir_all(&log_dir);
         return log_dir;

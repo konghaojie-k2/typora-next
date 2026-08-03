@@ -13,6 +13,7 @@ pub mod agent_sdk_probe;
 pub mod ai_agent;
 pub mod learning_paths;
 pub mod mac_pdf;
+pub mod mermaid_fix_log;
 pub mod paper_import;
 pub mod share_images;
 mod docx_template;
@@ -1690,13 +1691,17 @@ fn open_slides_window(content: String, app: tauri::AppHandle) -> Result<(), Stri
 /// Fix Mermaid syntax errors using AI
 #[tauri::command]
 async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Result<String, String> {
-    let config = get_config(app)?;
+    let config = get_config(app.clone())?;
     let api_key = config
         .api_key
         .filter(|k| !k.is_empty())
         .ok_or("未设置 API Key，请在设置中配置")?;
 
     let provider = config.ai_provider.unwrap_or_default();
+    let provider_name = match provider {
+        AiProvider::Anthropic => "anthropic",
+        AiProvider::Openai => "openai",
+    };
     let base_url = config
         .ai_base_url
         .filter(|u| !u.is_empty())
@@ -1718,59 +1723,100 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
         error, code
     );
 
-    // Build request based on provider
-    let (response, is_anthropic) = match provider {
-        AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
-            let req = serde_json::json!({
-                "model": model,
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}]
-            });
-            let resp = ureq::post(&url)
-                .set("Content-Type", "application/json")
-                .set("x-api-key", &api_key)
-                .set("anthropic-version", "2023-06-01")
-                .send_json(req)
-                .map_err(|e| format!("API 请求失败: {}", e))?;
-            (resp, true)
-        }
-        AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
-            let req = serde_json::json!({
-                "model": model,
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}]
-            });
-            let resp = ureq::post(&url)
-                .set("Content-Type", "application/json")
-                .set("Authorization", &format!("Bearer {}", api_key))
-                .send_json(req)
-                .map_err(|e| format!("API 请求失败: {}", e))?;
-            (resp, false)
-        }
-    };
+    // 120s hard timeout: ureq has NO default total timeout — on a bad
+    // network the old code waited forever with a dead-looking button.
+    let started = std::time::Instant::now();
+    let result = (|| -> Result<String, String> {
+        let (response, is_anthropic) = match provider {
+            AiProvider::Anthropic => {
+                let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+                let req = serde_json::json!({
+                    "model": model,
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}]
+                });
+                let resp = ureq::post(&url)
+                    .set("Content-Type", "application/json")
+                    .set("x-api-key", &api_key)
+                    .set("anthropic-version", "2023-06-01")
+                    .timeout(std::time::Duration::from_secs(120))
+                    .send_json(req)
+                    .map_err(fix_mermaid_http_error)?;
+                (resp, true)
+            }
+            AiProvider::Openai => {
+                let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+                let req = serde_json::json!({
+                    "model": model,
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": prompt}]
+                });
+                let resp = ureq::post(&url)
+                    .set("Content-Type", "application/json")
+                    .set("Authorization", &format!("Bearer {}", api_key))
+                    .timeout(std::time::Duration::from_secs(120))
+                    .send_json(req)
+                    .map_err(fix_mermaid_http_error)?;
+                (resp, false)
+            }
+        };
 
-    let json: serde_json::Value = response
-        .into_json()
-        .map_err(|e| format!("解析响应失败: {}", e))?;
+        let json: serde_json::Value = response
+            .into_json()
+            .map_err(|e| format!("解析响应失败: {}", e))?;
 
-    let fixed_code = if is_anthropic {
-        json["content"][0]["text"].as_str()
-    } else {
-        json["choices"][0]["message"]["content"].as_str()
+        let fixed_code = if is_anthropic {
+            json["content"][0]["text"].as_str()
+        } else {
+            json["choices"][0]["message"]["content"].as_str()
+        }
+        .ok_or("响应中没有内容")?;
+
+        // Clean up markdown code fences if present
+        let cleaned = fixed_code
+            .trim()
+            .trim_start_matches("```mermaid")
+            .trim_start_matches("```")
+            .trim_end_matches("```")
+            .trim();
+
+        Ok(cleaned.to_string())
+    })();
+
+    // 调用日志：每次调用（成败）追加一行 JSON 到 <log_dir>/mermaid-fix.log，
+    // 否则"为什么修复这么慢/失败"无从排查（fix_mermaid 走 ureq 直连，
+    // 不经过 agent-bridge 的日志管道）
+    let log_dir = ai_agent::_agent_log_dir(&app);
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let line = mermaid_fix_log::format_entry(
+        &ts,
+        provider_name,
+        &model,
+        started.elapsed().as_millis(),
+        result.as_ref().err().map(|e| e.as_str()),
+    );
+    if let Err(e) = mermaid_fix_log::append_entry(&log_dir, &line) {
+        eprintln!("[fix_mermaid] 写调用日志失败: {}", e);
     }
-    .ok_or("响应中没有内容")?;
 
-    // Clean up markdown code fences if present
-    let cleaned = fixed_code
-        .trim()
-        .trim_start_matches("```mermaid")
-        .trim_start_matches("```")
-        .trim_end_matches("```")
-        .trim();
+    result
+}
 
-    Ok(cleaned.to_string())
+/// Classify ureq errors: timeout vs network vs HTTP status.
+fn fix_mermaid_http_error(e: ureq::Error) -> String {
+    match &e {
+        ureq::Error::Status(code, resp) => {
+            format!("API 返回错误 ({} {})", code, resp.status_text())
+        }
+        ureq::Error::Transport(t) => {
+            let msg = t.to_string();
+            if msg.contains("timed out") {
+                "请求超时（120 秒）：请检查网络连接或设置中的 base_url".to_string()
+            } else {
+                format!("API 请求失败（网络错误）: {}", msg)
+            }
+        }
+    }
 }
 
 // ============================================

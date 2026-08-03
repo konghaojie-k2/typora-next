@@ -2430,6 +2430,11 @@ body.pdf-exporting-mac .markdown-body {
   font-family: var(--font-mono);
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
+  /* 具体解析错误（带行号/上下文）可能很长：保留换行 + 限高滚动 */
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .mermaid-error-code {
