@@ -680,8 +680,20 @@
       if (window.__TAURI__) {
         const { invoke } = window.__TAURI__.core;
 
-        // Ask user for parent save location
-        const parentPath = await invoke('open_folder_dialog');
+        // Ask user for parent save location.
+        // Note: invoke() REJECTS when the user cancels (Rust returns
+        // Err("No folder selected")), so a bare falsy check is not enough —
+        // without this catch, cancelling throws into the outer catch and
+        // handleError() bounces the user back to the input step, losing the
+        // generated outline.
+        let parentPath;
+        try {
+          parentPath = await invoke('open_folder_dialog');
+        } catch (dialogErr) {
+          console.log('[LearningProject] Folder picker cancelled:', dialogErr);
+          dialogState.step = 'outline';
+          return;
+        }
 
         if (!parentPath) {
           dialogState.step = 'outline';
