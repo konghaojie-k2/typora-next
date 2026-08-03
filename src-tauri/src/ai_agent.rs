@@ -230,6 +230,12 @@ fn check_sdk_quick() -> Result<bool, String> {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());
 
+    // Without NODE_PATH this check always fails on MSI installs (no local
+    // node_modules next to the bridge), even when the SDK is globally installed.
+    if let Ok(bridge_path) = get_agent_bridge_path() {
+        apply_agent_node_path(&mut cmd, &bridge_path);
+    }
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -344,6 +350,8 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
         .env("NODE_NO_WARNINGS", "1")
         .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir_for_path(&bridge_path));
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -438,9 +446,7 @@ async fn run_agent_bridge(
         );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
-    if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
-        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
-    }
+    apply_agent_node_path(&mut cmd, &bridge_path);
 
     // Redirect stderr to a debug file
     let stderr_log = std::path::PathBuf::from(&bridge_path)
@@ -1191,9 +1197,7 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
-    if let Some(node_path) = resolve_agent_node_path(&bridge_path) {
-        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
-    }
+    apply_agent_node_path(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -1257,6 +1261,16 @@ pub async fn probe_agent_sdk() -> Result<serde_json::Value, String> {
     }))
 }
 
+
+/// Apply the resolved SDK NODE_PATH to a bridge command.
+/// Every agent-bridge spawn site must call this: on MSI installs there is no
+/// node_modules next to agent-bridge.js, so without NODE_PATH the bridge's
+/// `require('@anthropic-ai/claude-agent-sdk')` always fails.
+fn apply_agent_node_path(cmd: &mut std::process::Command, bridge_path: &std::path::Path) {
+    if let Some(node_path) = resolve_agent_node_path(bridge_path) {
+        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
+    }
+}
 
 /// Resolve the NODE_PATH that makes `@anthropic-ai/claude-agent-sdk` available.
 ///
@@ -1768,6 +1782,8 @@ pub async fn evaluate_quiz(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -2157,6 +2173,8 @@ pub async fn explain_selection_agent(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -2263,6 +2281,8 @@ pub async fn adapt_subsequent_chapters(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     let output = cmd
         .output()
         .map_err(|e| format!("Failed to spawn agent-bridge: {}", e))?;
@@ -2365,6 +2385,8 @@ async fn spawn_generate_extra_quiz(
         .arg(payload.to_string())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
+
+    apply_agent_node_path(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2598,6 +2620,8 @@ pub async fn socratic_chat(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -2702,6 +2726,8 @@ pub async fn generate_review_content_agent(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
+    apply_agent_node_path(&mut cmd, &bridge_path);
+
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -2797,6 +2823,8 @@ pub async fn generate_review_content_batch_agent(
         .arg(payload.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    apply_agent_node_path(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2904,6 +2932,8 @@ pub async fn explore_chat(
         .arg(payload.to_string())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
+
+    apply_agent_node_path(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -3063,6 +3093,8 @@ pub async fn generate_paper_reader_guide(
             .arg(payload.to_string())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
+
+        apply_agent_node_path(&mut cmd, &bridge_path);
 
         #[cfg(windows)]
         {
