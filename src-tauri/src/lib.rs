@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod agent_sdk_probe;
 pub mod ai_agent;
+pub mod learning_paths;
 pub mod mac_pdf;
 pub mod paper_import;
 mod docx_template;
@@ -464,51 +465,13 @@ async fn open_folder_dialog(app: tauri::AppHandle) -> Result<String, String> {
     }
 }
 
-/// Sanitize a learning project slug into a safe ASCII directory name segment.
-/// - Keep ASCII alphanumeric, dash, underscore
-/// - Convert spaces to dashes
-/// - Truncate to 60 chars
-/// - Empty input → "learning-project"
-fn sanitize_dir_name(name: &str) -> String {
-    let cleaned: String = name
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_' || *c == ' ')
-        .collect();
-    let collapsed = cleaned
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join("-")
-        .to_ascii_lowercase();
-    if collapsed.is_empty() {
-        return "learning-project".to_string();
-    }
-    collapsed.chars().take(60).collect()
-}
-
 /// Create a dedicated subdirectory for a learning project under `parent_dir`.
 /// Returns the absolute path of the created subdirectory.
 /// If a directory with the same name already exists, appends a numeric suffix.
+/// Missing parents are created recursively (see learning_paths module docs).
 #[tauri::command]
 async fn create_project_subdir(parent_dir: String, slug: String) -> Result<String, String> {
-    let parent = std::path::PathBuf::from(&parent_dir);
-    if !parent.exists() {
-        return Err(format!("父目录不存在: {}", parent_dir));
-    }
-    if !parent.is_dir() {
-        return Err(format!("不是目录: {}", parent_dir));
-    }
-
-    let base = sanitize_dir_name(&slug);
-    let mut candidate = parent.join(&base);
-    let mut suffix = 1;
-    while candidate.exists() {
-        suffix += 1;
-        candidate = parent.join(format!("{}-{}", base, suffix));
-    }
-
-    std::fs::create_dir_all(&candidate).map_err(|e| format!("创建项目目录失败: {}", e))?;
-
-    Ok(candidate.display().to_string())
+    learning_paths::create_project_subdir_impl(parent_dir, slug)
 }
 
 /// List directory contents recursively (dirs + .md files)
