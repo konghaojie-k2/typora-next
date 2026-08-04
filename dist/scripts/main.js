@@ -516,24 +516,39 @@ window.agentBridge = {
       }
     });
 
+    // Open a file delivered by the OS (file association, command line,
+    // or macOS "Open With" event). Shared by the event listener and the
+    // init-time pending-file drain. addTab dedupes by path, so duplicate
+    // delivery (emit + drain) is harmless.
+    function openExternalFile(filePath) {
+      if (!filePath) return;
+      invoke('open_file', { path: filePath }).then(result => {
+        if (result && result.content) {
+          addTab(result.path, result.content, result.base_dir || '');
+          // Sprint 7: ask Rust to flash taskbar / bounce Dock if the user
+          // is not currently looking at the app window. No-op when focused.
+          // Fire-and-forget: don't pollute the main flow on failure.
+          invoke('notify_external_file_opened').catch(err =>
+            console.warn('[Attention] notify_external_file_opened failed:', err)
+          );
+        }
+      }).catch(err => {
+        console.error('Failed to open file from args:', err);
+      });
+    }
+
     // Listen for file open from command line args (file association)
     listen('open-file-from-args', (event) => {
-      const filePath = event.payload;
-      if (filePath) {
-        invoke('open_file', { path: filePath }).then(result => {
-          if (result && result.content) {
-            addTab(result.path, result.content, result.base_dir || '');
-            // Sprint 7: ask Rust to flash taskbar / bounce Dock if the user
-            // is not currently looking at the app window. No-op when focused.
-            // Fire-and-forget: don't pollute the main flow on failure.
-            invoke('notify_external_file_opened').catch(err =>
-              console.warn('[Attention] notify_external_file_opened failed:', err)
-            );
-          }
-        }).catch(err => {
-          console.error('Failed to open file from args:', err);
-        });
-      }
+      openExternalFile(event.payload);
+    });
+
+    // Drain files buffered by the OS open event before this listener was
+    // registered (macOS cold start: RunEvent::Opened fires before the
+    // webview is ready, so the emit above would have been lost).
+    invoke('take_pending_open_files').then(paths => {
+      (paths || []).forEach(openExternalFile);
+    }).catch(err => {
+      console.warn('Failed to drain pending open files:', err);
     });
   }
 

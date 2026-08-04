@@ -87,6 +87,10 @@ pub struct AppState {
     /// True while chapter generation is running in the background. Used to guard
     /// the main window close event so users don't accidentally abort generation.
     generation_in_progress: Mutex<bool>,
+    /// Markdown paths delivered by the OS "open file" event (macOS Finder /
+    /// "Open With" arrive via RunEvent::Opened, NOT command-line args) before
+    /// the frontend listener is ready. Drained once by take_pending_open_files.
+    pending_open_paths: Mutex<Vec<String>>,
 }
 
 /// File result containing path and content
@@ -218,6 +222,55 @@ async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String
         let _ = window.request_user_attention(Some(UserAttentionType::Informational));
     }
     Ok(())
+}
+
+/// Drain markdown file paths buffered by the OS "open file" event
+/// (RunEvent::Opened, the macOS file-association path) before the frontend
+/// event listener was registered. Called once by the frontend at init.
+#[tauri::command]
+async fn take_pending_open_files(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
+    let mut pending = state
+        .pending_open_paths
+        .lock()
+        .map_err(|e| e.to_string())?;
+    Ok(std::mem::take(&mut *pending))
+}
+
+/// True for .md / .markdown paths (case-insensitive).
+fn is_markdown_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
+        .unwrap_or(false)
+}
+
+/// Handle OS "open file" requests (macOS Finder "Open With" / double-click):
+/// keep only existing markdown files, buffer them for the frontend's
+/// init-time drain (cold start, listener not registered yet), and emit the
+/// open event for the already-registered listener (warm start).
+/// Kept cross-platform (unlike the RunEvent::Opened arm that calls it) so
+/// `cargo check` on Windows type-checks the logic.
+#[cfg_attr(
+    not(any(target_os = "macos", target_os = "ios", target_os = "android")),
+    allow(dead_code)
+)]
+fn handle_opened_urls(app_handle: &AppHandle, urls: Vec<tauri::Url>) {
+    for url in urls {
+        let path = match url.to_file_path() {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        if !is_markdown_path(&path) || !path.exists() {
+            continue;
+        }
+        let path_str = path.to_string_lossy().to_string();
+        if let Some(state) = app_handle.try_state::<AppState>() {
+            if let Ok(mut pending) = state.pending_open_paths.lock() {
+                pending.push(path_str.clone());
+            }
+        }
+        let _ = app_handle.emit("open-file-from-args", path_str);
+    }
 }
 
 /// Render markdown content to HTML (body content only, for WebView injection)
@@ -4373,6 +4426,7 @@ pub fn run() {
             watched_path: Mutex::new(None),
             project_json_lock: Mutex::new(()),
             generation_in_progress: Mutex::new(false),
+            pending_open_paths: Mutex::new(Vec::new()),
         })
         .manage(ai_agent::AgentProcess::default())
         .setup(|app| {
@@ -4414,6 +4468,7 @@ pub fn run() {
             render_markdown,
             get_toc,
             notify_external_file_opened,
+            take_pending_open_files,
             open_folder_dialog,
             list_directory,
             watch_file,
@@ -4492,6 +4547,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app_handle, event| match event {
+            // macOS file association: Finder "Open With" / double-click delivers
+            // the path via this event instead of command-line args.
+            #[cfg(any(target_os = "macos", target_os = "ios", target_os = "android"))]
+            tauri::RunEvent::Opened { urls } => {
+                handle_opened_urls(app_handle, urls);
+            }
             tauri::RunEvent::WindowEvent {
                 label,
                 event: tauri::WindowEvent::CloseRequested { api, .. },
