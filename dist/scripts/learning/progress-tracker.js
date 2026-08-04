@@ -636,6 +636,12 @@
     constructor(manager, ui, overlay) {
       this.manager = manager;
       this.ui = ui;
+      // ChapterStatusManager.handleAgentEvent reads this.ui.projectPath to
+      // normalize chapter_complete's bare filename into a full path (and to
+      // persist it). The manager never receives ui on its own — bind it here,
+      // otherwise post-generation clicks resolve to "File not found: <name>.md"
+      // until a re-entry guesses the path (chronic bug, root-caused 2026-08-04).
+      this.manager.ui = ui;
       this.overlay = overlay; // GenerationOverlay (centered progress)
       this._bound = false;
       this._generationDone = false;

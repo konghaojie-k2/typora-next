@@ -513,12 +513,12 @@
           await new Promise(resolve => setTimeout(resolve, 600));
           this.session.addMessage('assistant',
             '> 💡 **AI 深度探索需要桌面应用**\n\n' +
-            '当前为 Web 预览模式，无法加载 Claude Agent SDK。\n\n' +
-            '请使用 Tauri 桌面应用（`app.exe`）运行，以启用基于 Agent SDK 的深度探索对话。'
+            '当前为 Web 预览模式，无法加载 Pi coding agent。\n\n' +
+            '请使用 Tauri 桌面应用（`app.exe`）运行，以启用基于 Pi coding agent 的深度探索对话。'
           );
         } else {
-          // Real Agent SDK call via engine-agnostic bridge.
-          // The bridge (agent-bridge.js) loads @anthropic-ai/claude-agent-sdk
+          // Real agent call via engine-agnostic bridge.
+          // The bridge (agent-bridge.mjs) drives the Pi coding agent SDK
           // and returns the AI response. Swap bridge implementations to
           // change backends without touching this UI.
           const response = await window.agentBridge.chatWithAgent({
@@ -533,7 +533,7 @@
         this.session.addMessage('assistant',
           '**⚠️ 回复生成失败**\n\n' +
           '> ' + (e.message || String(e)) + '\n\n' +
-          '请检查 Agent SDK 配置后重试，或重新发送消息。'
+          '请检查 Pi coding agent 配置后重试，或重新发送消息。'
         );
       } finally {
         this._hideLoading();
