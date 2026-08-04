@@ -42,6 +42,7 @@ agent-bridge.log
 
 # Debug logs (last seen: agent-stderr.log, rust-debug.log, stdout-dump.txt)
 *.log
+stdout-dump.txt
 /tmp/
 
 # Design docs (design discussions, prototypes, ADRs)
