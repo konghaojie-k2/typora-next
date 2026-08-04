@@ -16,6 +16,7 @@ pub mod mac_pdf;
 pub mod mermaid_fix_log;
 pub mod paper_import;
 pub mod share_images;
+pub mod translation_clean;
 mod docx_template;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
@@ -1897,7 +1898,7 @@ async fn translate_text(
         for (i, text) in texts.iter().enumerate() {
             let key = cache_key(path, &target_lang, text);
             if let Some(cached) = cache.get(&key).and_then(|v| v.as_str()) {
-                result[i] = cached.to_string();
+                result[i] = translation_clean::strip_translation_label(cached);
             } else {
                 uncached_indices.push(i);
                 uncached_texts.push(text.clone());
@@ -1943,7 +1944,7 @@ async fn translate_text(
         .join("\n\n");
 
     let prompt = format!(
-        "请将以下文本翻译成 {}。保持 Markdown 格式、代码块标签和特殊符号不变。按顺序逐条返回译文，每条之间用 ---TRANSLATION--- 分隔。\n\n{}",
+        "请将以下文本翻译成 {}。保持 Markdown 格式、代码块标签和特殊符号不变。按顺序逐条返回译文，每条之间用 ---TRANSLATION--- 分隔。输出只包含译文本身，不得包含“段落 N”编号、原文或任何解释性文字。\n\n{}",
         target_lang, joined_texts
     );
 
@@ -1992,7 +1993,7 @@ async fn translate_text(
 
     let api_translations: Vec<String> = content
         .split("---TRANSLATION---")
-        .map(|s| s.trim().to_string())
+        .map(|s| translation_clean::strip_translation_label(s.trim()))
         .filter(|s| !s.is_empty())
         .collect();
 
