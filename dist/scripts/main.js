@@ -3706,13 +3706,13 @@ window.agentBridge = {
 
     const clickHint = '（点击重新检测）';
     if (status === 'missing') {
-      chip.title = errorMessage ? `${errorMessage} ${clickHint}` : `未检测到 Claude Code Agent SDK ${clickHint}`;
+      chip.title = errorMessage ? `${errorMessage} ${clickHint}` : `未检测到 Pi coding agent ${clickHint}`;
     } else if (status === 'ready') {
-      chip.title = `Claude Code Agent SDK 已就绪 ${clickHint}`;
+      chip.title = `Pi coding agent 已就绪 ${clickHint}`;
     } else if (status === 'idle') {
-      chip.title = `点击检测 Agent SDK ${clickHint}`;
+      chip.title = `点击检测 Pi coding agent ${clickHint}`;
     } else {
-      chip.title = '正在检测 Claude Code Agent SDK…';
+      chip.title = '正在检测 Pi coding agent…';
     }
   }
 
@@ -3725,11 +3725,11 @@ window.agentBridge = {
       toast.innerHTML = `
         <div class="agent-missing-toast-icon">!</div>
         <div class="agent-missing-toast-body">
-          <div class="agent-missing-toast-title">未检测到 Claude Code Agent</div>
-          <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Agent SDK 才能使用。</div>
+          <div class="agent-missing-toast-title">未检测到 Pi coding agent</div>
+          <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Pi coding agent 才能使用。</div>
           <div class="agent-missing-toast-install">
             <p>或打开终端手动执行：</p>
-            <code>npm install -g @anthropic-ai/claude-agent-sdk</code>
+            <code>npm install -g @earendil-works/pi-coding-agent</code>
             <button class="agent-missing-toast-copy" id="agentMissingCopyBtn">复制</button>
           </div>
           <div class="agent-missing-toast-actions">
@@ -3757,13 +3757,13 @@ window.agentBridge = {
       });
       toast.querySelector('#agentMissingCloseBtn').addEventListener('click', hideAgentMissingToast);
       toast.querySelector('#agentMissingCopyBtn').addEventListener('click', () => {
-        navigator.clipboard.writeText('npm install -g @anthropic-ai/claude-agent-sdk').catch(() => {});
+        navigator.clipboard.writeText('npm install -g @earendil-works/pi-coding-agent').catch(() => {});
       });
     }
 
     const hint = toast.querySelector('.agent-missing-toast-hint');
     if (hint && errorMessage) {
-      hint.textContent = `AI 学习功能需要安装 Agent SDK 才能使用。详情：${errorMessage}`;
+      hint.textContent = `AI 学习功能需要安装 Pi coding agent 才能使用。详情：${errorMessage}`;
     }
 
     // Force reflow to trigger transition
@@ -3790,7 +3790,7 @@ window.agentBridge = {
         // SDK 已就绪：清除"不再提示"标记，将来真正缺失时能再次引导
         localStorage.removeItem(AGENT_MISSING_DISMISS_KEY);
       } else {
-        const error = (result && result.error) ? String(result.error) : '未检测到 @anthropic-ai/claude-agent-sdk';
+        const error = (result && result.error) ? String(result.error) : '未检测到 @earendil-works/pi-coding-agent';
         updateAgentStatusChip('missing', error);
         showAgentMissingToast(error);
       }

@@ -1,16 +1,19 @@
 /**
  * E2E CLI Test
- * Tests agent-bridge.js via command line interface
- * No UI, no Rust backend - pure CLI parameter-driven testing
+ * Tests agent-bridge.mjs (pi kernel) via command line interface
+ * No UI, no Rust backend - pure CLI parameter-driven testing.
+ * The mock Pi SDK is injected at the ESM import boundary via
+ * TYPORA_PI_SDK_ENTRY (same mechanism the Rust host uses for the real SDK).
  */
 
 const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const TestRunner = require('../unit/test-runner');
+const TestRunner = require('../shared/test-runner');
 
-const BRIDGE_PATH = path.join(__dirname, '..', '..', 'agent-bridge.js');
+const BRIDGE_PATH = path.join(__dirname, '..', '..', 'agent-bridge.mjs');
+const MOCK_PI_SDK = path.join(__dirname, '..', 'mock-pi-sdk', 'index.mjs');
 
 /**
  * Run agent-bridge.js as CLI and collect output
@@ -21,8 +24,9 @@ function runAgentBridge(stage, config, args) {
     const proc = spawn('node', [BRIDGE_PATH, stage, payload], {
       env: {
         ...process.env,
-        // Allow test to inject mock SDK via env var
-        AGENT_SDK_MOCK: process.env.AGENT_SDK_MOCK || ''
+        TYPORA_PI_SDK_ENTRY: MOCK_PI_SDK,
+        // Keep the bridge log next to the running test so assertions find it
+        TYPORA_NEXT_LOG_DIR: process.cwd()
       }
     });
 
@@ -74,20 +78,14 @@ TestRunner.test('E2E: plan stage with CLI returns outline event', async () => {
     hours: 3
   });
 
-  // Should not crash
-  // Note: If Agent SDK is not installed, this will exit with error
-  // In CI/test env, use AGENT_SDK_MOCK=1
-
+  // With the mock Pi SDK injected, plan must complete and emit the outline
   const events = parseEvents(result.stdout);
+
+  TestRunner.assertEquals(result.code, 0, `plan stage should exit 0 (stderr: ${result.stderr.join(' ')})`);
+  TestRunner.assertExists(events.find(e => e.type === 'outline'), 'Should emit outline event');
 
   // Check log file was created
   TestRunner.assert(fs.existsSync('agent-bridge.log'), 'Should create agent-bridge.log');
-
-  // At minimum, we should get some output or a clear error
-  TestRunner.assert(
-    events.length > 0 || result.stderr.length > 0,
-    'Should produce some output'
-  );
 });
 
 TestRunner.test('E2E: CLI with invalid JSON args shows error', async () => {
@@ -134,8 +132,6 @@ TestRunner.test('E2E: CLI with missing stage shows usage error', async () => {
 });
 
 // Run
-console.log('Running E2E CLI Tests...');
-console.log('Note: These tests require Node.js. Agent SDK tests may fail if not installed.');
-console.log('Use AGENT_SDK_MOCK=1 to test with mock SDK.\n');
+console.log('Running E2E CLI Tests (pi kernel, mock SDK via TYPORA_PI_SDK_ENTRY)...\n');
 
 TestRunner.run();

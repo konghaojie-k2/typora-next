@@ -308,6 +308,27 @@ function requireMock() {
   return { ChapterStatusManager: require('../../../dist/scripts/learning/progress-tracker').ChapterStatusManager };
 }
 
+// Regression (2026-08-04): chapter_complete must normalize the bridge's bare
+// filename into a full path via the ui binding (AgentEventBridge sets
+// manager.ui). Without it, post-generation clicks hit "File not found".
+TestRunner.test('chapter_complete normalizes bare filename via manager.ui.projectPath', () => {
+  if (typeof window === 'undefined') global.window = {};
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'A' }]);
+  manager.ui = { projectPath: 'C:\\proj' };
+  manager.handleAgentEvent({ type: 'chapter_complete', data: { index: 0, file: '00-A.md' } });
+  TestRunner.assertEquals(manager.chapters[0].file, 'C:\\proj\\00-A.md', 'file joined with projectPath');
+});
+
+TestRunner.test('chapter_complete keeps absolute file unchanged', () => {
+  if (typeof window === 'undefined') global.window = {};
+  const { ChapterStatusManager } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'A' }]);
+  manager.ui = { projectPath: 'C:\\proj' };
+  manager.handleAgentEvent({ type: 'chapter_complete', data: { index: 0, file: 'D:\\other\\00-A.md' } });
+  TestRunner.assertEquals(manager.chapters[0].file, 'D:\\other\\00-A.md', 'absolute path untouched');
+});
+
 // Run
 console.log('Running Progress Tracker TDD tests...\n');
 TestRunner.run();

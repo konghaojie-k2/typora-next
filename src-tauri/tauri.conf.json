@@ -40,7 +40,7 @@
     ],
     "resources": [
       "icons/md-file-256.png",
-      "../agent-bridge.js",
+      "../agent-bridge.mjs",
       "../package.json",
       "skills/",
       "../samples/full.md"
