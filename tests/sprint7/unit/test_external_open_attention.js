@@ -7,11 +7,14 @@
  * is in the background, the taskbar icon should flash so the user
  * notices the file opened.
  *
- * The handler is an inline IIFE callback in dist/scripts/main.js, so a
- * full unit test (loading main.js with a mock __TAURI__) is heavy.
- * Instead we test the *structural contract* of the source file:
- *   - listener registered for 'open-file-from-args'
- *   - inside the listener: open_file invoke → addTab → notify invoke
+ * The open flow lives in openExternalFile() in dist/scripts/main.js
+ * (shared by the 'open-file-from-args' listener and the init-time
+ * pending-file drain), so a full unit test (loading main.js with a mock
+ * __TAURI__) is heavy. Instead we test the *structural contract* of the
+ * source file:
+ *   - listener registered for 'open-file-from-args', delegating to
+ *     openExternalFile()
+ *   - inside openExternalFile: open_file invoke → addTab → notify invoke
  *   - notify invoke is INSIDE the .then(success) branch (NOT after the .catch)
  *
  * This catches regressions where someone removes the notify call or
@@ -29,17 +32,13 @@ function loadMainJs() {
   return fs.readFileSync(MAIN_JS, 'utf8');
 }
 
-function extractOpenFileFromArgsListenerBody(source) {
-  // Match: listen('open-file-from-args', (event) => { ... });
-  // The body may contain nested braces; use a depth counter to find the closing brace.
-  const marker = "listen('open-file-from-args'";
+function extractBodyAfterMarker(source, marker) {
   const start = source.indexOf(marker);
-  if (start < 0) throw new Error('listen("open-file-from-args") not found in main.js');
+  if (start < 0) throw new Error(marker + ' not found in main.js');
 
-  // Find the opening brace of the arrow function body
-  const arrowIdx = source.indexOf('=>', start);
-  const braceIdx = source.indexOf('{', arrowIdx);
-  if (braceIdx < 0) throw new Error('Could not find arrow function body');
+  // Find the opening brace of the function/arrow-function body
+  const braceIdx = source.indexOf('{', start);
+  if (braceIdx < 0) throw new Error('Could not find function body');
 
   let depth = 0;
   for (let i = braceIdx; i < source.length; i++) {
@@ -49,7 +48,17 @@ function extractOpenFileFromArgsListenerBody(source) {
       if (depth === 0) return source.slice(braceIdx + 1, i);
     }
   }
-  throw new Error('Unterminated listener body');
+  throw new Error('Unterminated function body');
+}
+
+function extractOpenFileFromArgsListenerBody(source) {
+  // Match: listen('open-file-from-args', (event) => { ... });
+  return extractBodyAfterMarker(source, "listen('open-file-from-args'");
+}
+
+function extractOpenExternalFileBody(source) {
+  // Match: function openExternalFile(filePath) { ... }
+  return extractBodyAfterMarker(source, 'function openExternalFile(');
 }
 
 // ============================================
@@ -64,36 +73,46 @@ TestRunner.test('main.js registers a listener for open-file-from-args', () => {
   );
 });
 
-// ============================================
-// Listener body structure
-// ============================================
-
-TestRunner.test('listener invokes open_file to read the file', () => {
+TestRunner.test('listener delegates to openExternalFile', () => {
+  // The listener is a thin delegate so the init-time pending-file drain
+  // (macOS cold start) can reuse the same open flow.
   const body = extractOpenFileFromArgsListenerBody(loadMainJs());
   TestRunner.assert(
-    /invoke\(\s*['"]open_file['"]/.test(body),
-    'listener body must call invoke("open_file", ...) to read file content'
+    /openExternalFile\(/.test(body),
+    'listener must delegate to openExternalFile(event.payload)'
   );
 });
 
-TestRunner.test('listener calls addTab after open_file succeeds', () => {
-  const body = extractOpenFileFromArgsListenerBody(loadMainJs());
+// ============================================
+// openExternalFile body structure
+// ============================================
+
+TestRunner.test('openExternalFile invokes open_file to read the file', () => {
+  const body = extractOpenExternalFileBody(loadMainJs());
+  TestRunner.assert(
+    /invoke\(\s*['"]open_file['"]/.test(body),
+    'openExternalFile must call invoke("open_file", ...) to read file content'
+  );
+});
+
+TestRunner.test('openExternalFile calls addTab after open_file succeeds', () => {
+  const body = extractOpenExternalFileBody(loadMainJs());
   TestRunner.assert(
     /invoke\(\s*['"]open_file['"][\s\S]*?addTab\(/.test(body),
     'addTab must be called after invoke("open_file") (i.e. on success)'
   );
 });
 
-TestRunner.test('listener invokes notify_external_file_opened (Sprint 7)', () => {
-  const body = extractOpenFileFromArgsListenerBody(loadMainJs());
+TestRunner.test('openExternalFile invokes notify_external_file_opened (Sprint 7)', () => {
+  const body = extractOpenExternalFileBody(loadMainJs());
   TestRunner.assert(
     /invoke\(\s*['"]notify_external_file_opened['"]/.test(body),
-    'Sprint 7: listener must call invoke("notify_external_file_opened") for taskbar attention'
+    'Sprint 7: openExternalFile must call invoke("notify_external_file_opened") for taskbar attention'
   );
 });
 
 TestRunner.test('notify invoke is positioned AFTER addTab (so flash comes after open)', () => {
-  const body = extractOpenFileFromArgsListenerBody(loadMainJs());
+  const body = extractOpenExternalFileBody(loadMainJs());
   const addTabPos = body.indexOf('addTab(');
   const notifyPos = body.search(/invoke\(\s*['"]notify_external_file_opened['"]/);
   TestRunner.assert(addTabPos > -1, 'addTab call not found');
@@ -105,11 +124,11 @@ TestRunner.test('notify invoke is positioned AFTER addTab (so flash comes after 
 });
 
 TestRunner.test('notify invoke is INSIDE the .then success branch (not after .catch)', () => {
-  // The listener has: invoke('open_file').then(result => { ... addTab ... notify ... })
-  //                                                       .catch(err => { ... })
+  // openExternalFile has: invoke('open_file').then(result => { ... addTab ... notify ... })
+  //                                            .catch(err => { ... })
   // We must verify notify is in the success path. We do this by checking
-  // that the notify invoke string appears before the .catch( in the listener body.
-  const body = extractOpenFileFromArgsListenerBody(loadMainJs());
+  // that the notify invoke string appears before the .catch( in the body.
+  const body = extractOpenExternalFileBody(loadMainJs());
   const catchPos = body.indexOf('.catch(');
   const notifyPos = body.search(/invoke\(\s*['"]notify_external_file_opened['"]/);
   TestRunner.assert(notifyPos > -1, 'notify_external_file_opened invoke not found');
@@ -123,7 +142,7 @@ TestRunner.test('notify invoke has a .catch handler so a failure does not pollut
   // invoke('notify_external_file_opened').catch(err => ...) — the call must
   // not be naked (otherwise a failed attention request becomes an unhandled
   // promise rejection on the main flow).
-  const body = extractOpenFileFromArgsListenerBody(loadMainJs());
+  const body = extractOpenExternalFileBody(loadMainJs());
 
   // Find the notify invoke and check for a .catch right after it (allowing whitespace).
   const notifyMatch = body.match(/invoke\(\s*['"]notify_external_file_opened['"]\s*\)\s*\.catch\(/);
@@ -142,4 +161,4 @@ if (require.main === module) {
   TestRunner.run();
 }
 
-module.exports = { extractOpenFileFromArgsListenerBody };
+module.exports = { extractOpenFileFromArgsListenerBody, extractOpenExternalFileBody };
