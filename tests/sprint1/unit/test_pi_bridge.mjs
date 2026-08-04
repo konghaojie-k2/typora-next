@@ -272,6 +272,28 @@ T.test('paper-reader: missing paper_file throws', async () => {
 });
 
 // ============================================
+// _writeTempModelsJson: base_url semantics
+// ============================================
+
+T.test('_writeTempModelsJson: openai base_url 归一化 /v1，anthropic 不动', () => {
+  const read = (r) => JSON.parse(fs.readFileSync(r.modelsPath, 'utf-8'));
+  const cleanup = (r) => { fs.rmSync(r.dir, { recursive: true, force: true }); delete process.env[`TYPORA_PI_KEY_${process.pid}`]; };
+
+  const r1 = bridge._writeTempModelsJson({ ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com', api_key: 'k', model: 'm' });
+  T.assertEquals(read(r1).providers['typora-next-app'].baseUrl, 'https://api.deepseek.com/v1', 'openai 无版本段时补 /v1');
+  cleanup(r1);
+
+  const r2 = bridge._writeTempModelsJson({ ai_provider: 'openai', ai_base_url: 'https://api.openai.com/v1/', api_key: 'k', model: 'm' });
+  T.assertEquals(read(r2).providers['typora-next-app'].baseUrl, 'https://api.openai.com/v1/', '已有版本段不动');
+  cleanup(r2);
+
+  const r3 = bridge._writeTempModelsJson({ ai_provider: 'anthropic', ai_base_url: 'https://x.cn/apps/anthropic', api_key: 'k', model: 'm' });
+  T.assertEquals(read(r3).providers['typora-next-app'].baseUrl, 'https://x.cn/apps/anthropic', 'anthropic 不动');
+  T.assertEquals(read(r3).providers['typora-next-app'].api, 'anthropic-messages', 'anthropic 映射');
+  cleanup(r3);
+});
+
+// ============================================
 // chat stage
 // ============================================
 

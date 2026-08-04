@@ -113,11 +113,17 @@ async function loadPiSDK() {
 
 /** Map AppConfig (ai_provider/ai_base_url/api_key/model) to a temp models.json.
  *  apiKey is referenced by ENV VAR NAME — the key itself never touches disk. */
-function _writeTempModelsJson(config) {
+export function _writeTempModelsJson(config) {
   const provider = (config?.ai_provider || 'anthropic').toLowerCase();
   const isAnthropic = provider !== 'openai';
   const providerId = 'typora-next-app';
-  const baseUrl = (config?.ai_base_url || '').trim() || (isAnthropic ? 'https://api.anthropic.com' : 'https://api.openai.com');
+  let baseUrl = (config?.ai_base_url || '').trim() || (isAnthropic ? 'https://api.anthropic.com' : 'https://api.openai.com');
+  // pi 的 openai-completions 期望 baseUrl 自带版本段（直接拼 /chat/completions），
+  // 而应用内 ureq 直调自己拼 /v1/chat/completions——两边用同一份 base_url 会有
+  // 语义错位：deepseek 碰巧两种都通，api.openai.com 只通 /v1。归一化为 ureq 语义。
+  if (!isAnthropic && !/\/v\d+\/?$/.test(baseUrl)) {
+    baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
+  }
   const modelId = (config?.model || '').trim() || (isAnthropic ? 'claude-3-5-haiku-20241022' : 'gpt-4o-mini');
   const envKey = `TYPORA_PI_KEY_${process.pid}`;
   if (config?.api_key) process.env[envKey] = config.api_key;
