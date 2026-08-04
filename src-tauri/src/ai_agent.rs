@@ -92,10 +92,10 @@ fn kill_process_by_pid(pid: u32) {
         .status();
 }
 
-/// Resolve the directory where agent-bridge.js should write its logs.
+/// Resolve the directory where agent-bridge.mjs should write its logs.
 /// On MSI install → app_log_dir() (e.g. AppData\Local\<id>\logs).
 /// On dev / cargo run → falls back to the script's parent dir.
-/// agent-bridge.js reads TYPORA_NEXT_LOG_DIR from this.
+/// agent-bridge.mjs reads TYPORA_NEXT_LOG_DIR from this.
 /// Also used by fix_mermaid for its call log (mermaid-fix.log).
 pub(crate) fn _agent_log_dir(app_handle: &AppHandle) -> std::path::PathBuf {
     if let Ok(log_dir) = app_handle.path().app_log_dir() {
@@ -112,7 +112,7 @@ pub(crate) fn _agent_log_dir(app_handle: &AppHandle) -> std::path::PathBuf {
     std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
-/// Build the path to agent-bridge.js
+/// Build the path to agent-bridge.mjs
 fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
     // Helper: build a candidate path relative to exe directory
     let exe_parent = |sub: &str| {
@@ -124,23 +124,23 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
     // Try multiple possible locations
     let possible_paths = [
         // exe 同目录
-        exe_parent("agent-bridge.js"),
+        exe_parent("agent-bridge.mjs"),
         // MSI install: `../` in bundle.resources maps to _up_/ subdirectory
-        exe_parent("_up_/agent-bridge.js"),
+        exe_parent("_up_/agent-bridge.mjs"),
         // MSI install: resources/ subdirectory (standard Tauri resource path)
-        exe_parent("resources/agent-bridge.js"),
+        exe_parent("resources/agent-bridge.mjs"),
         // exe 父目录的父目录 (target/release/ -> target/)
         std::env::current_exe().ok().and_then(|p| {
             let parent = p.parent()?;
             let grandparent = parent.parent()?;
-            Some(grandparent.join("agent-bridge.js"))
+            Some(grandparent.join("agent-bridge.mjs"))
         }),
         // exe 父目录的父目录的父目录 (target/release/ -> src-tauri/)
         std::env::current_exe().ok().and_then(|p| {
             let parent = p.parent()?;
             let grandparent = parent.parent()?;
             let great_grandparent = grandparent.parent()?;
-            Some(great_grandparent.join("agent-bridge.js"))
+            Some(great_grandparent.join("agent-bridge.mjs"))
         }),
         // exe 父目录的父目录的父目录的父目录 (target/release/ -> worktree root)
         std::env::current_exe().ok().and_then(|p| {
@@ -148,11 +148,11 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
             let grandparent = parent.parent()?;
             let great_grandparent = grandparent.parent()?;
             let great_great_grandparent = great_grandparent.parent()?;
-            Some(great_great_grandparent.join("agent-bridge.js"))
+            Some(great_great_grandparent.join("agent-bridge.mjs"))
         }),
         // 当前工作目录
-        Some(std::path::PathBuf::from("agent-bridge.js")),
-        Some(std::path::PathBuf::from("../agent-bridge.js")),
+        Some(std::path::PathBuf::from("agent-bridge.mjs")),
+        Some(std::path::PathBuf::from("../agent-bridge.mjs")),
     ];
 
     // First pass: collect all existing candidates
@@ -164,12 +164,12 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
         .collect();
 
     if existing.is_empty() {
-        return Err("agent-bridge.js not found. Please ensure it's in the same directory as the executable or project root.".to_string());
+        return Err("agent-bridge.mjs not found. Please ensure it's in the same directory as the executable or project root.".to_string());
     }
 
     // Prefer the candidate with the LATEST mtime — guards against stale
     // copies in the exe directory that predate updates to the source.
-    // Without this, a leftover `target/release/agent-bridge.js` from an
+    // Without this, a leftover `target/release/agent-bridge.mjs` from an
     // earlier workflow silently shadows the fresh source.
     let chosen = existing
         .iter()
@@ -222,42 +222,23 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
     ))
 }
 
-/// Quick check if the Agent SDK is available.
-/// Runs `node -e "require('@anthropic-ai/claude-agent-sdk')"` and checks exit code.
-/// Fast (~100ms) — just a module resolution check, no network.
+/// Quick check if the Pi SDK is available.
+/// Pure filesystem probe, no process spawn (the pi SDK is ESM-only, so the old
+/// `node -e "require(...)"` probe can never succeed against it).
 fn check_sdk_quick() -> Result<bool, String> {
-    let mut cmd = std::process::Command::new("node");
-    cmd.args(&["-e", "require('@anthropic-ai/claude-agent-sdk')"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-
-    // Without NODE_PATH this check always fails on MSI installs (no local
-    // node_modules next to the bridge), even when the SDK is globally installed.
-    if let Ok(bridge_path) = get_agent_bridge_path() {
-        apply_agent_node_path(&mut cmd, &bridge_path);
-    }
-
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
-
-    let result = cmd
-        .status()
-        .map_err(|e| format!("Failed to run node: {}", e))?;
-    Ok(result.success())
+    let bridge_path = get_agent_bridge_path().ok();
+    Ok(crate::agent_sdk_probe::probe_agent_sdk_fs(bridge_path.as_deref()).found)
 }
 
-/// Copy bundled skills into a project's `.claude/skills/` so the agent SDK
-/// discovers them. Called at project-setup time (alongside
-/// `setup_project_with_session`). Each skill is a subdirectory containing
-/// `SKILL.md` — we mirror that layout under `{project}/.claude/skills/`.
+/// Copy bundled skills into a project's `.pi/skills/` so the pi SDK discovers
+/// them (pi's native discovery path). Called at project-setup time. Each skill
+/// is a subdirectory containing `SKILL.md` — mirrored under `{project}/.pi/skills/`.
+/// Legacy projects keep their `.claude/skills/` copies; the bridge also reads
+/// skill references from there as a fallback.
 pub fn copy_bundled_skills_to_project(project_path: &str) -> Result<(), String> {
     let src_dir = get_bundled_skills_dir()?;
     let dst_dir = std::path::PathBuf::from(project_path)
-        .join(".claude")
+        .join(".pi")
         .join("skills");
 
     std::fs::create_dir_all(&dst_dir)
@@ -322,7 +303,7 @@ fn read_session_id(project_path: &str) -> Option<String> {
 
 /// Initialize an agent session in the given project workspace.
 /// Synchronous (cmd.output()): spawns node, captures stdout, returns the
-/// session_id from the JSON line emitted by agent-bridge.js's init stage.
+/// session_id from the JSON line emitted by agent-bridge.mjs's init stage.
 ///
 /// Used by `create_project_with_session` (Phase B) on first project creation.
 /// The returned session_id is then persisted by the host to
@@ -351,7 +332,7 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
         .env("NODE_NO_WARNINGS", "1")
         .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir_for_path(&bridge_path));
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -439,7 +420,7 @@ async fn run_agent_bridge(
         .arg(config_json.to_string())
         .stdout(Stdio::piped())
         .env("NODE_NO_WARNINGS", "1")
-        // Tell agent-bridge.js where to write logs (MSI install → app_log_dir,
+        // Tell agent-bridge.mjs where to write logs (MSI install → app_log_dir,
         // dev → script dir). Falls back to __dirname if unset.
         .env(
             "TYPORA_NEXT_LOG_DIR",
@@ -447,7 +428,7 @@ async fn run_agent_bridge(
         );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     // Redirect stderr to a debug file
     let stderr_log = std::path::PathBuf::from(&bridge_path)
@@ -629,7 +610,7 @@ pub async fn plan_course(
 // ============================================
 
 /// Pure function — extracted for testability.
-/// Mirrors the prompt that previously lived in agent-bridge.js planCourse().
+/// Mirrors the prompt that previously lived in agent-bridge.mjs planCourse().
 pub fn build_plan_prompt(goal: &str, level: &str, hours: u32) -> String {
     let level_names = [
         ("beginner", "小白（零基础）"),
@@ -681,7 +662,7 @@ pub fn build_plan_prompt(goal: &str, level: &str, hours: u32) -> String {
 
 /// Pure function — extracted for testability.
 /// Strips markdown code block wrappers if present, then parses JSON.
-/// Mirrors `extractJSON` from agent-bridge.js plus normalization that
+/// Mirrors `extractJSON` from agent-bridge.mjs plus normalization that
 /// previously lived there.
 pub fn parse_plan_response(raw: &str) -> Result<Value, String> {
     // Strip markdown code block wrappers
@@ -822,12 +803,14 @@ pub async fn plan_course_llm(
     let prompt = build_plan_prompt(&goal, &level, hours);
 
     // Call LLM via ureq (mirrors explain_selection pattern)
+    // 8192: 2048 truncated long outlines mid-JSON (deepseek EOF-at-line-47
+    // incident, 2026-08-04 acceptance)
     let (response, is_anthropic) = match provider {
         crate::AiProvider::Anthropic => {
             let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
                 "model": model,
-                "max_tokens": 2048,
+                "max_tokens": 8192,
                 "messages": [{"role": "user", "content": prompt}]
             });
             let resp = ureq::post(&url)
@@ -842,7 +825,7 @@ pub async fn plan_course_llm(
             let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
             let req = serde_json::json!({
                 "model": model,
-                "max_tokens": 2048,
+                "max_tokens": 8192,
                 "messages": [{"role": "user", "content": prompt}]
             });
             let resp = ureq::post(&url)
@@ -1165,18 +1148,18 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
     let bridge_path = match get_agent_bridge_path() {
         Ok(p) => p,
         Err(e) => {
-            // MSI install: agent-bridge.js might be a resource next to exe
+            // MSI install: agent-bridge.mjs might be a resource next to exe
             // which our path resolution might miss — try AppData setup
             log::warn!("[ai_agent] bridge_path error: {}", e);
             return Ok(serde_json::json!({
                 "available": false,
-                "error": format!("agent-bridge.js 未找到: {}. 请确保应用文件完整（重新安装）", e)
+                "error": format!("agent-bridge.mjs 未找到: {}. 请确保应用文件完整（重新安装）", e)
             }));
         }
     };
 
     // Auto-setup node_modules if missing (MSI install / global SDK scenario)
-    let _node_path = resolve_agent_node_path(&bridge_path);
+    let _node_path = resolve_agent_sdk_entry(&bridge_path);
     let payload = serde_json::json!({
         "config": {},
         "args": {}
@@ -1198,7 +1181,7 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         );
 
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -1263,102 +1246,90 @@ pub async fn probe_agent_sdk() -> Result<serde_json::Value, String> {
 }
 
 
-/// Apply the resolved SDK NODE_PATH to a bridge command.
-/// Every agent-bridge spawn site must call this: on MSI installs there is no
-/// node_modules next to agent-bridge.js, so without NODE_PATH the bridge's
-/// `require('@anthropic-ai/claude-agent-sdk')` always fails.
-fn apply_agent_node_path(cmd: &mut std::process::Command, bridge_path: &std::path::Path) {
-    if let Some(node_path) = resolve_agent_node_path(bridge_path) {
-        cmd.env("NODE_PATH", node_path.to_string_lossy().to_string());
+/// Apply the resolved Pi SDK entry path to a bridge command.
+/// Every agent-bridge spawn site must call this: the pi SDK is ESM-only and
+/// ESM resolution ignores NODE_PATH, so on MSI installs (no node_modules next
+/// to the bridge) the entry is resolved here and passed via env for the
+/// bridge to import by absolute path.
+fn apply_agent_sdk_entry(cmd: &mut std::process::Command, bridge_path: &std::path::Path) {
+    if let Some(entry) = resolve_agent_sdk_entry(bridge_path) {
+        cmd.env("TYPORA_PI_SDK_ENTRY", entry.to_string_lossy().to_string());
     }
 }
 
-/// Resolve the NODE_PATH that makes `@anthropic-ai/claude-agent-sdk` available.
+/// Resolve the absolute path to the Pi SDK entry (dist/index.js).
 ///
 /// Strategy:
-/// 1. Dev: node_modules next to agent-bridge.js
-/// 2. Global: `npm root -g` (npm 5+ prefix; node's `module.globalPaths` no longer used)
+/// 1. Dev: node_modules next to agent-bridge.mjs
+/// 2. Global: `npm root -g` (npm 5+ prefix)
 /// 3. Auto-install: `npm install` to platform app data directory
 ///
-/// Returns the directory to set as NODE_PATH, or None.
-fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    // Helper: check if SDK exists in a given directory (which should contain node_modules/)
-    let has_sdk = |dir: &std::path::Path| -> bool {
-        let checks = [
-            dir.join("node_modules")
-                .join("@anthropic-ai")
-                .join("claude-agent-sdk"),
-            dir.join("@anthropic-ai").join("claude-agent-sdk"), // dir is already node_modules
-        ];
-        checks.iter().any(|p| p.exists())
+/// Returns the entry file path, or None.
+fn resolve_agent_sdk_entry(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    // Helper: the SDK entry file inside a node_modules directory
+    let entry_in = |nm: &std::path::Path| {
+        nm.join("@earendil-works")
+            .join("pi-coding-agent")
+            .join("dist")
+            .join("index.js")
     };
 
-    // 1. Check next to bridge (dev scenario)
+    // 1. Check next to bridge (dev / auto-install scenario)
     if let Some(parent) = bridge_path.parent() {
-        if has_sdk(parent) {
-            let nm = parent.join("node_modules");
-            let node_path = if nm.join("@anthropic-ai").join("claude-agent-sdk").exists() {
-                nm
-            } else {
-                parent.to_path_buf()
-            };
-            log::info!("[agent_path] found local SDK at {:?}", node_path);
-            return Some(node_path);
+        let entry = entry_in(&parent.join("node_modules"));
+        if entry.exists() {
+            log::info!("[agent_path] found local Pi SDK at {:?}", entry);
+            return Some(entry);
         }
     }
 
-    // 2. Find npm's global node_modules (npm 5+ prefix, not node's compiled-in globalPaths).
-    //    Use `npm root -g` — it follows npm's own prefix resolution.
+    // 2. Find npm's global node_modules (npm 5+ prefix).
     //    On Windows, spawn through cmd so the shell can find npm.cmd / npm.ps1.
-    let npm_root_global = |_path: &mut std::path::PathBuf| -> Option<std::path::PathBuf> {
-        let mut npm_cmd = if cfg!(windows) {
-            let mut c = std::process::Command::new("cmd");
-            c.args(["/C", "npm root -g"]);
-            c
-        } else {
-            let mut c = std::process::Command::new("npm");
-            c.args(["root", "-g"]);
-            c
-        };
-        npm_cmd
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            const CREATE_NO_WINDOW: u32 = 0x08000000;
-            npm_cmd.creation_flags(CREATE_NO_WINDOW);
-        }
-        if let Ok(output) = npm_cmd.output() {
-            let p = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-            if p.join("@anthropic-ai").join("claude-agent-sdk").exists() {
-                log::info!("[agent_path] found global SDK via npm root -g at {:?}", p);
-                return Some(p);
-            }
-        }
-        None
+    let mut npm_cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "npm root -g"]);
+        c
+    } else {
+        let mut c = std::process::Command::new("npm");
+        c.args(["root", "-g"]);
+        c
     };
-    if let Some(p) = npm_root_global(&mut std::path::PathBuf::new()) {
-        return Some(p);
+    npm_cmd
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        npm_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    if let Ok(output) = npm_cmd.output() {
+        let entry = entry_in(
+            &std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()),
+        );
+        if entry.exists() {
+            log::info!("[agent_path] found global Pi SDK via npm root -g at {:?}", entry);
+            return Some(entry);
+        }
     }
 
     // 3. Auto-install to platform-appropriate app data directory
-    log::info!("[agent_path] SDK not found, installing...");
+    log::info!("[agent_path] Pi SDK not found, installing...");
     let target_dir = crate::agent_sdk_probe::agent_app_data_dir()?;
     std::fs::create_dir_all(&target_dir).ok()?;
 
-    // Copy agent-bridge.js
+    // Copy agent-bridge.mjs
     let bridge_name = bridge_path
         .file_name()
-        .unwrap_or(std::ffi::OsStr::new("agent-bridge.js"));
+        .unwrap_or(std::ffi::OsStr::new("agent-bridge.mjs"));
     let dest_bridge = target_dir.join(bridge_name);
     if !dest_bridge.exists() {
         if let Err(e) = std::fs::copy(bridge_path, &dest_bridge) {
-            log::warn!("[agent_path] copy agent-bridge.js failed: {}", e);
+            log::warn!("[agent_path] copy agent-bridge.mjs failed: {}", e);
         }
     }
 
-    // Copy package.json
+    // Copy package.json (carries the pi SDK dependency for npm install)
     if let Some(src_dir) = bridge_path.parent() {
         let pkg_src = src_dir.join("package.json");
         let pkg_dst = target_dir.join("package.json");
@@ -1370,12 +1341,8 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
     }
 
     // Run npm install if SDK still missing
-    let target_nm = target_dir.join("node_modules");
-    if !target_nm
-        .join("@anthropic-ai")
-        .join("claude-agent-sdk")
-        .exists()
-    {
+    let target_entry = entry_in(&target_dir.join("node_modules"));
+    if !target_entry.exists() {
         log::info!("[agent_path] running npm install in {:?}", target_dir);
         let install = || -> Option<()> {
             let mut install_cmd = if cfg!(windows) {
@@ -1407,15 +1374,11 @@ fn resolve_agent_node_path(bridge_path: &std::path::Path) -> Option<std::path::P
         install();
     }
 
-    if target_nm
-        .join("@anthropic-ai")
-        .join("claude-agent-sdk")
-        .exists()
-    {
-        log::info!("[agent_path] installed SDK to {:?}", target_nm);
-        Some(target_nm)
+    if target_entry.exists() {
+        log::info!("[agent_path] installed Pi SDK to {:?}", target_entry);
+        Some(target_entry)
     } else {
-        log::warn!("[agent_path] SDK setup failed after all attempts");
+        log::warn!("[agent_path] Pi SDK setup failed after all attempts");
         None
     }
 }
@@ -1783,7 +1746,7 @@ pub async fn evaluate_quiz(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2174,7 +2137,7 @@ pub async fn explain_selection_agent(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2282,7 +2245,7 @@ pub async fn adapt_subsequent_chapters(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     let output = cmd
         .output()
@@ -2387,7 +2350,7 @@ async fn spawn_generate_extra_quiz(
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2621,7 +2584,7 @@ pub async fn socratic_chat(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2652,7 +2615,7 @@ pub async fn socratic_chat(
     let stdout = String::from_utf8_lossy(&output.stdout);
     log::info!("[Sprint8b] socratic_chat: raw_stdout={}", stdout.trim());
 
-    // stdout is line-delimited JSON (see agent-bridge.js: stdout = JSON lines).
+    // stdout is line-delimited JSON (see agent-bridge.mjs: stdout = JSON lines).
     // When the agent makes tool calls (e.g. reading socratic-sessions history),
     // `progress_log` event lines precede the final result object. Parse the LAST
     // line that deserializes into a SocraticChatResponse — event lines lack the
@@ -2727,7 +2690,7 @@ pub async fn generate_review_content_agent(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2825,7 +2788,7 @@ pub async fn generate_review_content_batch_agent(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -2934,7 +2897,7 @@ pub async fn explore_chat(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    apply_agent_node_path(&mut cmd, &bridge_path);
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
     #[cfg(windows)]
     {
@@ -3095,7 +3058,7 @@ pub async fn generate_paper_reader_guide(
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped());
 
-        apply_agent_node_path(&mut cmd, &bridge_path);
+        apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
         #[cfg(windows)]
         {

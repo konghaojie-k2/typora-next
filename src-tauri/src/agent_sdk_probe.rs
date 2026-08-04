@@ -15,10 +15,10 @@ pub struct ProbeResult {
     pub location: Option<std::path::PathBuf>,
 }
 
-/// 纯文件系统探测：候选目录中是否存在 `@anthropic-ai/claude-agent-sdk`。
+/// 纯文件系统探测：候选目录中是否存在 `@earendil-works/pi-coding-agent`。
 pub fn probe_agent_sdk_fs(bridge_path: Option<&std::path::Path>) -> ProbeResult {
     for dir in candidate_sdk_dirs(bridge_path) {
-        if dir.join("@anthropic-ai").join("claude-agent-sdk").exists() {
+        if dir.join("@earendil-works").join("pi-coding-agent").exists() {
             return ProbeResult {
                 found: true,
                 location: Some(dir),
@@ -31,7 +31,7 @@ pub fn probe_agent_sdk_fs(bridge_path: Option<&std::path::Path>) -> ProbeResult 
     }
 }
 
-/// Directories that may directly contain `@anthropic-ai/claude-agent-sdk`
+/// Directories that may directly contain `@earendil-works/pi-coding-agent`
 /// (i.e. each candidate itself is a node_modules directory).
 pub fn candidate_sdk_dirs(bridge_path: Option<&std::path::Path>) -> Vec<std::path::PathBuf> {
     let mut dirs = Vec::new();
