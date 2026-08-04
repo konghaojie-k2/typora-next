@@ -3693,6 +3693,8 @@ window.agentBridge = {
 
   // "不再提示"的持久化标记（localStorage），SDK 检测成功后清除
   const AGENT_MISSING_DISMISS_KEY = 'agent-missing-dismissed';
+  const AGENT_INIT_KEY = 'agent-init-done';
+  const AGENT_KEY_PROMPT_KEY = 'agent-key-prompted';
 
   function updateAgentStatusChip(status, errorMessage) {
     const chip = elements.agentStatusChip;
@@ -3716,7 +3718,8 @@ window.agentBridge = {
     }
   }
 
-  function showAgentMissingToast(errorMessage) {
+  function showAgentMissingToast(errorMessage, opts = {}) {
+    const isInit = !!opts.init;
     let toast = document.getElementById('agent-missing-toast');
     if (!toast) {
       toast = document.createElement('div');
@@ -3725,12 +3728,13 @@ window.agentBridge = {
       toast.innerHTML = `
         <div class="agent-missing-toast-icon">!</div>
         <div class="agent-missing-toast-body">
-          <div class="agent-missing-toast-title">未检测到 Pi coding agent</div>
-          <div class="agent-missing-toast-hint">AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Pi coding agent 才能使用。</div>
+          <div class="agent-missing-toast-title"></div>
+          <div class="agent-missing-toast-hint"></div>
           <div class="agent-missing-toast-install">
             <p>或打开终端手动执行：</p>
             <code>npm install -g @earendil-works/pi-coding-agent</code>
             <button class="agent-missing-toast-copy" id="agentMissingCopyBtn">复制</button>
+            <p>装好后请在「设置」里确认 API Key 已配置（与翻译共用同一套，不需要单独配置 pi）。</p>
           </div>
           <div class="agent-missing-toast-actions">
             <button class="agent-missing-toast-btn primary" id="agentMissingRetryBtn">自动安装</button>
@@ -3761,9 +3765,17 @@ window.agentBridge = {
       });
     }
 
+    const titleEl = toast.querySelector('.agent-missing-toast-title');
+    if (titleEl) {
+      titleEl.textContent = isInit ? '首次初始化：安装 Pi coding agent' : '未检测到 Pi coding agent';
+    }
     const hint = toast.querySelector('.agent-missing-toast-hint');
-    if (hint && errorMessage) {
-      hint.textContent = `AI 学习功能需要安装 Pi coding agent 才能使用。详情：${errorMessage}`;
+    if (hint) {
+      hint.textContent = errorMessage
+        ? `AI 学习功能需要安装 Pi coding agent 才能使用。详情：${errorMessage}`
+        : (isInit
+          ? 'AI 学习功能（大纲生成、章节生成、Socratic 复习）需要 Pi coding agent。这是一次性初始化引导，之后仅在用时检测。'
+          : 'AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Pi coding agent 才能使用。');
     }
 
     // Force reflow to trigger transition
@@ -3789,6 +3801,8 @@ window.agentBridge = {
         hideAgentMissingToast();
         // SDK 已就绪：清除"不再提示"标记，将来真正缺失时能再次引导
         localStorage.removeItem(AGENT_MISSING_DISMISS_KEY);
+        localStorage.setItem(AGENT_INIT_KEY, '1');
+        maybePromptMissingApiKey();
       } else {
         const error = (result && result.error) ? String(result.error) : '未检测到 @earendil-works/pi-coding-agent';
         updateAgentStatusChip('missing', error);
@@ -3802,18 +3816,66 @@ window.agentBridge = {
     }
   }
 
-  // 启动引导（issue #2）：轻量探测 SDK 是否存在于已知目录，纯文件系统检查，
-  // 不 spawn node、不触发 npm 自动安装，所以可以安全地在启动时运行。
-  // 只有"确定缺失"且用户未点过"不再提示"时才显示引导 toast。
+  // 启动引导（issue #2 + 初始化模型 2026-08-04）：轻量探测 SDK 是否存在于已知
+  // 目录，纯文件系统检查，不 spawn node、不触发 npm 自动安装。
+  // 初始化 ≠ 使用检测：首启给一次性初始化引导（show-init-toast 并记 flag）；
+  // 之后 SDK 缺失只在状态芯片/用时错误里体现，不再自动弹 toast。
   async function probeAgentSdkAtStartup() {
     try {
       const result = await invoke('probe_agent_sdk');
-      if (result && result.found) return;
-      if (localStorage.getItem(AGENT_MISSING_DISMISS_KEY) === '1') return;
-      showAgentMissingToast(null);
+      const action = window.AgentInit.decideStartupAction({
+        sdkFound: !!(result && result.found),
+        initDone: localStorage.getItem(AGENT_INIT_KEY) === '1',
+        dismissed: localStorage.getItem(AGENT_MISSING_DISMISS_KEY) === '1'
+      });
+      if (action === 'mark-init-done') {
+        localStorage.setItem(AGENT_INIT_KEY, '1');
+      } else if (action === 'show-init-toast') {
+        showAgentMissingToast(null, { init: true });
+        localStorage.setItem(AGENT_INIT_KEY, '1'); // 引导只给一次
+      }
     } catch (err) {
       console.warn('[AgentStatus] startup probe failed:', err);
     }
+  }
+
+  // SDK 已就绪但 API Key 未配置时的一次性提示（与翻译共用同一套配置，
+  // 指向设置面板；用户填过 Key 后不再出现）
+  async function maybePromptMissingApiKey() {
+    try {
+      const config = await invoke('get_config');
+      const hasKey = !!(config && config.api_key && String(config.api_key).length > 0);
+      const prompted = localStorage.getItem(AGENT_KEY_PROMPT_KEY) === '1';
+      if (!window.AgentInit.shouldPromptMissingApiKey({ hasKey, prompted })) return;
+      localStorage.setItem(AGENT_KEY_PROMPT_KEY, '1');
+      showAgentKeyMissingToast();
+    } catch (err) {
+      console.warn('[AgentStatus] key prompt check failed:', err);
+    }
+  }
+
+  function showAgentKeyMissingToast() {
+    if (document.getElementById('agent-key-toast')) return;
+    const toast = document.createElement('div');
+    toast.id = 'agent-key-toast';
+    toast.className = 'agent-missing-toast';
+    toast.innerHTML = `
+      <div class="agent-missing-toast-icon">!</div>
+      <div class="agent-missing-toast-body">
+        <div class="agent-missing-toast-title">API Key 未配置</div>
+        <div class="agent-missing-toast-hint">Pi coding agent 已就绪。请到「设置」里配置 API Key（与翻译共用同一套），AI 学习功能才能使用。</div>
+        <div class="agent-missing-toast-actions">
+          <button class="agent-missing-toast-btn primary" id="agentKeySettingsBtn">去设置</button>
+          <button class="agent-missing-toast-btn" id="agentKeyCloseBtn">知道了</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(toast);
+    const close = () => toast.remove();
+    toast.querySelector('#agentKeySettingsBtn').addEventListener('click', () => { close(); openSettings(); });
+    toast.querySelector('#agentKeyCloseBtn').addEventListener('click', close);
+    void toast.offsetWidth;
+    toast.classList.add('visible');
   }
 
   function initAgentStatusIndicator() {
