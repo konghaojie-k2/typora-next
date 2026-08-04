@@ -6581,7 +6581,7 @@ body.learning-mode .toolbar {
 
 .cornell-cue-input-bar button {
   padding: 4px 6px;
-
+  background: var(--color-accent);
   color: var(--color-bg-primary);
   border: none;
   border-radius: 3px;
@@ -6592,7 +6592,7 @@ body.learning-mode .toolbar {
 }
 
 .cornell-cue-input-bar button:hover {
-
+  background: var(--color-accent-hover, #2563eb);
 }
 
 /* Hint Cue (继续选词提示) */
