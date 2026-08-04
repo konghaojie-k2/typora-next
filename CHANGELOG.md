@@ -1,5 +1,51 @@
 # Changelog
 
+## [0.4.0] - 2026-08-04
+
+### Breaking — Agent 内核替换：Claude Agent SDK → Pi coding agent SDK
+
+- **AI 学习功能的 agent 内核整体替换**为 [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
+  - **存量用户需要改装 SDK**：`npm install -g @earendil-works/pi-coding-agent`（应用内引导提供自动安装；不再需要 `@anthropic-ai/claude-agent-sdk`）
+  - 模型自由：内核模型无关，应用内设置支持 Anthropic / OpenAI / 任意 OpenAI 兼容端点（如 DeepSeek），与翻译共用同一套配置
+  - 流式升级为逐 token（此前第三方模型整段返回）；skills 目录 `.claude/skills/` → `.pi/skills/`
+  - agent session 改为文件持久化（旧 session 不可续用，首次自动新建，无感迁移）
+  - bridge 的 12 个 stage、stdout 事件协议、Tauri 命令契约全部保持不变
+
+### Features
+
+- **SDK 初始化状态机**：安装（初始化）与使用检测分离——首启给一次性"首次初始化"引导（自动安装 / 手动命令 / 填 Key 提示），之后缺失只在状态芯片和用时错误中体现，不再反复打扰
+- **API Key 未配置提示**：SDK 就绪但 Key 未填时弹一次性引导，「去设置」按钮直达设置面板
+- 译文回显的"段落 N:"前缀清除（prompt 禁回显 + 兜底清洗 + 旧缓存加载即修复）
+
+### Fixes
+
+- 课程章节生成后点击报 "File not found" 的痼疾根因：`ChapterStatusManager` 从未拿到 `ui` 绑定，裸文件名未归一化（此前靠重新进入时的路径猜测掩盖）
+- 大纲生成 `max_tokens` 2048 → 8192：修复长时长大纲（如 5h 小白级 10+ 章）JSON 中途截断报 EOF
+- openai base_url 归一化 `/v1`：消除 ureq 直调与 pi SDK 的拼接语义错位（deepseek 碰巧兼容，OpenAI 官方端点会 404）
+- 康奈尔追问「发送」按钮补背景色：修复白字落在默认灰底上看似禁用的视觉失效
+- `stdout-dump.txt` 补 `.gitignore` 规则（注释提过但规则漏写，三次复发根治）
+- e2e 测试既有损坏修复（`tests/unit` 早已不存在）；`session_refresh` 事件提升到统一包装层（真实/模拟路径契约一致）
+
+### Refactor / Infrastructure
+
+- agent-bridge 转 ESM（`.mjs`），pi SDK 经 `TYPORA_PI_SDK_ENTRY` 绝对路径加载（ESM 不吃 NODE_PATH）；SDK 可用性检测从 spawn `node require` 改纯文件系统探测
+- 测试层收敛：3316 行 claude 形状测试 → 契约套件（22 断言）+ `mock-pi-sdk`（经 `TYPORA_PI_SDK_ENTRY` 注入，e2e 同源复用）
+- 门禁：run-all 640+ 全绿、bdd-acceptance 全绿、e2e 3/3、`cargo check` 无错误
+
+## [0.3.1] - 2026-08-03
+
+### Features — 工具栏菜单合并 + 康奈尔划词痕迹
+
+- 工具栏导出 Word/PDF/分享合并为下拉菜单，引导自动展开
+- 康奈尔划词痕迹：正文波浪线标记 + hover 摘要气泡 + 点击跳转侧栏
+- Mermaid AI 修复增强：显示具体解析错误、120s 超时、调用日志
+
+### Fixes
+
+- 分享打包图片三连修：解析覆盖（title/`<img>`/%20/wiki|300）、中文正文 panic（str 字节索引切片遇多字节 UTF-8）、路径逃逸（`../assets` 未归一化）
+- macOS PDF 导出：headless_chrome（主）+ WKWebView createPDF（回退）双路径实测通过
+- 文件夹弹窗取消不再丢失已生成大纲；MSI 下 SDK 检测恒失败修复（NODE_PATH 统一）
+
 ## [0.3.0] - 2026-07-18
 
 ### Features — 论文导读 + DOCX 导出重做 + 引导模式

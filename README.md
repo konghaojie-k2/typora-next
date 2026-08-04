@@ -200,6 +200,14 @@ graph TD
 
 配置方式：设置面板 → 输入 API Key → 选择提供商和模型（支持 Anthropic / OpenAI 兼容 API）。
 
+### AI 学习功能依赖（Pi coding agent）
+
+AI 学习功能（大纲生成、章节生成、苏格拉底复习等）由 **Pi coding agent** 驱动：
+
+- **安装 SDK**：`npm install -g @earendil-works/pi-coding-agent`（需要 Node.js；首次启动应用会给一次性初始化引导，支持自动安装）
+- **模型配置**：设置面板 → API Key / 提供商 / 模型，与翻译共用同一套配置（支持 Anthropic / OpenAI / 任意 OpenAI 兼容端点，如 DeepSeek），不需要单独配置 pi
+- **版本注意**：v0.4.0 起 agent 内核从 Claude Agent SDK 切换为 Pi coding agent，老用户需改装上述 SDK
+
 ### AI 修复 Mermaid
 
 当 Mermaid 语法错误时，点击 "AI 修复" 按钮，调用配置的 AI 模型（支持 Anthropic / OpenAI 兼容 API）自动修正语法。
