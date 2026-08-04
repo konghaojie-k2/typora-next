@@ -2,7 +2,7 @@
   "name": "ai-learning-sprint2",
   "version": "1.0.0",
   "description": "<h1 align=\"center\">Typora Next</h1>",
-  "main": "agent-bridge.js",
+  "main": "agent-bridge.mjs",
   "directories": {
     "doc": "docs",
     "test": "tests"
@@ -14,7 +14,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.160",
+    "@earendil-works/pi-coding-agent": "^0.74.2",
     "@tauri-apps/plugin-process": "^2.3.1",
     "@tauri-apps/plugin-updater": "^2.10.1"
   }
