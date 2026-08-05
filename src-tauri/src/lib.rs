@@ -11,13 +11,15 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod agent_sdk_probe;
 pub mod ai_agent;
+mod docx_template;
 pub mod learning_paths;
 pub mod mac_pdf;
 pub mod mermaid_fix_log;
 pub mod paper_import;
+pub mod quiz_quality;
+pub mod sdk_install;
 pub mod share_images;
 pub mod translation_clean;
-mod docx_template;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
 
@@ -229,10 +231,7 @@ async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String
 /// event listener was registered. Called once by the frontend at init.
 #[tauri::command]
 async fn take_pending_open_files(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
-    let mut pending = state
-        .pending_open_paths
-        .lock()
-        .map_err(|e| e.to_string())?;
+    let mut pending = state.pending_open_paths.lock().map_err(|e| e.to_string())?;
     Ok(std::mem::take(&mut *pending))
 }
 
@@ -921,8 +920,7 @@ fn render_svg_to_png(svg: &str, logical_width: u32) -> Result<Vec<u8>, String> {
     // Fallback font family when the SVG references an unavailable font.
     opts.font_family = "Arial".to_string();
 
-    let tree = usvg::Tree::from_str(svg, &opts)
-        .map_err(|e| format!("SVG parse failed: {}", e))?;
+    let tree = usvg::Tree::from_str(svg, &opts).map_err(|e| format!("SVG parse failed: {}", e))?;
 
     let original_width = tree.size().width();
     let original_height = tree.size().height();
@@ -931,11 +929,10 @@ fn render_svg_to_png(svg: &str, logical_width: u32) -> Result<Vec<u8>, String> {
     }
 
     let target_width = ((logical_width.max(1) as f32) * RENDER_SCALE).round() as u32;
-    let target_height =
-        ((target_width as f32) * original_height / original_width).round() as u32;
+    let target_height = ((target_width as f32) * original_height / original_width).round() as u32;
 
-    let mut pixmap = tiny_skia::Pixmap::new(target_width, target_height.max(1))
-        .ok_or("Cannot create pixmap")?;
+    let mut pixmap =
+        tiny_skia::Pixmap::new(target_width, target_height.max(1)).ok_or("Cannot create pixmap")?;
     // Render onto a transparent background so the image blends with the Word page
     // instead of carrying a white rectangle around the diagram.
     pixmap.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 0));
@@ -4502,6 +4499,7 @@ pub fn run() {
             ai_agent::explain_selection,
             ai_agent::check_agent_sdk,
             ai_agent::probe_agent_sdk,
+            ai_agent::install_pi_sdk,
             ai_agent::ensure_extra_questions,
             ai_agent::load_extra_questions,
             create_learning_project,

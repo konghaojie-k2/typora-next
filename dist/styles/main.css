@@ -1158,6 +1158,57 @@ main {
   color: var(--color-text-primary);
 }
 
+/* 安装进度区（pi-install-progress：spinner + 阶段文案 + npm 输出行 + 错误） */
+.agent-missing-toast-progress {
+  margin: 8px 0;
+  padding: 8px 10px;
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-md);
+  font-size: var(--font-size-xs);
+}
+
+.agent-missing-toast-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-primary);
+}
+
+.agent-missing-toast-spinner {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-error);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.agent-missing-toast-npmline {
+  margin-top: 6px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  word-break: break-all;
+  max-height: 30px;
+  overflow: hidden;
+}
+
+.agent-missing-toast-npmline:empty {
+  display: none;
+}
+
+.agent-missing-toast-error {
+  margin-top: 6px;
+  color: var(--color-error);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.agent-missing-toast-error:empty {
+  display: none;
+}
+
 .btn-toggle {
   padding: var(--spacing-sm) var(--spacing-md);
   background: var(--color-bg-tertiary);

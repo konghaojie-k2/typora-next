@@ -898,8 +898,50 @@ pub async fn generate_chapters(
 
     let process: AgentProcess = (*agent_process).clone();
     tauri::async_runtime::spawn(async move {
+        let repair_process = process.clone();
         match run_agent_bridge("generate", &config, args, app_handle.clone(), process).await {
             Ok(()) => {
+                // C 层（quiz-distractor-quality）：校验 quiz 质量，违规一轮重写。
+                // best-effort——重写失败不影响生成主流程。
+                let repairs = collect_quiz_repairs(&project_path);
+                if !repairs.is_empty() {
+                    let n: usize = repairs
+                        .iter()
+                        .filter_map(|r| r.get("violations").and_then(|v| v.as_array()))
+                        .map(|a| a.len())
+                        .sum();
+                    let _ = app_handle.emit(
+                        "agent-event",
+                        serde_json::json!({
+                            "type": "status",
+                            "data": { "message": format!("检测到 {} 道低质量题目，自动重写中…", n) }
+                        }),
+                    );
+                    let repair_args = serde_json::json!({
+                        "project_path": project_path,
+                        "repairs": repairs
+                    });
+                    match run_agent_bridge(
+                        "quiz-repair",
+                        &config,
+                        repair_args,
+                        app_handle.clone(),
+                        repair_process,
+                    )
+                    .await
+                    {
+                        Ok(()) => {
+                            let _ = app_handle.emit(
+                                "agent-event",
+                                serde_json::json!({
+                                    "type": "status",
+                                    "data": { "message": "低质量题目重写完成" }
+                                }),
+                            );
+                        }
+                        Err(e) => log::warn!("[ai_agent] quiz-repair best-effort failed: {}", e),
+                    }
+                }
                 let _ = app_handle.emit(
                     "agent-event",
                     serde_json::json!({
@@ -927,6 +969,54 @@ pub async fn generate_chapters(
     });
 
     Ok(())
+}
+
+/// Scan the project's `*.quiz.json` files and build a repair list for the
+/// quiz-repair stage (empty = all questions pass quality checks).
+/// Corrupted JSON files are skipped (the skill checklist now requires valid
+/// JSON; a broken file cannot be rewritten blindly).
+fn collect_quiz_repairs(project_path: &str) -> Vec<serde_json::Value> {
+    let dir = std::path::Path::new(project_path);
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut repairs = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".quiz.json") {
+            continue;
+        }
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let json = match serde_json::from_str::<serde_json::Value>(&content) {
+            Ok(j) => j,
+            Err(_) => continue,
+        };
+        // Adjacent chapter body (same stem) powers the verbatim check
+        let stem = name.trim_end_matches(".quiz.json");
+        let chapter_text = std::fs::read_to_string(dir.join(format!("{}.md", stem))).ok();
+        let violations = crate::quiz_quality::check_quiz_json(&json, chapter_text.as_deref());
+        if violations.is_empty() {
+            continue;
+        }
+        repairs.push(serde_json::json!({
+            "quiz_file": name,
+            "violations": violations
+                .iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "question_id": v.question_id,
+                        "kind": v.kind,
+                        "detail": v.detail
+                    })
+                })
+                .collect::<Vec<_>>()
+        }));
+    }
+    repairs
 }
 
 // ============================================
@@ -1140,7 +1230,12 @@ pub async fn is_agent_running(agent_process: State<'_, AgentProcess>) -> Result<
     Ok(agent_process.is_running())
 }
 
-/// Check whether the Claude Agent SDK is available
+/// Check whether the Claude Agent SDK is available.
+///
+/// Check-only: never auto-installs. A missing SDK surfaces as an
+/// unavailable result so the frontend toast can route the user to the
+/// progress-visible install (`install_pi_sdk`) instead of waiting on a
+/// silent multi-minute black box.
 #[tauri::command]
 pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
     log::info!("[ai_agent] check_agent_sdk called");
@@ -1158,8 +1253,6 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         }
     };
 
-    // Auto-setup node_modules if missing (MSI install / global SDK scenario)
-    let _node_path = resolve_agent_sdk_entry(&bridge_path);
     let payload = serde_json::json!({
         "config": {},
         "args": {}
@@ -1180,8 +1273,12 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
             _agent_log_dir(&app_handle).to_string_lossy().to_string(),
         );
 
-    // MSI install / global SDK: set NODE_PATH so node_modules resolves
-    apply_agent_sdk_entry(&mut cmd, &bridge_path);
+    // Pass the SDK entry if an existing install is found; never install
+    // here — the bridge exits non-zero when the entry is missing, which
+    // the toast turns into the guided (progress-visible) install.
+    if let Some(entry) = find_agent_sdk_entry(&bridge_path) {
+        cmd.env("TYPORA_PI_SDK_ENTRY", entry.to_string_lossy().to_string());
+    }
 
     #[cfg(windows)]
     {
@@ -1245,7 +1342,6 @@ pub async fn probe_agent_sdk() -> Result<serde_json::Value, String> {
     }))
 }
 
-
 /// Apply the resolved Pi SDK entry path to a bridge command.
 /// Every agent-bridge spawn site must call this: the pi SDK is ESM-only and
 /// ESM resolution ignores NODE_PATH, so on MSI installs (no node_modules next
@@ -1264,19 +1360,38 @@ fn apply_agent_sdk_entry(cmd: &mut std::process::Command, bridge_path: &std::pat
 /// 2. Global: `npm root -g` (npm 5+ prefix)
 /// 3. Auto-install: `npm install` to platform app data directory
 ///
-/// Returns the entry file path, or None.
+/// Returns the entry file path, or None. Silent variant used at every
+/// bridge spawn site; the interactive install with progress events goes
+/// through `install_pi_sdk` → `resolve_agent_sdk_entry_with_progress`.
 fn resolve_agent_sdk_entry(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
-    // Helper: the SDK entry file inside a node_modules directory
-    let entry_in = |nm: &std::path::Path| {
-        nm.join("@earendil-works")
-            .join("pi-coding-agent")
-            .join("dist")
-            .join("index.js")
-    };
+    match resolve_agent_sdk_entry_with_progress(bridge_path, None) {
+        Ok(entry) => entry,
+        Err(e) => {
+            log::warn!("[agent_path] Pi SDK setup failed: {}", e);
+            None
+        }
+    }
+}
 
-    // 1. Check next to bridge (dev / auto-install scenario)
+/// The Pi SDK entry file (dist/index.js) inside a node_modules directory
+fn sdk_entry_in(nm: &std::path::Path) -> std::path::PathBuf {
+    nm.join("@earendil-works")
+        .join("pi-coding-agent")
+        .join("dist")
+        .join("index.js")
+}
+
+/// Find an existing Pi SDK entry without installing anything.
+/// Priority matches the historical resolve order: the global install the
+/// user actively maintains wins; the AppData auto-install dir is a fallback
+/// (MSI / fresh-machine scenario).
+/// 1. node_modules next to agent-bridge.mjs (dev / bundled)
+/// 2. `npm root -g` (covers custom npm prefixes)
+/// 3. Other fs candidates (AppData auto-install dir / common global prefixes)
+fn find_agent_sdk_entry(bridge_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    // 1. Next to bridge (dev / bundled)
     if let Some(parent) = bridge_path.parent() {
-        let entry = entry_in(&parent.join("node_modules"));
+        let entry = sdk_entry_in(&parent.join("node_modules"));
         if entry.exists() {
             log::info!("[agent_path] found local Pi SDK at {:?}", entry);
             return Some(entry);
@@ -1304,19 +1419,53 @@ fn resolve_agent_sdk_entry(bridge_path: &std::path::Path) -> Option<std::path::P
         npm_cmd.creation_flags(CREATE_NO_WINDOW);
     }
     if let Ok(output) = npm_cmd.output() {
-        let entry = entry_in(
-            &std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim()),
-        );
+        let entry = sdk_entry_in(&std::path::PathBuf::from(
+            String::from_utf8_lossy(&output.stdout).trim(),
+        ));
         if entry.exists() {
-            log::info!("[agent_path] found global Pi SDK via npm root -g at {:?}", entry);
+            log::info!(
+                "[agent_path] found global Pi SDK via npm root -g at {:?}",
+                entry
+            );
             return Some(entry);
         }
     }
 
+    // 3. Fallback fs candidates (AppData auto-install dir / common prefixes)
+    if let Some(nm) = crate::agent_sdk_probe::probe_agent_sdk_fs(Some(bridge_path)).location {
+        let entry = sdk_entry_in(&nm);
+        if entry.exists() {
+            log::info!("[agent_path] found Pi SDK fallback at {:?}", entry);
+            return Some(entry);
+        }
+    }
+    None
+}
+
+/// Progress-reporting variant of `resolve_agent_sdk_entry`.
+///
+/// When `on_progress` is given it receives `(stage, message)` callbacks:
+/// stages are `prepare` / `download` / `verify`, and `download` messages
+/// are npm stdout lines. Returns `Err` with a user-readable reason on
+/// failure (see `sdk_install::extract_install_error`).
+fn resolve_agent_sdk_entry_with_progress(
+    bridge_path: &std::path::Path,
+    mut on_progress: Option<&mut dyn FnMut(&str, &str)>,
+) -> Result<Option<std::path::PathBuf>, String> {
+    // 1+2. Existing install (fs candidates + npm root -g), never installs
+    if let Some(entry) = find_agent_sdk_entry(bridge_path) {
+        return Ok(Some(entry));
+    }
+
     // 3. Auto-install to platform-appropriate app data directory
     log::info!("[agent_path] Pi SDK not found, installing...");
-    let target_dir = crate::agent_sdk_probe::agent_app_data_dir()?;
-    std::fs::create_dir_all(&target_dir).ok()?;
+    if let Some(cb) = on_progress.as_mut() {
+        cb("prepare", "准备安装目录…");
+    }
+    let target_dir = crate::agent_sdk_probe::agent_app_data_dir()
+        .ok_or_else(|| "无法获取安装目录（APPDATA/HOME 环境变量未设置）".to_string())?;
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("创建安装目录失败（{}）：{}", target_dir.display(), e))?;
 
     // Copy agent-bridge.mjs
     let bridge_name = bridge_path
@@ -1341,45 +1490,241 @@ fn resolve_agent_sdk_entry(bridge_path: &std::path::Path) -> Option<std::path::P
     }
 
     // Run npm install if SDK still missing
-    let target_entry = entry_in(&target_dir.join("node_modules"));
+    let target_entry = sdk_entry_in(&target_dir.join("node_modules"));
     if !target_entry.exists() {
         log::info!("[agent_path] running npm install in {:?}", target_dir);
-        let install = || -> Option<()> {
-            let mut install_cmd = if cfg!(windows) {
-                let mut c = std::process::Command::new("cmd");
-                c.args(["/C", "npm install --only=production --no-audit --no-fund"]);
-                c
-            } else {
-                let mut c = std::process::Command::new("npm");
-                c.args(["install", "--only=production", "--no-audit", "--no-fund"]);
-                c
-            };
-            install_cmd
-                .current_dir(&target_dir)
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null());
-            #[cfg(windows)]
-            {
-                use std::os::windows::process::CommandExt;
-                const CREATE_NO_WINDOW: u32 = 0x08000000;
-                install_cmd.creation_flags(CREATE_NO_WINDOW);
+        if let Some(cb) = on_progress.as_mut() {
+            cb("download", "下载依赖中…");
+        }
+        // Verbose npm output only when someone is watching (interactive install)
+        let verbose = on_progress.is_some();
+        let mut line_cb = |line: &str| {
+            if let Some(cb) = on_progress.as_mut() {
+                cb("download", line);
             }
-            let status = install_cmd.status().ok()?;
-            if !status.success() {
-                log::warn!("[agent_path] npm install exit {:?}", status.code());
-                return None;
-            }
-            Some(())
         };
-        install();
+        run_npm_install(&target_dir, verbose, Some(&mut line_cb))?;
     }
 
+    if let Some(cb) = on_progress.as_mut() {
+        cb("verify", "校验安装结果…");
+    }
     if target_entry.exists() {
         log::info!("[agent_path] installed Pi SDK to {:?}", target_entry);
-        Some(target_entry)
+        Ok(Some(target_entry))
     } else {
         log::warn!("[agent_path] Pi SDK setup failed after all attempts");
-        None
+        Err("安装完成但未检测到 Pi SDK 文件，请重试或手动安装".to_string())
+    }
+}
+
+/// Run `npm install` in `target_dir`, feeding each trimmed output line
+/// (stdout+stderr merged) to `on_line`. `verbose` bumps npm loglevel so
+/// download activity is visible. Returns a user-readable error on failure.
+///
+/// Mirror fallback (sdk-install-mirror-fallback): if the first attempt fails
+/// with a *network-class* error (default registry.npmjs.org is unreachable
+/// from CN networks), retry once with `--registry=npmmirror`. Permission /
+/// npm-missing failures are not retried — a mirror won't fix them.
+fn run_npm_install(
+    target_dir: &std::path::Path,
+    verbose: bool,
+    mut on_line: Option<&mut dyn FnMut(&str)>,
+) -> Result<(), String> {
+    // Preflight: npm present? Gives a clean, encoding-independent answer —
+    // cmd's own error text is GBK on Chinese Windows and cannot be matched
+    // after UTF-8 conversion.
+    let preflight_script = "(npm --version) 2>&1";
+    let mut preflight = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", preflight_script]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", preflight_script]);
+        c
+    };
+    preflight
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        preflight.creation_flags(CREATE_NO_WINDOW);
+    }
+    match preflight.output() {
+        Ok(o) if o.status.success() => {}
+        _ => {
+            return Err(crate::sdk_install::extract_install_error(
+                "npm: command not found",
+                None,
+            ))
+        }
+    }
+
+    // Wrap in fresh closures so each call's borrow ends when the call
+    // returns (a direct reborrow unifies with the source lifetime and
+    // blocks the mirror-retry call below).
+    let mut first_cb = |l: &str| {
+        if let Some(cb) = on_line.as_mut() {
+            cb(l);
+        }
+    };
+    let first = run_npm_install_once(target_dir, verbose, None, Some(&mut first_cb));
+    match first {
+        Ok(()) => Ok(()),
+        Err((tail, code)) => {
+            if crate::sdk_install::is_network_failure(&tail) {
+                log::warn!("[agent_path] npm install network failure, retrying with mirror");
+                if let Some(cb) = on_line.as_mut() {
+                    cb("官方源下载失败，切换国内镜像源重试…");
+                }
+                let mut retry_cb = |l: &str| {
+                    if let Some(cb) = on_line.as_mut() {
+                        cb(l);
+                    }
+                };
+                let second = run_npm_install_once(
+                    target_dir,
+                    verbose,
+                    Some(crate::sdk_install::NPM_MIRROR_REGISTRY),
+                    Some(&mut retry_cb),
+                );
+                match second {
+                    Ok(()) => Ok(()),
+                    Err((tail2, code2)) => {
+                        Err(crate::sdk_install::extract_install_error(&tail2, code2))
+                    }
+                }
+            } else {
+                Err(crate::sdk_install::extract_install_error(&tail, code))
+            }
+        }
+    }
+}
+
+/// One `npm install` attempt. On failure returns the raw output tail and
+/// exit code so the caller can classify (e.g. decide on a mirror retry).
+fn run_npm_install_once(
+    target_dir: &std::path::Path,
+    verbose: bool,
+    registry: Option<&str>,
+    mut on_line: Option<&mut dyn FnMut(&str)>,
+) -> Result<(), (String, Option<i32>)> {
+    // Parenthesized block + 2>&1 merges stdout/stderr — including the
+    // shell's own errors — into one pipe we can stream.
+    let level = if verbose { " --loglevel=info" } else { "" };
+    let registry_flag = registry
+        .map(|r| format!(" --registry={}", r))
+        .unwrap_or_default();
+    let script = format!(
+        "(npm install --only=production --no-audit --no-fund{}{}) 2>&1",
+        level, registry_flag
+    );
+    let mut install_cmd = if cfg!(windows) {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", &script]);
+        c
+    } else {
+        let mut c = std::process::Command::new("sh");
+        c.args(["-c", &script]);
+        c
+    };
+    install_cmd
+        .current_dir(target_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        install_cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let mut child = install_cmd
+        .spawn()
+        .map_err(|e| (format!("无法启动 npm 进程：{}", e), None))?;
+
+    use std::io::BufRead;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| ("无法捕获 npm 输出".to_string(), None))?;
+    let reader = std::io::BufReader::new(stdout);
+    // Ring buffer of recent lines as failure context
+    let mut tail: Vec<String> = Vec::new();
+    for line in reader.lines() {
+        let line = match line {
+            Ok(l) => l,
+            Err(_) => break,
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        log::info!("[agent_path] npm: {}", trimmed);
+        tail.push(trimmed.to_string());
+        if tail.len() > 40 {
+            tail.remove(0);
+        }
+        if let Some(cb) = on_line.as_mut() {
+            cb(trimmed);
+        }
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| (format!("等待 npm 进程结束失败：{}", e), None))?;
+    if !status.success() {
+        log::warn!("[agent_path] npm install exit {:?}", status.code());
+        return Err((tail.join("\n"), status.code()));
+    }
+    Ok(())
+}
+
+/// Explicit Pi SDK install with progress events (pi-install-progress).
+///
+/// Emits `sdk-install-progress` events `{stage, message}` while installing
+/// (stages: prepare / download / verify; download messages are npm output
+/// lines), then returns the final status for the frontend to act on.
+#[tauri::command]
+pub async fn install_pi_sdk(app_handle: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    log::info!("[ai_agent] install_pi_sdk called");
+
+    let bridge_path = match get_agent_bridge_path() {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(serde_json::json!({
+                "status": "failed",
+                "error": format!("agent-bridge.mjs 未找到: {}. 请确保应用文件完整（重新安装）", e)
+            }));
+        }
+    };
+
+    let mut emitter = |stage: &str, message: &str| {
+        let _ = app_handle.emit(
+            "sdk-install-progress",
+            serde_json::json!({ "stage": stage, "message": message }),
+        );
+    };
+
+    match resolve_agent_sdk_entry_with_progress(&bridge_path, Some(&mut emitter)) {
+        Ok(Some(entry)) => {
+            log::info!("[ai_agent] install_pi_sdk success: {:?}", entry);
+            Ok(serde_json::json!({
+                "status": "installed",
+                "location": entry.to_string_lossy()
+            }))
+        }
+        Ok(None) => Ok(serde_json::json!({
+            "status": "failed",
+            "error": "未知错误：安装后未找到 SDK 入口文件"
+        })),
+        Err(e) => {
+            log::warn!("[ai_agent] install_pi_sdk failed: {}", e);
+            Ok(serde_json::json!({ "status": "failed", "error": e }))
+        }
     }
 }
 

@@ -3174,6 +3174,28 @@ window.agentBridge = {
         bq.classList.add('obsidian-callout-collapsed');
       }
 
+      // quiz-distractor-quality: legacy chapters were generated from an old
+      // skill template that baked a "✓" into the correct option line — the
+      // answer leaked in the reading view. CommonMark merges consecutive
+      // option lines into one paragraph, so the mark lands mid-text, right
+      // before the next option's <strong>; strip it from every text node in
+      // the block (a bare checkmark has no other legitimate use in a quiz).
+      if (calloutType === 'QUIZ') {
+        const stripMarks = (node) => {
+          for (let i = 0; i < node.childNodes.length; i++) {
+            const n = node.childNodes[i];
+            if (n.nodeType === 3) {
+              if (/[✓✅]/.test(n.textContent)) {
+                n.textContent = n.textContent.replace(/[✓✅]+/g, '');
+              }
+            } else if (n.childNodes && n.childNodes.length) {
+              stripMarks(n);
+            }
+          }
+        };
+        stripMarks(bq);
+      }
+
       // Remove the [!TYPE] marker
       firstP.textContent = firstP.textContent.replace(calloutMatch[0], '').trim();
 
@@ -3745,6 +3767,14 @@ window.agentBridge = {
         <div class="agent-missing-toast-body">
           <div class="agent-missing-toast-title"></div>
           <div class="agent-missing-toast-hint"></div>
+          <div class="agent-missing-toast-progress" style="display: none;">
+            <div class="agent-missing-toast-progress-head">
+              <span class="agent-missing-toast-spinner"></span>
+              <span class="agent-missing-toast-stage"></span>
+            </div>
+            <div class="agent-missing-toast-npmline"></div>
+            <div class="agent-missing-toast-error"></div>
+          </div>
           <div class="agent-missing-toast-install">
             <p>或打开终端手动执行：</p>
             <code>npm install -g @earendil-works/pi-coding-agent</code>
@@ -3760,14 +3790,72 @@ window.agentBridge = {
       `;
       document.body.appendChild(toast);
 
-      // 自动安装：完整检测会尝试 npm 自动安装（可能耗时几分钟）
+      // 自动安装：调用 install_pi_sdk 并订阅进度事件，实时显示阶段与 npm
+      // 输出（pi-install-progress）。失败展示可读原因并允许重试。
       toast.querySelector('#agentMissingRetryBtn').addEventListener('click', async () => {
         const btn = toast.querySelector('#agentMissingRetryBtn');
+        const progressArea = toast.querySelector('.agent-missing-toast-progress');
+        const stageEl = toast.querySelector('.agent-missing-toast-stage');
+        const lineEl = toast.querySelector('.agent-missing-toast-npmline');
+        const errEl = toast.querySelector('.agent-missing-toast-error');
+        const spinnerEl = toast.querySelector('.agent-missing-toast-spinner');
+
         btn.disabled = true;
-        btn.textContent = '安装中，可能需要几分钟…';
-        await checkAgentSdk();
-        btn.disabled = false;
-        btn.textContent = '自动安装';
+        btn.textContent = '安装中…';
+        if (progressArea) progressArea.style.display = '';
+        if (lineEl) lineEl.textContent = '';
+        if (errEl) errEl.textContent = '';
+
+        let state = window.SdkInstallProgress.createInstallState();
+        const render = () => {
+          if (stageEl) stageEl.textContent = state.stage;
+          if (lineEl) lineEl.textContent = state.lastLine;
+          if (errEl) errEl.textContent = state.error;
+          if (spinnerEl) spinnerEl.style.display = state.phase === 'installing' ? '' : 'none';
+        };
+        render();
+
+        // 已用秒数：npm install 可能安静数十秒，计时避免"卡死"观感
+        const startedAt = Date.now();
+        const timer = setInterval(() => {
+          if (state.phase !== 'installing' || !stageEl) return;
+          const secs = Math.floor((Date.now() - startedAt) / 1000);
+          stageEl.textContent = `${state.stage}（已 ${secs}s）`;
+        }, 1000);
+
+        let unlisten = null;
+        if (window.__TAURI__ && window.__TAURI__.event) {
+          unlisten = await window.__TAURI__.event
+            .listen('sdk-install-progress', (event) => {
+              state = window.SdkInstallProgress.applyProgress(state, event.payload);
+              render();
+            })
+            .catch(() => null);
+        }
+
+        let result;
+        try {
+          result = await invoke('install_pi_sdk');
+        } catch (err) {
+          result = {
+            status: 'failed',
+            error: err && err.message ? String(err.message) : String(err)
+          };
+        }
+        state = window.SdkInstallProgress.applyResult(state, result);
+        clearInterval(timer);
+        if (unlisten) unlisten();
+        render();
+
+        if (state.phase === 'success') {
+          btn.textContent = '安装完成';
+          if (stageEl) stageEl.textContent = '✅ Pi coding agent 安装完成';
+          // 稍作停留让用户看到成功状态，然后完整检测更新芯片并隐藏 toast
+          setTimeout(() => { checkAgentSdk(); }, 1200);
+        } else {
+          btn.disabled = false;
+          btn.textContent = '重试';
+        }
       });
       // 不再提示：持久化忽略标记，之后可通过工具栏 Agent 芯片随时重新检测
       toast.querySelector('#agentMissingDismissBtn').addEventListener('click', () => {
@@ -3791,6 +3879,14 @@ window.agentBridge = {
         : (isInit
           ? 'AI 学习功能（大纲生成、章节生成、Socratic 复习）需要 Pi coding agent。这是一次性初始化引导，之后仅在用时检测。'
           : 'AI 学习功能（大纲生成、章节生成、Socratic 复习）需要安装 Pi coding agent 才能使用。');
+    }
+    // 每次显示重置进度区，避免上次安装的阶段/错误残留
+    const progressArea = toast.querySelector('.agent-missing-toast-progress');
+    if (progressArea) progressArea.style.display = 'none';
+    const retryBtn = toast.querySelector('#agentMissingRetryBtn');
+    if (retryBtn) {
+      retryBtn.disabled = false;
+      retryBtn.textContent = '自动安装';
     }
 
     // Force reflow to trigger transition

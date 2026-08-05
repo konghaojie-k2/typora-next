@@ -500,6 +500,44 @@ ${prevQaBlock ? `\n以下是之前的相关对话，请结合上下文回答：\
   log('info', 'explainText SUCCESS', { output_file });
 }
 
+/**
+ * quiz-repair stage（quiz-distractor-quality C 层）：对校验违规的题目做一轮
+ * 定向重写。只改被列出的题的选项文本（保持题意与正确性），不动其他题。
+ */
+export async function repairQuizQuality(queryFnUnused, config, args) {
+  const { project_path, repairs } = args;
+  if (!project_path || !Array.isArray(repairs) || !repairs.length) {
+    return;
+  }
+
+  const prompt = `刚生成的章节测验未通过质量校验，请定向修复以下文件中的违规题目。
+- project_path: ${JSON.stringify(project_path)}
+- repairs: ${JSON.stringify(repairs)}
+
+对每个 quiz_file：
+1. 用 Read 读取 {project_path}/{quiz_file}
+2. 仅重写被列出的 question_id 那道题的**选项文本**（题意不变、正确项的事实不变）：
+   - 最长选项与最短选项字数比 ≤ 1.8；正确项不得明显更长
+   - 正确项若被判"照抄正文"，必须用自己的话改写
+   - 干扰项必须是基于常见误解的合理陷阱，不得一眼荒谬或跨领域胡扯
+   - 选项位置保持原样即可（前端会自动 shuffle）
+3. 用 Write 写回整个文件：必须是合法 JSON（双引号转义！），顶层 questions 数组完整、其余题目原样保留。
+
+全部修复后回复一行总结。`;
+
+  const { output: raw } = await runPiTurn({
+    prompt,
+    config,
+    cwd: project_path,
+    tools: ['read', 'write'],
+    sessionId: args.session_id || null
+  });
+
+  if (!raw || raw.trim().length < 2) {
+    throw new Error('quiz-repair: agent response empty');
+  }
+}
+
 export async function generateExtraQuiz(queryFnUnused, config, args) {
   const { project_path, concepts, output_file } = args;
   if (!project_path || !concepts || !concepts.length) {
@@ -933,6 +971,12 @@ async function main() {
         log('info', 'Starting generate-extra-quiz stage', { project_path: taskArgs.project_path, conceptCount: taskArgs.concepts?.length, session_id: taskArgs.session_id || null });
         await generateExtraQuiz(null, config, taskArgs);
         log('info', 'Generate-extra-quiz stage completed');
+        process.exit(0);
+      }
+      case 'quiz-repair': {
+        log('info', 'Starting quiz-repair stage', { project_path: taskArgs.project_path, fileCount: taskArgs.repairs?.length });
+        await repairQuizQuality(null, config, taskArgs);
+        log('info', 'Quiz-repair stage completed');
         process.exit(0);
       }
       case 'paper-reader': {
