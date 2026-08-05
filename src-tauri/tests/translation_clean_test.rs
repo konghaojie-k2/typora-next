@@ -17,10 +17,7 @@ use translation_clean::strip_translation_label;
 
 #[test]
 fn strips_halfwidth_colon_label() {
-    assert_eq!(
-        strip_translation_label("段落 1: 1. 引言"),
-        "1. 引言"
-    );
+    assert_eq!(strip_translation_label("段落 1: 1. 引言"), "1. 引言");
 }
 
 #[test]

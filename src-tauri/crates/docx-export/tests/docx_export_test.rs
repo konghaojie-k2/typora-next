@@ -861,9 +861,15 @@ fn test_toc_placeholder() {
     let xml = extract_document_xml(&bytes);
 
     // Should NOT contain %%TOC%% as text
-    assert!(!xml.contains("%%TOC%%"), "%%TOC%% must not remain as plain text");
+    assert!(
+        !xml.contains("%%TOC%%"),
+        "%%TOC%% must not remain as plain text"
+    );
     // Should NOT contain literal [toc]
-    assert!(!xml.contains("[toc]"), "[toc] must not appear as plain text");
+    assert!(
+        !xml.contains("[toc]"),
+        "[toc] must not appear as plain text"
+    );
 
     // Must contain the TOC field instruction with proper structure
     assert!(
@@ -881,7 +887,10 @@ fn test_toc_placeholder() {
 fn test_toc_uppercase() {
     let md = "# Heading 1\n\n[TOC]\n\nSome text\n\nMore";
     let protected = docx_export::replace_toc_placeholder(md);
-    assert!(protected.contains("%%TOC%%"), "uppercase [TOC] should be replaced");
+    assert!(
+        protected.contains("%%TOC%%"),
+        "uppercase [TOC] should be replaced"
+    );
 }
 
 /// Test [toc] on a Windows CRLF file is detected (the `$` anchor must not be
@@ -1052,7 +1061,9 @@ fn test_toc_styles_injected() {
     // The TOC field paragraph must end with a page break (body starts on a new
     // page), and must NOT begin with one (TOC stays on the title's page).
     let doc_xml = extract_document_xml(&bytes);
-    let fld_begin = doc_xml.find("w:fldCharType=\"begin\"").expect("field begin");
+    let fld_begin = doc_xml
+        .find("w:fldCharType=\"begin\"")
+        .expect("field begin");
     let fld_end = doc_xml.find("w:fldCharType=\"end\"").expect("field end");
     let page_break = doc_xml.find("w:type=\"page\"").expect("page break");
     assert!(
@@ -1064,10 +1075,7 @@ fn test_toc_styles_injected() {
         "sanity: page break after field begin"
     );
     // "目录" caption text must be present before the field.
-    assert!(
-        doc_xml.contains("目"),
-        "TOC caption text should be present"
-    );
+    assert!(doc_xml.contains("目"), "TOC caption text should be present");
 }
 
 /// Create a test PNG image at the given dimensions.

@@ -58,8 +58,7 @@ fn build_template_docx() -> Vec<u8> {
 /// Create a small DOCX by feeding markdown to docx-export so we have a real
 /// document to feed through apply_template.
 fn make_test_docx(md: &str) -> Vec<u8> {
-    docx_export::markdown_to_docx(md, std::path::Path::new("."))
-        .expect("docx generation failed")
+    docx_export::markdown_to_docx(md, std::path::Path::new(".")).expect("docx generation failed")
 }
 
 /// Call into the binary crate's apply_template. The function is private, so

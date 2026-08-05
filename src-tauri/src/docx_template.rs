@@ -20,10 +20,9 @@ use zip::{ZipArchive, ZipWriter};
 pub fn apply_template(docx_bytes: &[u8], template_path: &Path) -> Result<Vec<u8>, String> {
     let mut src = ZipArchive::new(Cursor::new(docx_bytes))
         .map_err(|e| format!("无法读取生成的 DOCX: {}", e))?;
-    let tmpl_file = std::fs::File::open(template_path)
-        .map_err(|e| format!("无法打开模板文件: {}", e))?;
-    let mut tmpl = ZipArchive::new(tmpl_file)
-        .map_err(|e| format!("无法读取模板 DOCX: {}", e))?;
+    let tmpl_file =
+        std::fs::File::open(template_path).map_err(|e| format!("无法打开模板文件: {}", e))?;
+    let mut tmpl = ZipArchive::new(tmpl_file).map_err(|e| format!("无法读取模板 DOCX: {}", e))?;
 
     let tmpl_styles = read_zip_entry(&mut tmpl, "word/styles.xml")?;
     let tmpl_numbering = read_zip_entry(&mut tmpl, "word/numbering.xml").ok();
@@ -38,7 +37,9 @@ pub fn apply_template(docx_bytes: &[u8], template_path: &Path) -> Result<Vec<u8>
     let total = src.len();
     let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(total);
     for i in 0..total {
-        let entry = src.by_index(i).map_err(|e| format!("ZIP 读取错误: {}", e))?;
+        let entry = src
+            .by_index(i)
+            .map_err(|e| format!("ZIP 读取错误: {}", e))?;
         let name = entry.name().to_string();
         drop(entry); // release the borrow on src
 
@@ -68,8 +69,8 @@ pub fn apply_template(docx_bytes: &[u8], template_path: &Path) -> Result<Vec<u8>
     {
         let mut out = ZipWriter::new(&mut out_buf);
         for (name, data) in &entries {
-            let options = zip::write::SimpleFileOptions::default()
-                .compression_method(if data.len() > 0 {
+            let options =
+                zip::write::SimpleFileOptions::default().compression_method(if data.len() > 0 {
                     zip::CompressionMethod::Deflated
                 } else {
                     zip::CompressionMethod::Stored
@@ -93,10 +94,7 @@ fn parse_template_style_names(styles_xml: &[u8]) -> HashMap<String, String> {
         Ok(s) => s,
         Err(_) => return map,
     };
-    let re = Regex::new(
-        r#"(?s)<w:style\s[^>]*w:styleId="([^"]+)"[^>]*>(.*?)</w:style>"#,
-    )
-    .unwrap();
+    let re = Regex::new(r#"(?s)<w:style\s[^>]*w:styleId="([^"]+)"[^>]*>(.*?)</w:style>"#).unwrap();
     for cap in re.captures_iter(s) {
         let id = cap[1].to_string();
         let inner = &cap[2];
@@ -114,8 +112,20 @@ fn parse_template_style_names(styles_xml: &[u8]) -> HashMap<String, String> {
 /// Then strip direct run formatting from heading paragraphs.
 fn rewrite_style_references(xml: &mut String, name_to_id: &HashMap<String, String>) {
     const OUR_STYLES: &[&str] = &[
-        "Normal", "Heading1", "Heading2", "Heading3", "Heading4", "Heading5", "Heading6",
-        "Caption", "Hyperlink", "TOC1", "TOC2", "TOC3", "TOC4", "TOC5",
+        "Normal",
+        "Heading1",
+        "Heading2",
+        "Heading3",
+        "Heading4",
+        "Heading5",
+        "Heading6",
+        "Caption",
+        "Hyperlink",
+        "TOC1",
+        "TOC2",
+        "TOC3",
+        "TOC4",
+        "TOC5",
     ];
 
     for style_name in OUR_STYLES {
@@ -143,14 +153,11 @@ fn rewrite_style_references(xml: &mut String, name_to_id: &HashMap<String, Strin
 /// template's heading style determine the visual weight and size.
 fn strip_direct_formatting_from_headings(xml: &str) -> String {
     static P_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let p_re = P_RE.get_or_init(|| {
-        Regex::new(r#"(?s)(<w:p\b[^>]*>)(.*?)(</w:p>)"#).unwrap()
-    });
+    let p_re = P_RE.get_or_init(|| Regex::new(r#"(?s)(<w:p\b[^>]*>)(.*?)(</w:p>)"#).unwrap());
 
     static HEADING_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
-    let heading_re = HEADING_RE.get_or_init(|| {
-        Regex::new(r#"<w:pStyle\s+w:val="(?:Heading\d|[3-8])""#).unwrap()
-    });
+    let heading_re = HEADING_RE
+        .get_or_init(|| Regex::new(r#"<w:pStyle\s+w:val="(?:Heading\d|[3-8])""#).unwrap());
 
     let run_re = Regex::new(r#"<w:rPr>(.*?)</w:rPr>"#).unwrap();
     let b_self = Regex::new(r#"<w:b\s*/>"#).unwrap();
@@ -241,9 +248,7 @@ mod tests {
         zip.start_file("word/styles.xml", opts).unwrap();
         zip.write_all(styles.as_bytes()).unwrap();
         // finish() returns the inner writer (our Cursor<Vec<u8>>); .into_inner() extracts the Vec.
-        zip.finish()
-            .expect("zip finish")
-            .into_inner()
+        zip.finish().expect("zip finish").into_inner()
     }
 
     #[test]
@@ -310,8 +315,7 @@ mod tests {
         // Use docx-export to generate a real DOCX with Heading1 references,
         // then apply our (in-memory) template.
         let md = "# Title One\n\n## Title Two\n\nBody paragraph.\n";
-        let generated =
-            docx_export::markdown_to_docx(md, std::path::Path::new(".")).unwrap();
+        let generated = docx_export::markdown_to_docx(md, std::path::Path::new(".")).unwrap();
         let template_bytes = build_template_docx_bytes();
 
         // Save template to a temp file (apply_template takes a path).

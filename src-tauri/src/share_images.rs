@@ -82,7 +82,9 @@ pub fn share_relative_path(source: &std::path::Path, base_dir: &str, md_dir: &st
     let md_dir_str = md_dir_str.trim_end_matches('/');
 
     let rel = if !base_str.is_empty() && source_str.starts_with(base_str) {
-        source_str[base_str.len()..].trim_start_matches('/').to_string()
+        source_str[base_str.len()..]
+            .trim_start_matches('/')
+            .to_string()
     } else if !md_dir_str.is_empty() && source_str.starts_with(md_dir_str) {
         source_str[md_dir_str.len()..]
             .trim_start_matches('/')
@@ -235,7 +237,11 @@ fn split_destination(raw: &str) -> Option<String> {
     if let Some(rest) = trimmed.strip_prefix('<') {
         let end = rest.find('>')?;
         let path = rest[..end].trim();
-        return if path.is_empty() { None } else { Some(path.to_string()) };
+        return if path.is_empty() {
+            None
+        } else {
+            Some(path.to_string())
+        };
     }
     // Plain destination: path ends at the first whitespace (title follows).
     let path = trimmed.split_whitespace().next()?;

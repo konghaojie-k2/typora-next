@@ -6,12 +6,12 @@
 //! - latex2mathml + deckmint-math for LaTeX -> MathML -> OMML conversion
 
 use docx_rs::*;
+use image::GenericImageView;
 use pulldown_cmark::{Event, Parser, Tag, TagEnd};
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use image::GenericImageView;
 
 const MATH_NS: &str = "http://schemas.openxmlformats.org/officeDocument/2006/math";
 
@@ -721,9 +721,7 @@ fn collapse_handwritten_toc(blocks: Vec<BlockItem>) -> Vec<BlockItem> {
     let mut iter = blocks.into_iter().peekable();
     while let Some(block) = iter.next() {
         let is_toc_heading = match &block {
-            BlockItem::Heading(_, inlines) => {
-                is_toc_heading_text(&inlines_to_plain_text(inlines))
-            }
+            BlockItem::Heading(_, inlines) => is_toc_heading_text(&inlines_to_plain_text(inlines)),
             _ => false,
         };
         if is_toc_heading {
@@ -1471,9 +1469,9 @@ impl Converter {
     fn build_toc_paragraphs(&self) -> Vec<Paragraph> {
         // "目录" caption: direct formatting only, no heading style and no
         // outline level, so it never appears inside the TOC itself.
-        let title = Paragraph::new().align(AlignmentType::Center).add_run(
-            Run::new().bold().size(32).add_text("目  录"),
-        );
+        let title = Paragraph::new()
+            .align(AlignmentType::Center)
+            .add_run(Run::new().bold().size(32).add_text("目  录"));
 
         let field = Paragraph::new()
             .add_run(Run::new().add_field_char(FieldCharType::Begin, true))
@@ -2318,15 +2316,21 @@ fn read_image(path: &str) -> Result<Pic, String> {
     // Constrain width to MAX_IMAGE_WIDTH_PX, scale height proportionally
     let (out_w, out_h) = if w > MAX_IMAGE_WIDTH_PX {
         let ratio = h as f64 / w as f64;
-        (MAX_IMAGE_WIDTH_PX, (MAX_IMAGE_WIDTH_PX as f64 * ratio).round() as u32)
+        (
+            MAX_IMAGE_WIDTH_PX,
+            (MAX_IMAGE_WIDTH_PX as f64 * ratio).round() as u32,
+        )
     } else {
         (w, h)
     };
 
     // Re-encode as PNG (docx-rs only supports PNG)
     let mut png_buf = Vec::new();
-    img.write_to(&mut std::io::Cursor::new(&mut png_buf), image::ImageFormat::Png)
-        .map_err(|e| format!("Cannot re-encode image {} as PNG: {}", path, e))?;
+    img.write_to(
+        &mut std::io::Cursor::new(&mut png_buf),
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| format!("Cannot re-encode image {} as PNG: {}", path, e))?;
 
     Ok(Pic::new_with_dimensions(png_buf, out_w, out_h))
 }

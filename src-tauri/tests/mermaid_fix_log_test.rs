@@ -8,7 +8,13 @@ use mermaid_fix_log::{append_entry, format_entry, log_path};
 
 #[test]
 fn success_entry_has_ok_true_and_no_error() {
-    let line = format_entry("2026-08-03 15:20:11", "anthropic", "claude-haiku", 1234, None);
+    let line = format_entry(
+        "2026-08-03 15:20:11",
+        "anthropic",
+        "claude-haiku",
+        1234,
+        None,
+    );
     let v: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(v["ok"], true);
     assert_eq!(v["error"], serde_json::Value::Null);
@@ -22,7 +28,13 @@ fn success_entry_has_ok_true_and_no_error() {
 fn failure_entry_escapes_error_text() {
     // Error text with quotes + newline must survive JSON round-trip
     let err = "API 请求失败: \"timeout\"\nconnection reset";
-    let line = format_entry("2026-08-03 15:25:00", "openai", "gpt-4o-mini", 120033, Some(err));
+    let line = format_entry(
+        "2026-08-03 15:25:00",
+        "openai",
+        "gpt-4o-mini",
+        120033,
+        Some(err),
+    );
     let v: serde_json::Value = serde_json::from_str(&line).unwrap();
     assert_eq!(v["ok"], false);
     assert_eq!(v["error"], err);

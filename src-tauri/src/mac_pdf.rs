@@ -90,8 +90,7 @@ mod macos {
         if let Some(html) = html {
             match export_via_chrome(html) {
                 Ok(pdf_data) => {
-                    std::fs::write(&dest, &pdf_data)
-                        .map_err(|e| format!("写入文件失败: {}", e))?;
+                    std::fs::write(&dest, &pdf_data).map_err(|e| format!("写入文件失败: {}", e))?;
                     return Ok(dest.display().to_string());
                 }
                 Err(e) => {
@@ -122,8 +121,7 @@ mod macos {
         let html_url = format!("file://{}", html_path.display());
 
         let result = (|| -> Result<Vec<u8>, String> {
-            let browser =
-                Browser::default().map_err(|e| format!("Chrome 启动失败: {}", e))?;
+            let browser = Browser::default().map_err(|e| format!("Chrome 启动失败: {}", e))?;
             let tab = browser
                 .new_tab()
                 .map_err(|e| format!("无法创建标签页: {}", e))?;
@@ -170,8 +168,8 @@ mod macos {
                 // block 内捕获 tx 的 clone，保留原始 tx 给 exception 路径
                 let tx_block = tx.clone();
 
-                let block = block2::RcBlock::new(
-                    move |data: *mut AnyObject, error: *mut AnyObject| {
+                let block =
+                    block2::RcBlock::new(move |data: *mut AnyObject, error: *mut AnyObject| {
                         if !data.is_null() {
                             unsafe {
                                 let bytes: *const u8 = msg_send![data, bytes];
@@ -204,8 +202,7 @@ mod macos {
                             };
                             let _ = tx_block.send(Err(msg));
                         }
-                    },
-                );
+                    });
 
                 let result = exception::catch(AssertUnwindSafe(|| unsafe {
                     let _: () = msg_send![wk, createPDFWithCompletionHandler: &*block];
