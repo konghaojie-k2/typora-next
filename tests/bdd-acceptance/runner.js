@@ -236,6 +236,26 @@ async function runAcceptanceTests() {
   totalPassed += cornellTextMarksResult.passed;
   totalFailed += cornellTextMarksResult.failed;
 
+  // Sprint 13: SDK install progress visualization (pi-install-progress)
+  console.log(`\n${YELLOW}▶ Sprint 13: SDK Install Progress${RESET}`);
+  const sdkInstallProgressSteps = require('./sprint13_sdk_install_progress.steps');
+  const sdkInstallProgressResult = await runFeatureFile(
+    path.join(__dirname, '../sprint13/features/sdk_install_progress.feature'),
+    sdkInstallProgressSteps
+  );
+  totalPassed += sdkInstallProgressResult.passed;
+  totalFailed += sdkInstallProgressResult.failed;
+
+  // Sprint 13: Quiz option shuffle (quiz-distractor-quality B 层)
+  console.log(`\n${YELLOW}▶ Sprint 13: Quiz Option Shuffle${RESET}`);
+  const quizShuffleSteps = require('./sprint13_quiz_shuffle.steps');
+  const quizShuffleResult = await runFeatureFile(
+    path.join(__dirname, '../sprint13/features/quiz_shuffle.feature'),
+    quizShuffleSteps
+  );
+  totalPassed += quizShuffleResult.passed;
+  totalFailed += quizShuffleResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

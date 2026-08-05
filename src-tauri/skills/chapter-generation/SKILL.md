@@ -109,7 +109,7 @@ End with a ONE-SENTENCE summary in a blockquote.
 > **1. {question}**
 >
 > **A.** {option 1}
-> **B.** {option 2} ✓
+> **B.** {option 2}
 > **C.** {option 3}
 > **D.** {option 4}
 >
@@ -148,6 +148,20 @@ Run through this with `Read` after writing. If anything fails, rewrite the file.
 - [ ] Contains ≥ 1 `> [!question]` block (with `> > [!answer]` inside) — must be **synthesis-level**, not trivial
 - [ ] Contains ≥ 1 `> [!quiz]` block (inline self-check with at least 3 multiple-choice questions)
 - [ ] Quiz questions test **understanding**, not fact recall (avoid "what is X" — prefer "why does X happen" / "which scenario best illustrates X")
+- [ ] 所有选择题（md 内联 + quiz.json）满足下方「选择题质量硬约束」
+- [ ] quiz.json 是合法 JSON（无未转义双引号；用 Read 复核一遍）
+- [ ] 内联 `[!quiz]` 选项行无 ✓/✅ 标记（答案只在折叠 `[!answer]` 里）
+- [ ] quiz.json 题目与内联 `[!quiz]` 题目无重叠
+
+## 选择题质量硬约束（MANDATORY — 适用于 md 内联 quiz 与 quiz.json）
+
+1. **位置随机**：正确项在 A-D 中随机分布，一批题目里 4 个位置都要出现，禁止固定位。
+2. **长度均衡**：最长选项与最短选项的字数比 ≤ 1.8；正确项不得明显比干扰项更长更详细。
+3. **正确项不照抄**：用自己的话改写，不得整句粘贴正文原文。
+4. **干扰项是合理陷阱**：基于常见误解/易混概念，让没掌握的人真会选；禁止一眼荒谬或跨领域胡扯。
+5. **盲选自检**：写完后捂住答案只看选项——若凭长度/位置/措辞能猜对，或能瞬间排除两项以上，必须重写该题。
+6. **选项不带答案标记**：内联 `[!quiz]` 的选项行禁止出现 ✓/✅ 或任何正确性暗示；答案只写在折叠的 `[!answer]` 块里。
+7. **两套题不重叠**：内联 `[!quiz]`（阅读时即时自测，考本节直接理解）与 quiz.json（随堂考察，考应用/迁移/对比）必须是**不同的题目**，禁止同一题两处复用。
 
 **Formatting:**
 - [ ] All math uses `$...$` or `$$...$$` (not raw `\(...\)`)

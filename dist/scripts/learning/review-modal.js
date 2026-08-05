@@ -15,7 +15,19 @@
     constructor(options) {
       this.state = 'hidden';
       this.items = (options && options.items) || [];
-      this.cards = (options && options.cards) || {}; // concept -> ReviewCard
+      // 渲染前 shuffle 选项：存量复习卡 91.5% 正确项在 0 位（quiz-distractor-quality B 层）
+      const rawCards = (options && options.cards) || {}; // concept -> ReviewCard
+      const QS = typeof window !== 'undefined' ? window.QuizShuffle : null;
+      this.cards = QS
+        ? Object.fromEntries(
+            Object.entries(rawCards).map(([concept, card]) => [
+              concept,
+              Object.assign({}, card, {
+                quiz_questions: QS.shuffleIndexQuestions(card.quiz_questions)
+              })
+            ])
+          )
+        : rawCards;
       this.currentIndex = 0;
       this._currentQuestionIdx = 0; // which question within current concept
       this.onComplete = (options && options.onComplete) || (() => {});

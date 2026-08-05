@@ -216,10 +216,13 @@
             chapterFile: _currentChapterFile,
             projectPath: _projectPath
           });
-          const extras = await window.__TAURI__.core.invoke('load_extra_questions', {
+          const rawExtras = await window.__TAURI__.core.invoke('load_extra_questions', {
             chapterFile: _currentChapterFile,
             projectPath: _projectPath
           });
+          // 渲染前 shuffle 选项：存量题正确项位置强偏（quiz-distractor-quality B 层）
+          const QS = typeof window !== 'undefined' ? window.QuizShuffle : null;
+          const extras = QS ? QS.shuffleLabelQuestions(rawExtras) : rawExtras;
           if (extras && extras.length) {
             showExtraReviewModal(extras);
           } else {
@@ -356,7 +359,11 @@
       const chapterFile = _quizPanel.getChapterFile();
       console.log('[QuizDebug] chapterFile=', chapterFile, 'projectPath=', _projectPath);
       const result = await window.__TAURI__.core.invoke('generate_chapter_quiz', { chapterFile, projectPath: _projectPath });
-      const standard = result.standard || [];
+      // 渲染前 shuffle 选项：存量题正确项位置强偏（quiz-distractor-quality B 层）
+      const QS = typeof window !== 'undefined' ? window.QuizShuffle : null;
+      const standard = QS
+        ? QS.shuffleLabelQuestions(result.standard || [])
+        : (result.standard || []);
       console.log('[QuizDebug] loaded questions:', standard.length, 'standard');
       // Only standard questions go into the quiz modal; extras have a separate entry point.
       _currentQuizQuestions = standard;
