@@ -92,6 +92,7 @@ window.agentBridge = {
     tabsBar: document.getElementById('tabsBar'),
     tabsList: document.getElementById('tabsList'),
     openFileBtn: document.getElementById('openFileBtn'),
+    refreshFileBtn: document.getElementById('refreshFileBtn'),
     paperReaderBtn: document.getElementById('paperReaderBtn'),
     sourceToggle: document.getElementById('sourceToggle'),
     exportPdfBtn: document.getElementById('exportPdfBtn'),
@@ -492,6 +493,28 @@ window.agentBridge = {
     }
   }
 
+  // Re-read the file when switching back to a tab: the watcher only covers
+  // the active tab, so external edits made while this tab was in the
+  // background would otherwise go unnoticed (tab.content is a stale cache).
+  async function checkExternalChangeOnSwitch(tab) {
+    if (!window.__TAURI__ || !window.ExternalRefresh) return;
+    if (!tab || tab.mode === 'paper') return;
+    try {
+      const result = await invoke('open_file', { path: tab.path });
+      // The read is async — the user may have switched away again meanwhile.
+      if (state.tabs[state.activeTab] !== tab) return;
+      if (window.ExternalRefresh.shouldPromptExternalRefresh(
+        tab.content,
+        result && result.content,
+        state.refreshPromptVisible
+      )) {
+        showRefreshPrompt(tab.path);
+      }
+    } catch (err) {
+      // Passive detection: a deleted/unreadable file must not interrupt switching.
+    }
+  }
+
   async function unwatchCurrentFile() {
     if (!window.__TAURI__) return;
     try {
@@ -646,6 +669,7 @@ window.agentBridge = {
   async function refreshCurrentFile() {
     const tab = state.tabs[state.activeTab];
     if (!tab) return;
+    if (tab.mode === 'paper') return; // 论文页由 PaperReader 自管理
     try {
       const savedScrollTop = elements.markdownBody ? elements.markdownBody.scrollTop : 0;
       const result = await invoke('open_file', { path: tab.path });
@@ -784,6 +808,7 @@ window.agentBridge = {
 
     if (tab) {
       watchCurrentFile(tab.path);
+      checkExternalChangeOnSwitch(tab);
     }
   }
 
@@ -4921,6 +4946,12 @@ window.agentBridge = {
         exportToPDF();
       }
 
+      // Ctrl+R: Refresh current file from disk
+      if (e.ctrlKey && !e.shiftKey && (e.key === 'r' || e.key === 'R')) {
+        e.preventDefault();
+        refreshCurrentFile();
+      }
+
       // Ctrl+Shift+L: Toggle theme
       if (e.ctrlKey && e.shiftKey && e.key === 'L') {
         e.preventDefault();
@@ -5110,6 +5141,9 @@ window.agentBridge = {
   // ============================================
   function bindEvents() {
     elements.openFileBtn.addEventListener('click', openFile);
+    if (elements.refreshFileBtn) {
+      elements.refreshFileBtn.addEventListener('click', refreshCurrentFile);
+    }
     if (elements.paperReaderBtn) {
       elements.paperReaderBtn.addEventListener('click', openPaperReader);
     }

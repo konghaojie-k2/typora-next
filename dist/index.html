@@ -81,6 +81,13 @@
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
             </svg>
           </button>
+          <button class="btn-icon" id="refreshFileBtn" data-tooltip="刷新文件 (Ctrl+R)">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <polyline points="1 20 1 14 7 14"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+          </button>
           <button class="btn-icon" id="newLearningProjectBtn" data-tooltip="课程模式">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -548,6 +555,7 @@
   <script src="scripts/agent-init.js"></script>
   <script src="scripts/sdk-install-progress.js"></script>
   <script src="scripts/quiz-shuffle.js"></script>
+  <script src="scripts/external-refresh.js"></script>
   <script src="scripts/main.js"></script>
   <script>
     // Learning mode: toolbar button opens hub (project list)

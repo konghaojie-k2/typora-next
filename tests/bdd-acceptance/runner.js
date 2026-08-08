@@ -256,6 +256,16 @@ async function runAcceptanceTests() {
   totalPassed += quizShuffleResult.passed;
   totalFailed += quizShuffleResult.failed;
 
+  // Sprint 14: External file refresh (background-tab detection + manual entry)
+  console.log(`\n${YELLOW}▶ Sprint 14: External File Refresh${RESET}`);
+  const externalRefreshSteps = require('./sprint14_external_refresh.steps');
+  const externalRefreshResult = await runFeatureFile(
+    path.join(__dirname, '../sprint14/features/external_refresh.feature'),
+    externalRefreshSteps
+  );
+  totalPassed += externalRefreshResult.passed;
+  totalFailed += externalRefreshResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});
