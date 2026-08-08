@@ -118,6 +118,104 @@ T.test('generateChapters: missing file → chapter_failed (no crash)', async () 
 });
 
 // ============================================
+// summary stage（课程完成 → 主题式 slide 总结）
+// ============================================
+
+/** 一份带 --- 分隔的演示总结，模拟 agent 写盘内容。 */
+const MOCK_SUMMARY_MD = `# 扩散模型课程总结
+
+这是一门关于扩散模型的入门课。
+
+---
+
+## 主题一：生成模型基础
+
+- 核心概念 A
+- 核心概念 B
+
+---
+
+## 主题二：数学原理
+
+- 前向过程
+- 反向过程
+
+---
+
+## 主题三：架构与训练
+
+- UNet
+- 噪声调度
+
+---
+
+## 主题四：应用与前沿
+
+- 文生图
+- 加速采样
+
+---
+
+## 学习回顾
+
+1. 最重要知识点 1
+2. 最重要知识点 2
+3. 最重要知识点 3
+`;
+
+T.test('generateSummary: agent 写盘 → summary_complete + file 事件', async () => {
+  const proj = tmpdir('sum-');
+  bridge.__setRunnerForTests(async (opts) => {
+    // 校验 prompt 引用 skill + 写固定文件 + 备用指令保留 --- 幻灯片分隔
+    T.assert(opts.prompt.includes('typora-course-summary skill'), 'prompt names the summary skill');
+    T.assert(opts.prompt.includes('99-课程总结.md'), 'prompt names the fixed summary file');
+    T.assert(opts.prompt.includes('单独一行 ---'), 'fallback keeps explicit slide separators');
+    T.assert(opts.tools.includes('read') && opts.tools.includes('write'), 'read/write tools enabled');
+    fs.writeFileSync(path.join(proj, '99-课程总结.md'), MOCK_SUMMARY_MD);
+    return { output: '总结已写入', sessionFile: 's.jsonl', refreshed: false };
+  });
+  const events = await captureEvents(() => bridge.generateSummary(null, {}, {
+    project_path: proj,
+    outline: { chapters: [{ title: '一' }, { title: '二' }, { title: '三' }] }
+  }));
+  T.assertEquals(events.find(e => e.type === 'summary_complete').data.file, '99-课程总结.md', 'summary_complete carries file');
+  T.assert(fs.existsSync(path.join(proj, '99-课程总结.md')), 'summary file written on disk');
+  bridge.__setRunnerForTests(null);
+  fs.rmSync(proj, { recursive: true, force: true });
+});
+
+T.test('generateSummary: agent 未写盘 → summary_failed（不崩溃）', async () => {
+  const proj = tmpdir('sumfail-');
+  bridge.__setRunnerForTests(async () => ({ output: 'done', sessionFile: null, refreshed: false }));
+  const events = await captureEvents(() => bridge.generateSummary(null, {}, {
+    project_path: proj,
+    outline: { chapters: [{ title: 'x' }] }
+  }));
+  T.assertExists(events.find(e => e.type === 'summary_failed'), 'summary_failed emitted when file missing');
+  T.assert(!events.some(e => e.type === 'summary_complete'), 'no summary_complete on failure');
+  bridge.__setRunnerForTests(null);
+  fs.rmSync(proj, { recursive: true, force: true });
+});
+
+T.test('generateSummary: onToolLog 转发 progress_log', async () => {
+  const proj = tmpdir('sumlog-');
+  bridge.__setRunnerForTests(async (opts) => {
+    opts.onToolLog('📖 正在读 00-一.md');
+    opts.onToolLog('✓ 正在写 99-课程总结.md');
+    fs.writeFileSync(path.join(proj, '99-课程总结.md'), '# 封面\n\n---\n\n## 主题\n');
+    return { output: 'ok', sessionFile: null, refreshed: false };
+  });
+  const events = await captureEvents(() => bridge.generateSummary(null, {}, {
+    project_path: proj,
+    outline: { chapters: [{ title: '一' }] }
+  }));
+  const logs = events.filter(e => e.type === 'progress_log').map(e => e.data.text);
+  T.assert(logs.some(t => t.includes('99-课程总结.md')), 'progress_log lines forwarded');
+  bridge.__setRunnerForTests(null);
+  fs.rmSync(proj, { recursive: true, force: true });
+});
+
+// ============================================
 // explain stage
 // ============================================
 

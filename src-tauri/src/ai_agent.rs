@@ -971,6 +971,68 @@ pub async fn generate_chapters(
     Ok(())
 }
 
+/// Generate a theme-based slide summary for a completed course.
+/// The agent reads all chapter files and writes `<project>/99-课程总结.md`
+/// with `---` slide separators (parsed by the frontend's explicit mode).
+/// Outcome is signaled by the bridge via `summary_complete` / `summary_failed`;
+/// this wrapper only surfaces process-level failures as `error`.
+#[tauri::command]
+pub async fn generate_summary(
+    project_path: String,
+    outline: Value,
+    app_handle: AppHandle,
+    agent_process: State<'_, AgentProcess>,
+    session_id: Option<String>,
+    app_state: State<'_, AppState>,
+) -> Result<(), String> {
+    let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+
+    // Ensure the bundled typora-course-summary skill is available in the project
+    // (idempotent). The bridge prompt tells the agent to Read its SKILL.md.
+    let _ = copy_bundled_skills_to_project(&project_path);
+
+    // Mark generation as in-progress so the main window close guard can warn
+    // the user before aborting background summary generation.
+    {
+        if let Ok(mut guard) = app_state.generation_in_progress.lock() {
+            *guard = true;
+        }
+    }
+
+    let args = serde_json::json!({
+        "project_path": project_path,
+        "outline": outline,
+        "session_id": session_id,
+    });
+
+    let process: AgentProcess = (*agent_process).clone();
+    tauri::async_runtime::spawn(async move {
+        // Success is signaled by the bridge's summary_complete event; the Rust
+        // wrapper only surfaces hard failures (e.g. node process crash).
+        match run_agent_bridge("summary", &config, args, app_handle.clone(), process).await {
+            Ok(()) => {
+                log::info!("[ai_agent] summary stage finished cleanly");
+            }
+            Err(e) => {
+                let _ = app_handle.emit(
+                    "agent-event",
+                    serde_json::json!({
+                        "type": "error",
+                        "data": { "message": e }
+                    }),
+                );
+            }
+        }
+
+        let state = app_handle.state::<AppState>();
+        if let Ok(mut guard) = state.generation_in_progress.lock() {
+            *guard = false;
+        };
+    });
+
+    Ok(())
+}
+
 /// Scan the project's `*.quiz.json` files and build a repair list for the
 /// quiz-repair stage (empty = all questions pass quality checks).
 /// Corrupted JSON files are skipped (the skill checklist now requires valid

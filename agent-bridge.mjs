@@ -458,6 +458,68 @@ ${prevContext}
   emit('complete', { total_generated: indicesToGenerate.length });
 }
 
+/**
+ * summary stage：课程学完后生成主题式幻灯片总结。
+ * Agent 读全部章节 → 跨章节提炼 4-6 个大主题 → 写 <project>/99-课程总结.md，
+ * 内容用 `---` 作幻灯片硬分隔（主视图 parseExplicitStructure 直接识别）。
+ * 结果通过 summary_complete / summary_failed 事件上报。
+ */
+export async function generateSummary(queryFnUnused, config, args) {
+  const { project_path, outline, session_id } = args;
+  const SUMMARY_FILE = '99-课程总结.md';
+  const summaryPath = path.join(project_path, SUMMARY_FILE);
+  const chapters = (outline && outline.chapters) || [];
+
+  emit('status', { message: 'AI 正在提炼课程主题，生成总结…' });
+
+  const chapterList = chapters
+    .map((ch, i) => `${i + 1}. ${ch.title}`)
+    .join('\n');
+  const courseName = (outline && outline.name) || (chapters[0] && chapters[0].title) || '课程总结';
+
+  const prompt = `请使用 typora-course-summary skill 为以下已完成的课程生成**主题式幻灯片总结**。
+
+- project_path: ${JSON.stringify(project_path)}
+- 课程章节（按顺序）：
+${chapterList}
+
+重要：
+1. 先 Read typora-course-summary skill 的 SKILL.md（路径二选一：${JSON.stringify(project_path + '/.pi/skills/typora-course-summary/SKILL.md')} 或 ${JSON.stringify(project_path + '/.claude/skills/typora-course-summary/SKILL.md')}），严格按它的结构和 MUST-VERIFY checklist 执行。
+2. 用 find 列出 ${JSON.stringify(project_path)} 根目录下所有章节 .md 文件（跳过 ${JSON.stringify(SUMMARY_FILE)} 自身），逐个 Read 读取内容，跨章节提炼 4-6 个大主题。
+3. 用 Write 将总结写入文件：${JSON.stringify(summaryPath)}（幻灯片语法：每张幻灯片之间用单独一行 --- 分隔）。
+4. 课程名用：${JSON.stringify(courseName)}。`;
+
+  // 若项目里没拷到 skill（旧项目），退化为内联指令，保证功能可用
+  const inlineFallback = `
+
+（备用指令——若找不到 typora-course-summary SKILL.md 则按此执行：）
+1. 读全部章节 .md，跨章节提炼 4-6 个大主题，总结而非逐章复述。
+2. 写入 ${JSON.stringify(summaryPath)}。
+3. 第一页封面以 # 写课程名（${JSON.stringify(courseName)}）+ 一行 ≤15 字 tagline；
+   每主题一页以 ## 主题名 开头 + 一个 mermaid 图 + ≤3 条要点（每条 ≤12 字）；
+   页与页之间用单独一行 ---（前后各留一个空行）分隔；最后一页「学习回顾」只列 3-5 个知识点名词。
+4. 少字多图：严禁段落、严禁长句。全中文，只输出幻灯片 markdown 正文。`;
+  const skillPrompt = prompt + inlineFallback;
+
+  try {
+    await runPiTurn({
+      prompt: skillPrompt,
+      config,
+      cwd: project_path,
+      tools: ['read', 'write', 'find', 'grep'],
+      sessionId: session_id,
+      onToolLog: (text) => emit('progress_log', { text })
+    });
+
+    if (!fs.existsSync(summaryPath)) {
+      throw new Error(`Agent did not write expected summary file: ${SUMMARY_FILE}`);
+    }
+    emit('summary_complete', { file: SUMMARY_FILE });
+  } catch (e) {
+    emit('summary_failed', { message: e.message });
+  }
+}
+
 export async function explainText(queryFnUnused, config, args) {
   const { text, context, output_file } = args;
 
@@ -938,6 +1000,12 @@ async function main() {
         log('info', 'Starting generate stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length, session_id: taskArgs.session_id || null });
         await generateChapters(null, config, taskArgs);
         log('info', 'Generate stage completed');
+        process.exit(0);
+        break;
+      case 'summary':
+        log('info', 'Starting summary stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length, session_id: taskArgs.session_id || null });
+        await generateSummary(null, config, taskArgs);
+        log('info', 'Summary stage completed');
         process.exit(0);
         break;
       case 'explain':

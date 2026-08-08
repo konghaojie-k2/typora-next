@@ -43,6 +43,13 @@ pub enum AgentEvent {
     Complete { total_generated: usize },
     #[serde(rename = "error")]
     Error { message: String },
+    // Sprint 15 (course-completion slide summary): emitted by the Node bridge
+    // (agent-bridge.mjs summary stage), not by Rust. Kept here as the contract
+    // the frontend's CourseSummary listener depends on.
+    #[serde(rename = "summary_complete")]
+    SummaryComplete { file: String },
+    #[serde(rename = "summary_failed")]
+    SummaryFailed { message: String },
 }
 
 #[test]
@@ -127,6 +134,26 @@ fn test_agent_event_error_shape() {
 }
 
 #[test]
+fn test_agent_event_summary_complete_shape() {
+    let event = AgentEvent::SummaryComplete {
+        file: "99-课程总结.md".to_string(),
+    };
+    let value = serde_json::to_value(&event).unwrap();
+    assert_eq!(value["type"], "summary_complete");
+    assert_eq!(value["data"]["file"], "99-课程总结.md");
+}
+
+#[test]
+fn test_agent_event_summary_failed_shape() {
+    let event = AgentEvent::SummaryFailed {
+        message: "Agent did not write expected file".to_string(),
+    };
+    let value = serde_json::to_value(&event).unwrap();
+    assert_eq!(value["type"], "summary_failed");
+    assert_eq!(value["data"]["message"], "Agent did not write expected file");
+}
+
+#[test]
 fn test_all_variant_types_are_strings_and_data_is_object() {
     let events = vec![
         AgentEvent::Outline { outline: json!({}) },
@@ -149,6 +176,8 @@ fn test_all_variant_types_are_strings_and_data_is_object() {
         AgentEvent::Status { message: "".into() },
         AgentEvent::Complete { total_generated: 0 },
         AgentEvent::Error { message: "".into() },
+        AgentEvent::SummaryComplete { file: "".into() },
+        AgentEvent::SummaryFailed { message: "".into() },
     ];
 
     for event in events {

@@ -266,6 +266,17 @@ async function runAcceptanceTests() {
   totalPassed += externalRefreshResult.passed;
   totalFailed += externalRefreshResult.failed;
 
+  // Sprint 15: Course completion slide summary (AI-generated theme recap)
+  console.log(`\n${YELLOW}▶ Sprint 15: Course Completion Slide Summary${RESET}`);
+  const courseSummarySteps = require('./sprint15_course_summary.steps');
+  const courseSummaryResult = await runFeatureFile(
+    path.join(__dirname, '../sprint15/features/course_completion_summary.feature'),
+    courseSummarySteps
+  );
+  totalPassed += courseSummaryResult.passed;
+  totalFailed += courseSummaryResult.failed;
+  if (courseSummarySteps._cleanup) courseSummarySteps._cleanup.call({});
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

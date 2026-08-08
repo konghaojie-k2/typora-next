@@ -563,6 +563,11 @@
             if (triggerNext) {
               triggerNext(basePath);
             }
+            // Course completion → show summary button + offer slide summary (once)
+            if (window.CourseSummary && window.CourseSummary.isCourseCompleted(manager)) {
+              ui.render();
+              window.CourseSummary.maybeOfferSummary(basePath, manager);
+            }
           }
         };
 

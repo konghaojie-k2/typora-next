@@ -6571,6 +6571,7 @@ window.agentBridge = {
     addTab,
     switchTab,
     closeTab,
+    openSlides,
     renderMarkdown,
     toggleSourceMode,
     toggleSidebar,
@@ -6597,6 +6598,10 @@ window.agentBridge = {
       }
     }
   };
+
+  // Expose showToast for learning modules that already call window.showToast
+  // (guarded) but never had it wired — my course-summary feature depends on it.
+  window.showToast = showToast;
 
   // ============================================
   // Toolbar tooltips: custom fast-reveal tooltips

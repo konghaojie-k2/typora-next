@@ -4492,6 +4492,7 @@ pub fn run() {
             ai_agent::plan_course,
             ai_agent::plan_course_llm,
             ai_agent::generate_chapters,
+            ai_agent::generate_summary,
             ai_agent::abort_generation,
             ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz,
