@@ -277,6 +277,27 @@ async function runAcceptanceTests() {
   totalFailed += courseSummaryResult.failed;
   if (courseSummarySteps._cleanup) courseSummarySteps._cleanup.call({});
 
+  // Sprint 16: Course completion state (terminal status + review entry de-nag)
+  console.log(`\n${YELLOW}▶ Sprint 16: Course Completion State${RESET}`);
+  const courseCompletionSteps = require('./sprint16_course_completion_state.steps');
+  const courseCompletionResult = await runFeatureFile(
+    path.join(__dirname, '../sprint16/features/course_completion_state.feature'),
+    courseCompletionSteps
+  );
+  totalPassed += courseCompletionResult.passed;
+  totalFailed += courseCompletionResult.failed;
+  if (courseCompletionSteps._cleanup) courseCompletionSteps._cleanup.call({});
+
+  // Sprint 16: Explain raw-quote truncation fix (skill constraint + parser wiring)
+  console.log(`\n${YELLOW}▶ Sprint 16: Explain Raw-Quote Parsing Fix${RESET}`);
+  const explainRawQuoteSteps = require('./sprint16_explain_raw_quote.steps');
+  const explainRawQuoteResult = await runFeatureFile(
+    path.join(__dirname, '../sprint16/features/explain_raw_quote_parsing.feature'),
+    explainRawQuoteSteps
+  );
+  totalPassed += explainRawQuoteResult.passed;
+  totalFailed += explainRawQuoteResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

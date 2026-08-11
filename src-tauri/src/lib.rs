@@ -11,7 +11,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod agent_sdk_probe;
 pub mod ai_agent;
+pub mod course_completion;
 mod docx_template;
+pub mod explain_parse;
 pub mod learning_paths;
 pub mod mac_pdf;
 pub mod mermaid_fix_log;
@@ -2550,6 +2552,11 @@ async fn persist_quiz_result(
         .and_then(|v| v.as_object_mut())
     {
         status_map.insert(chapter_basename.clone(), serde_json::json!("completed"));
+    }
+
+    // Sprint 16: 全部章节完成 → 落课程级终态 course_status = "completed"
+    if course_completion::mark_course_completed_if_done(&mut project) {
+        log::info!("[persist_quiz_result] course completed → course_status stamped");
     }
     // Strip chapter.concepts down to {id, name} only (no status, no updated_at)
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {

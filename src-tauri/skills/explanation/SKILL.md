@@ -57,4 +57,5 @@ Parse these into variables:
 
 - `explanation`: plain Chinese text, no markdown formatting. 300-500 characters.
 - `suggested_questions`: 2-4 questions. Each should check understanding or explore a related angle.
+- **禁止半角双引号**：所有文本值（explanation、questions）内引用一律用中文全角引号「」或“”。半角 `"` 会让写出的 JSON 非法，导致解析截断（2026-08-11 实爆：回答被切成半句话）。
 - 写入文件后输出一句话确认即可。

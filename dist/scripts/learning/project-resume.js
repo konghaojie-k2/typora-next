@@ -354,6 +354,11 @@
         status: getChapterStatus(ch, chaptersStatus)
       }));
 
+      // Sprint 16: 课程完结终态（落盘字段或全章节完成派生）
+      const courseCompleted = window.CourseSummary && window.CourseSummary.isProjectCourseCompleted
+        ? window.CourseSummary.isProjectCourseCompleted(project)
+        : false;
+
       // Show dashboard modal
       console.log('[ProjectDashboard] Showing dashboard, stats:', stats);
       return new Promise((resolve) => {
@@ -379,7 +384,8 @@
           stats,
           chapters,
           projectName: (project && project.name) || '学习项目',
-          dueCount
+          dueCount,
+          courseCompleted
         });
       });
     } catch (e) {
@@ -690,7 +696,11 @@
               stats,
               chapters,
               projectName: (project && project.name) || '学习项目',
-              dueCount
+              dueCount,
+              // Sprint 16: 课程完结终态
+              courseCompleted: window.CourseSummary && window.CourseSummary.isProjectCourseCompleted
+                ? window.CourseSummary.isProjectCourseCompleted(project)
+                : false
             });
           } catch (e) {
             console.error('[ProjectResume] KG open error:', e);

@@ -7555,3 +7555,16 @@ body.learning-mode .toolbar {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* Sprint 16: 课程完结终态徽标 */
+.kg-course-completed-badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #047857;
+  background: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  border-radius: 999px;
+}

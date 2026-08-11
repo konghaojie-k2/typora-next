@@ -2251,107 +2251,13 @@ pub fn build_explain_prompt(
 /// Parse LLM response into structured ExplainV2Response
 /// Pure function — extracted for testability
 pub fn parse_explain_response(raw: &str) -> ExplainV2Response {
-    // Strip markdown code block wrappers if present (LLM sometimes wraps JSON in ```json ... ```)
-    // Handles both multi-line and single-line formats:
-    //   ```json
-    //   {"explanation":"...", ...}
-    //   ```
-    //   or single-line: ```json {"explanation":"...", ...} ```
-    let cleaned = {
-        let mut s = raw.trim();
-        if s.starts_with("```") {
-            // Remove the opening ``` line (```json or just ```)
-            if let Some(content_start) = s.find('\n') {
-                // Multi-line: skip the ```json line
-                s = s[content_start..].trim_start();
-                // Remove closing ``` and everything after
-                if let Some(end) = s.find("```") {
-                    s = s[..end].trim();
-                }
-            } else {
-                // Single-line: strip ```...``` and  optional `json` prefix
-                s = &s[3..]; // skip opening ```
-                if let Some(end) = s.rfind("```") {
-                    s = s[..end].trim();
-                } else {
-                    s = s.trim();
-                }
-                // Strip leading `json` if present (from ```json)
-                if let Some(stripped) = s.strip_prefix("json").or_else(|| s.strip_prefix("JSON")) {
-                    s = stripped.trim();
-                }
-            }
-        }
-        s.to_string()
-    };
-
-    // Try to parse as JSON
-    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&cleaned) {
-        let mut explanation = parsed
-            .get("explanation")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        // Safety truncate to 1000 chars (very rare, only if LLM goes wild)
-        if explanation.chars().count() > 1000 {
-            explanation = explanation.chars().take(997).collect::<String>() + "...";
-        }
-        let suggested_questions = parsed
-            .get("suggested_questions")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|v| v.as_str().map(String::from))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        return ExplainV2Response {
-            explanation,
-            suggested_questions,
-        };
-    }
-
-    // Fallback: try lenient extract — lightly parse explanation field from partial JSON
-    // Usually JSON fails because LLM truncated the output mid-array (suggested_questions).
-    // The explanation field was written before questions, so it's usually complete.
-    let fallback_explanation = if let Some(start) = cleaned.find("\"explanation\"") {
-        // Find the value after "explanation":
-        let after_key = &cleaned[start + 13..]; // skip "explanation":
-        let after_colon = after_key.trim_start().trim_start_matches(':').trim_start();
-        // JSON string value starts with ", find closing "
-        if after_colon.starts_with('"') {
-            let content = &after_colon[1..]; // skip opening "
-            let mut extracted = String::new();
-            let mut chars = content.chars();
-            loop {
-                match chars.next() {
-                    None => break,
-                    Some('"') => {
-                        // Check if escaped
-                        if extracted.ends_with('\\') {
-                            extracted.push('"');
-                        } else {
-                            break; // found closing "
-                        }
-                    }
-                    Some(c) => extracted.push(c),
-                }
-            }
-            if !extracted.is_empty() {
-                extracted
-            } else {
-                raw.to_string()
-            }
-        } else {
-            raw.to_string()
-        }
-    } else {
-        raw.to_string()
-    };
-
+    // 解析核心在 explain_parse 模块（可独立 #[path] include 测试）：
+    // 2026-08-11 修复——模型写盘 JSON 字符串值内含未转义半角引号时，
+    // 旧 lenient fallback 在第一个引号处截断，用户看到半句话。
+    let parsed = crate::explain_parse::parse_explain_output(raw);
     ExplainV2Response {
-        explanation: fallback_explanation,
-        suggested_questions: vec![],
+        explanation: parsed.explanation,
+        suggested_questions: parsed.suggested_questions,
     }
 }
 

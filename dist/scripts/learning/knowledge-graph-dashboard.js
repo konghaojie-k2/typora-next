@@ -66,7 +66,7 @@
       modal.className = 'kg-dashboard-modal';
 
       // Header
-      const header = this._createHeader(data.projectName);
+      const header = this._createHeader(data.projectName, !!data.courseCompleted);
       modal.appendChild(header);
 
       // Stats row (only if graph exists)
@@ -93,7 +93,7 @@
       this._overlay = overlay;
     }
 
-    _createHeader(projectName) {
+    _createHeader(projectName, courseCompleted) {
       const header = document.createElement('div');
       header.className = 'kg-dashboard-header';
 
@@ -101,6 +101,14 @@
       title.className = 'kg-dashboard-title';
       title.textContent = projectName || '学习项目';
       header.appendChild(title);
+
+      // Sprint 16: 课程完结终态标识（用户能感知当前所处状态）
+      if (courseCompleted) {
+        const badge = document.createElement('span');
+        badge.className = 'kg-course-completed-badge';
+        badge.textContent = '🎉 课程已完结';
+        header.appendChild(badge);
+      }
 
       return header;
     }
@@ -315,12 +323,18 @@
       actions.className = 'kg-actions';
 
       // Review button (project-level entry)
+      // Sprint 16: 完结课程入口常驻、不带计数徽标（不再催复习）；决策纯函数在 course-summary.js
       const dueCount = (data && data.dueCount) || 0;
-      if (dueCount > 0) {
+      const spec = (window.CourseSummary && window.CourseSummary.getReviewEntrySpec)
+        ? window.CourseSummary.getReviewEntrySpec(!!(data && data.courseCompleted), dueCount)
+        : { visible: dueCount > 0, showCount: dueCount > 0, count: dueCount };
+      if (spec.visible) {
         const reviewBtn = document.createElement('button');
         reviewBtn.className = 'kg-action-btn kg-action-review';
         reviewBtn.setAttribute('data-action', 'review');
-        reviewBtn.innerHTML = `🧠 今日复习 <span class="kg-review-count">${dueCount}</span>`;
+        reviewBtn.innerHTML = spec.showCount
+          ? `🧠 今日复习 <span class="kg-review-count">${spec.count}</span>`
+          : '🧠 复习回顾';
         reviewBtn.addEventListener('click', () => {
           this.onReview();
         });

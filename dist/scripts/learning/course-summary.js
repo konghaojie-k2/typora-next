@@ -65,6 +65,41 @@
     return true;
   }
 
+  /**
+   * 课程是否完结（读侧派生，Sprint 16）。
+   * 完结 = project.json 顶层 course_status === 'completed'（写侧落盘）
+   *   或全部章节状态为 completed/已完成（存量项目兼容，含 v1 chapter.status）。
+   * @param {object} project - project.json 对象（{ chapters, chapters_status, course_status? }）
+   */
+  function isProjectCourseCompleted(project) {
+    if (!project || typeof project !== 'object') return false;
+    if (project.course_status === 'completed') return true;
+    const chapters = Array.isArray(project.chapters) ? project.chapters : [];
+    if (chapters.length === 0) return false;
+    const cs = project.chapters_status || {};
+    return chapters.every((ch) => {
+      const s = (ch && ch.file && cs[ch.file]) || (ch && ch.status) || '';
+      return s === 'completed' || s === '已完成';
+    });
+  }
+
+  /**
+   * Dashboard 复习入口展示决策（Sprint 16）。
+   * 完结课程：入口常驻、不带计数徽标（不再催复习）；
+   * 未完结：仅有到期项时显示，且带计数。
+   * @returns {{visible: boolean, showCount: boolean, count: number}}
+   */
+  function getReviewEntrySpec(courseCompleted, dueCount) {
+    const due = Number.isInteger(dueCount) && dueCount > 0 ? dueCount : 0;
+    if (courseCompleted) {
+      return { visible: true, showCount: false, count: 0 };
+    }
+    if (due > 0) {
+      return { visible: true, showCount: true, count: due };
+    }
+    return { visible: false, showCount: false, count: 0 };
+  }
+
   // ============================================
   // 文件系统
   // ============================================
@@ -334,6 +369,8 @@
     isCourseCompleted,
     getSummaryPath,
     shouldOfferSummary,
+    isProjectCourseCompleted,
+    getReviewEntrySpec,
     summaryExists,
     maybeOfferSummary,
     onSummaryButtonClick,
@@ -343,6 +380,6 @@
 
   // Export for Node.js testing
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { isCourseCompleted, getSummaryPath, shouldOfferSummary, summaryExists, SUMMARY_FILE };
+    module.exports = { isCourseCompleted, getSummaryPath, shouldOfferSummary, isProjectCourseCompleted, getReviewEntrySpec, summaryExists, SUMMARY_FILE };
   }
 })();
