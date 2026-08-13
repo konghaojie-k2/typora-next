@@ -39,6 +39,10 @@
   let _summaryOffered = false; // 本次会话只弹一次确认框
   let _generating = false;     // 防止重复触发生成
 
+  // 2026-08-13：总结质量未达标，暂时隐藏所有用户入口（📊 总结按钮 + 完成弹窗）。
+  // 生成/放映逻辑与纯函数保留，BDD/单测不受影响；质量达标后改回 true 即可恢复。
+  const SUMMARY_ENTRY_ENABLED = false;
+
   // ============================================
   // 纯函数（Node.js 可测）
   // ============================================
@@ -218,6 +222,7 @@
    * 课程完成时调用：满足条件则弹窗一次。
    */
   async function maybeOfferSummary(projectPath, manager) {
+    if (!SUMMARY_ENTRY_ENABLED) return;
     try {
       const fileExists = await summaryExists(projectPath);
       if (!shouldOfferSummary(manager, _summaryOffered, fileExists)) return;
@@ -366,6 +371,7 @@
   // ============================================
   window.CourseSummary = {
     SUMMARY_FILE,
+    SUMMARY_ENTRY_ENABLED,
     isCourseCompleted,
     getSummaryPath,
     shouldOfferSummary,

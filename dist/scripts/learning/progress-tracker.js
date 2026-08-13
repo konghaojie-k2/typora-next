@@ -425,7 +425,11 @@
      * 文件已生成 → 点击放映；未生成 → 点击触发生成。
      */
     _renderSummaryButton() {
-      if (!window.CourseSummary || !window.CourseSummary.isCourseCompleted(this.manager)) {
+      // 2026-08-13：总结质量未达标，入口暂时隐藏（SUMMARY_ENTRY_ENABLED=false）
+      if (!window.CourseSummary || !window.CourseSummary.SUMMARY_ENTRY_ENABLED) {
+        return '';
+      }
+      if (!window.CourseSummary.isCourseCompleted(this.manager)) {
         return '';
       }
       return '<button class="learning-summary-btn" id="learningSummaryBtn" title="课程总结幻灯片">📊 总结</button>';
