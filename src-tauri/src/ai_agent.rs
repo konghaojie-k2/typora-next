@@ -129,6 +129,10 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
         exe_parent("_up_/agent-bridge.mjs"),
         // MSI install: resources/ subdirectory (standard Tauri resource path)
         exe_parent("resources/agent-bridge.mjs"),
+        // macOS .app: Contents/MacOS/exe -> Contents/Resources/agent-bridge.mjs
+        exe_parent("../Resources/agent-bridge.mjs"),
+        // macOS .app: `../` in bundle.resources maps to _up_/ under Resources
+        exe_parent("../Resources/_up_/agent-bridge.mjs"),
         // exe 父目录的父目录 (target/release/ -> target/)
         std::env::current_exe().ok().and_then(|p| {
             let parent = p.parent()?;
@@ -193,6 +197,8 @@ pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
         exe_dir.join("skills"),
         exe_dir.join("_up_").join("skills"), // Tauri resources (Windows MSI)
         exe_dir.join("resources").join("skills"), // Tauri resources alt layout
+        exe_dir.join("..").join("Resources").join("skills"), // macOS .app: Contents/Resources/skills
+        exe_dir.join("..").join("Resources").join("_up_").join("skills"), // macOS _up_ mapping
         exe_dir.join("..").join("skills"),   // target/release/../skills = target/skills
         exe_dir.join("..").join("..").join("skills"), // target/release/../../skills = project-root/skills
         exe_dir.join("..").join("src-tauri").join("skills"), // target/release/ -> target/src-tauri/skills
