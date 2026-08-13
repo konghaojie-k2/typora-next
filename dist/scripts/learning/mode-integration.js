@@ -1305,15 +1305,27 @@
         <div class="info" id="cornellSidebarInfo">📖 尚未选词</div>
         <div class="meta" id="cornellSidebarMeta">还没有 cue</div>
       </div>
+      <div class="cornell-sidebar-actions">
+        <button class="cornell-footer-btn" id="caseStudyBtn">📋 案例研习记录</button>
+      </div>
       <div class="cornell-sidebar-body" id="cornellSidebarBody">
         <div class="cornell-cue-empty" id="cornellEmptyState">
           <div class="icon">📌</div>
-          选中正文中的文字<br>点击下方按钮生成 cue<br><br>
-          <span style="font-size:10px;color:#6b7280;">例：选中"位置编码"<br>→ 点底部按钮解释</span>
+          选中正文中的文字<br>点击上方按钮解释或生成案例<br><br>
+          <span style="font-size:10px;color:#6b7280;">例：选中"位置编码"<br>→ 点 💡 解释 / 📋 案例研习</span>
         </div>
       </div>
-      <div class="cornell-sidebar-footer" id="cornellSidebarFooter">💡 选中文字后点击此处解释</div>
+      <div class="cornell-sidebar-footer" id="cornellSidebarFooter">💡 选中文字后可解释或生成案例</div>
     `;
+
+    // 案例研习记录入口（Sprint 17 UX 修正：新建案例只在划词气泡原地触发，
+    // 侧栏按钮 = 纯历史回看；解释走划词气泡 🤖 / cue 卡片）
+    const caseStudyBtn = document.getElementById('caseStudyBtn');
+    if (caseStudyBtn) {
+      caseStudyBtn.addEventListener('click', () => {
+        if (window.CaseStudyModal) window.CaseStudyModal.openHistory(_projectPath);
+      });
+    }
 
     // Bind selectionchange
     if (!_selectionChangeHandler) {
@@ -1355,6 +1367,13 @@
       const sel = window.getSelection();
       const text = sel ? sel.toString().trim() : '';
       if (!text || text.length < 2) return;
+
+      // UX 修正（2026-08-11）：只追踪文章正文内的划词，
+      // 侧栏/面板/弹窗里的选中不算（否则会误启用文章外的案例研习）
+      let node = sel.rangeCount > 0 ? sel.getRangeAt(0).startContainer : null;
+      while (node && node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+      const mdBody = document.getElementById('markdownBody');
+      if (!mdBody || !node || !mdBody.contains(node)) return;
 
       // Just track selected text for context; cue creation is triggered via toolbar button
       _pendingSelectedText = text;
@@ -2069,6 +2088,54 @@
   }
 
   // ============================================
+  // Sprint 17: Case Study（案例研习）
+  // ============================================
+
+  /**
+   * 打开案例研习面板。
+   * @param {string} term - 划词选中的概念；为空则打开历史回看列表
+   */
+  async function openCaseStudy(term) {
+    if (!window.CaseStudyModal) {
+      console.warn('[Sprint17] CaseStudyModal not loaded');
+      return;
+    }
+    if (!term) {
+      await window.CaseStudyModal.openHistory(_projectPath);
+      return;
+    }
+
+    // 章节上下文（与 createCue 同源逻辑；surroundingText 取不到时留空，
+    // skill 会基于 chapterGoal/通识兜底）
+    let chapterGoal = '';
+    const md = document.getElementById('markdownBody');
+    if (md) {
+      const callout = md.querySelector('blockquote[data-sprint3-enhanced]');
+      if (callout) chapterGoal = callout.textContent.trim().substring(0, 200);
+    }
+    let surroundingText = '';
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0 && sel.toString().trim()) {
+      let node = sel.getRangeAt(0).startContainer;
+      while (node && node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+      const blockEl = node?.closest?.('p, h1, h2, h3, h4, li, td, blockquote') || node;
+      if (blockEl) surroundingText = blockEl.textContent.trim().substring(0, 400);
+    }
+
+    const modal = new window.CaseStudyModal({
+      projectPath: _projectPath,
+      selectedText: term,
+      context: {
+        chapterTitle: _currentChapterTitle,
+        chapterGoal,
+        surroundingText
+      },
+      chapterFile: _currentChapterFile
+    });
+    await modal.open();
+  }
+
+  // ============================================
   // Public API
   // ============================================
 
@@ -2081,6 +2148,7 @@
     checkAndShowDailyReview,
     clearCues,
     createCue,
+    openCaseStudy,
     getProjectPath() { return _projectPath; },
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }

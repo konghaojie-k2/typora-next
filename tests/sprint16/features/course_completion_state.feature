@@ -53,6 +53,22 @@ Feature: 课程完结状态（Course Completion State）
     When the review entry spec is computed
     Then the review entry should be hidden
 
+  # 实机反馈（2026-08-12）：仅去计数徽标不够，橙红渐变按钮本身仍是视觉催促
+  Scenario: 已完结课程的复习入口为平静样式（不催促）
+    Given a completed course with 3 due review items
+    When the review entry spec is computed
+    Then the review entry should use the calm style
+
+  Scenario: 未完结有到期课程的复习入口保持提醒态（回归）
+    Given an active course with 3 due review items
+    When the review entry spec is computed
+    Then the review entry should use the urgent style
+
+  # 实机反馈（2026-08-12）：图谱 dashboard 元素溢出触发滚轮，必须一屏看完
+  Scenario: dashboard 源码接入 calm 样式与一屏看完布局
+    Given the real dashboard source and stylesheet
+    Then the dashboard should wire the calm class and fit-to-screen rendering
+
   Scenario: Rust 持久化路径接入完结标记
     Given the real lib.rs source
     Then persist_quiz_result should call the course completion marker

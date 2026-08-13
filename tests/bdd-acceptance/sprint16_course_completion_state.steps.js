@@ -21,6 +21,8 @@ const CourseSummary = require('../../dist/scripts/learning/course-summary');
 const steps = new StepRegistry();
 
 const LIB_RS = path.join(__dirname, '../../src-tauri/src/lib.rs');
+const DASHBOARD_JS = path.join(__dirname, '../../dist/scripts/learning/knowledge-graph-dashboard.js');
+const LEARNING_CSS = path.join(__dirname, '../../dist/styles/learning.css');
 
 let _tmpDirs = [];
 
@@ -95,6 +97,11 @@ steps.given('the real lib.rs source', function() {
   this.libRs = fs.readFileSync(LIB_RS, 'utf-8');
 });
 
+steps.given('the real dashboard source and stylesheet', function() {
+  this.dashboardJs = fs.readFileSync(DASHBOARD_JS, 'utf-8');
+  this.learningCss = fs.readFileSync(LEARNING_CSS, 'utf-8');
+});
+
 // ============================================
 // When
 // ============================================
@@ -145,6 +152,42 @@ steps.then('the review entry should show the count {int}', function(n) {
 steps.then('the review entry should be hidden', function() {
   if (!this.spec || this.spec.visible !== false) {
     throw new Error(`Expected visible=false, got ${JSON.stringify(this.spec)}`);
+  }
+});
+
+steps.then('the review entry should use the calm style', function() {
+  if (!this.spec || this.spec.visible !== true || this.spec.urgent !== false) {
+    throw new Error(`Expected visible=true, urgent=false, got ${JSON.stringify(this.spec)}`);
+  }
+});
+
+steps.then('the review entry should use the urgent style', function() {
+  if (!this.spec || this.spec.visible !== true || this.spec.urgent !== true) {
+    throw new Error(`Expected visible=true, urgent=true, got ${JSON.stringify(this.spec)}`);
+  }
+});
+
+steps.then('the dashboard should wire the calm class and fit-to-screen rendering', function() {
+  // 1. calm 样式接线：非提醒态走 kg-action-review-calm
+  if (!this.dashboardJs.includes('kg-action-review-calm')) {
+    throw new Error('dashboard JS does not wire kg-action-review-calm');
+  }
+  // 2. CSS 存在 calm 覆盖（在橙红渐变定义之后生效）
+  const urgentIdx = this.learningCss.indexOf('.kg-action-btn.kg-action-review {');
+  const calmIdx = this.learningCss.lastIndexOf('.kg-action-review-calm');
+  if (urgentIdx < 0 || calmIdx < 0 || calmIdx < urgentIdx) {
+    throw new Error('learning.css missing effective .kg-action-review-calm override');
+  }
+  // 3. 一屏看完：图谱模式 modal 固定高 + canvas flex 自适应
+  if (!this.learningCss.includes('.kg-dashboard-modal--has-graph')) {
+    throw new Error('learning.css missing .kg-dashboard-modal--has-graph layout');
+  }
+  if (!this.dashboardJs.includes('kg-dashboard-modal--has-graph')) {
+    throw new Error('dashboard JS does not add --has-graph modifier');
+  }
+  // 4. D3 按真实容器高度渲染（而非硬编码 400）
+  if (!this.dashboardJs.includes('container.clientHeight')) {
+    throw new Error('dashboard D3 render does not use container.clientHeight');
   }
 });
 

@@ -5890,6 +5890,7 @@ window.agentBridge = {
         <button id="deleteAnnotationBtn" title="删除">🗑️</button>
         <button id="translateSelectionBtn" title="翻译">译</button>
         <button id="aiExplainBtn" title="AI 解释" style="display:none">🤖</button>
+        <button id="caseStudySelectionBtn" title="案例研习" style="display:none">📋</button>
       </div>
     `;
     document.body.appendChild(selectionToolbar);
@@ -6114,6 +6115,18 @@ window.agentBridge = {
         window.LearningModeIntegration.createCue(text);
       }
     });
+
+    // Sprint 17: 划词原地触发案例研习（与苏格拉底共用笔记本面板，不进窄侧栏）
+    selectionToolbar.querySelector('#caseStudySelectionBtn').addEventListener('click', () => {
+      const selection = window.getSelection();
+      if (!selection || selection.isCollapsed) return;
+      const text = selection.toString().trim();
+      if (!text || text.length < 2) return;
+      hideSelectionToolbar();
+      if (window.LearningModeIntegration && window.LearningModeIntegration.openCaseStudy) {
+        window.LearningModeIntegration.openCaseStudy(text);
+      }
+    });
   }
 
   function findTextRange(container, searchText) {
@@ -6241,6 +6254,11 @@ window.agentBridge = {
     if (aiBtn) {
       aiBtn.style.display = AppWorkspace.isIn('course') ? 'inline-flex' : 'none';
     }
+    // Sprint 17: 案例研习按钮与解释按钮同显隐（仅课程模式）
+    const caseBtn = selectionToolbar.querySelector('#caseStudySelectionBtn');
+    if (caseBtn) {
+      caseBtn.style.display = AppWorkspace.isIn('course') ? 'inline-flex' : 'none';
+    }
     selectionToolbar.style.display = 'flex';
     selectionToolbar.style.left = (rect.left + rect.width / 2 - 60) + 'px';
     selectionToolbar.style.top = (rect.top - 40) + 'px';
@@ -6309,9 +6327,15 @@ window.agentBridge = {
       const range = selection.getRangeAt(0);
       const rect = range.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
-        // Detect if selection is inside an existing annotation
+        // UX 修正（2026-08-11）：划词气泡只在文章正文内出现——
+        // 侧栏/面板/弹窗里的选中不触发（批注/翻译/解释/案例都是正文功能）
         const node = range.commonAncestorContainer;
         const parentEl = node.nodeType === Node.TEXT_NODE ? node.parentElement : node;
+        if (!parentEl || !elements.markdownBody.contains(parentEl)) {
+          setTimeout(() => hideSelectionToolbar(), 150);
+          return;
+        }
+        // Detect if selection is inside an existing annotation
         const annEl = parentEl?.closest('.annotation-highlight, .annotation-underline');
         if (annEl && annEl.dataset.annotationId) {
           lastAnnotationId = annEl.dataset.annotationId;

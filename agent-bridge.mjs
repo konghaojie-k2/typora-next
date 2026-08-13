@@ -6,7 +6,7 @@
  *   node agent-bridge.mjs <stage> <config_json>
  *
  * Stages (contracts unchanged from the claude-kernel bridge):
- *   check / plan / generate / explain / socratic / review-gen /
+ *   check / plan / generate / explain / socratic / case-study / review-gen /
  *   review-gen-batch / generate-extra-quiz / paper-reader / init / chat / explore
  *
  * stdout = JSON lines for Rust (emit protocol unchanged), stderr = logs.
@@ -222,6 +222,8 @@ async function _runPiTurnReal(opts) {
     session.subscribe((ev) => {
       if (ev.type === 'message_update' && ev.assistantMessageEvent?.type === 'text_delta') {
         chunks.push(ev.assistantMessageEvent.delta);
+        // Sprint 17: 流式输出（案例研习等场景实时渲染）
+        if (opts.onDelta) opts.onDelta(ev.assistantMessageEvent.delta);
       }
       if (ev.type === 'tool_execution_start' && onToolLog) {
         const logText = _toolLogText(ev.toolName, ev.args || {});
@@ -690,6 +692,49 @@ export async function socraticChat(queryFnUnused, config, args) {
   return { content, done, session_id };
 }
 
+/**
+ * Case Study stage（Sprint 17）：划词选概念 → AI 生成教学案例 + 自由追问。
+ * 与 socratic 同构（runPiTurn + sessionId 续聊），但无 done 状态——
+ * 用户手动关闭面板，无 [SESSION_END] 契约。
+ */
+export async function caseStudyChat(queryFnUnused, config, args) {
+  const { project_path, selected_text, context, user_answer } = args;
+
+  if (!project_path) {
+    throw new Error('project_path is required for case study');
+  }
+  if (!selected_text || !selected_text.trim()) {
+    throw new Error('selected_text is required for case study');
+  }
+
+  const isFirstTurn = !user_answer;
+  log('info', 'Starting case study', { project_path, selected_text, first_turn: isFirstTurn });
+
+  const prompt = isFirstTurn
+    ? `请使用 typora-course-case-study skill 生成教学案例。\n` +
+      `选中概念: ${JSON.stringify(selected_text)}\n` +
+      (context ? `章节上下文: ${JSON.stringify(context)}\n` : '')
+    : user_answer;
+
+  const { output, sessionFile } = await runPiTurn({
+    prompt,
+    config,
+    cwd: project_path,
+    tools: ['read', 'write', 'find', 'grep'],
+    sessionId: args.session_id,
+    // Sprint 17: 流式输出——text_delta 实时 emit，Rust 逐行转发给前端渲染
+    onDelta: (delta) => emit('case_study_delta', { delta })
+  });
+
+  if (!output || output.trim().length === 0) {
+    throw new Error('Agent returned empty case study response');
+  }
+
+  const session_id = sessionFile || args.session_id || null;
+  log('info', 'Case study turn complete', { content_length: output.trim().length, has_session: !!session_id });
+  return { content: output.trim(), done: false, session_id };
+}
+
 export async function generatePaperReaderGuide(queryFnUnused, config, args) {
   const { paper_file, output_file, persona, session_id } = args;
   if (!paper_file) {
@@ -1019,6 +1064,13 @@ async function main() {
         const socraticResult = await socraticChat(null, config, taskArgs);
         console.log(JSON.stringify(socraticResult));
         log('info', 'Socratic stage completed', { done: socraticResult.done, content_length: socraticResult.content.length });
+        process.exit(0);
+      }
+      case 'case-study': {
+        log('info', 'Starting case-study stage', { project_path: taskArgs.project_path, selected_text: taskArgs.selected_text, session_id: taskArgs.session_id || null });
+        const caseResult = await caseStudyChat(null, config, taskArgs);
+        console.log(JSON.stringify(caseResult));
+        log('info', 'Case-study stage completed', { content_length: caseResult.content.length });
         process.exit(0);
       }
       case 'review-gen': {

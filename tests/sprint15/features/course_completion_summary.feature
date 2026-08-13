@@ -30,7 +30,12 @@ Feature: 课程完成时生成 slide 总结（Course Completion Slide Summary）
   Scenario: 生成的总结文件能用 --- 解析成多页幻灯片
     Given an AI-written summary markdown with --- separators
     When the summary is parsed as slide structure
-    Then it should yield at least 4 slide groups
+    Then it should yield at least 6 slide groups
+
+  # 2026-08-12 总结升级：精华 + case study；设计思路化进主题页脉络、不单设元说明页
+  Scenario: 总结包含精华提炼与 Case Study 页，且无独立的课程设计说明页
+    Given an AI-written summary markdown with --- separators
+    Then the summary should contain essence and case study pages without a meta design page
 
   Scenario: 生成总结后文件存在，可再次进入
     Given the course summary file was written to disk

@@ -298,6 +298,17 @@ async function runAcceptanceTests() {
   totalPassed += explainRawQuoteResult.passed;
   totalFailed += explainRawQuoteResult.failed;
 
+  // Sprint 17: Course case study (notebook shell + case-study stage + session persistence)
+  console.log(`\n${YELLOW}▶ Sprint 17: Course Case Study${RESET}`);
+  const caseStudySteps = require('./sprint17_case_study.steps');
+  const caseStudyResult = await runFeatureFile(
+    path.join(__dirname, '../sprint17/features/case_study.feature'),
+    caseStudySteps
+  );
+  totalPassed += caseStudyResult.passed;
+  totalFailed += caseStudyResult.failed;
+  if (caseStudySteps._cleanup) caseStudySteps._cleanup.call({});
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

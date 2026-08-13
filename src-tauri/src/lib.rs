@@ -4408,6 +4408,65 @@ async fn socratic_save_session(
     Ok(file_path.display().to_string())
 }
 
+/// Sprint 17: 案例研习会话落盘（.learning/case-studies/{ts}.json）。
+/// session schema 由前端持有（selected_text/chapter_file/session_id/turns/...），
+/// Rust 只做写盘，用 Value 透传。
+#[tauri::command]
+async fn case_study_save_session(
+    project_path: String,
+    session: serde_json::Value,
+) -> Result<String, String> {
+    let sessions_dir = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("case-studies");
+    std::fs::create_dir_all(&sessions_dir)
+        .map_err(|e| format!("创建 case-studies 目录失败: {}", e))?;
+
+    let ended = session
+        .get("ended_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .replace(':', "-")
+        .replace('.', "-");
+    let file_path = sessions_dir.join(format!("{}.json", ended));
+    let json = serde_json::to_string_pretty(&session)
+        .map_err(|e| format!("序列化 case study session 失败: {}", e))?;
+    std::fs::write(&file_path, json).map_err(|e| format!("写入 case study session 失败: {}", e))?;
+    Ok(file_path.display().to_string())
+}
+
+/// Sprint 17: 列出案例研习历史会话（新→旧），供只读回看。
+#[tauri::command]
+async fn case_study_list_sessions(project_path: String) -> Result<Vec<serde_json::Value>, String> {
+    let sessions_dir = std::path::PathBuf::from(&project_path)
+        .join(".learning")
+        .join("case-studies");
+    if !sessions_dir.exists() {
+        return Ok(vec![]);
+    }
+    let mut sessions = vec![];
+    let entries = std::fs::read_dir(&sessions_dir)
+        .map_err(|e| format!("读取 case-studies 目录失败: {}", e))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) {
+                sessions.push(v);
+            }
+        }
+    }
+    // 文件名即 ISO 时间戳，按 ended_at 倒序（新→旧）
+    sessions.sort_by(|a, b| {
+        let ea = a.get("ended_at").and_then(|v| v.as_str()).unwrap_or("");
+        let eb = b.get("ended_at").and_then(|v| v.as_str()).unwrap_or("");
+        eb.cmp(ea)
+    });
+    Ok(sessions)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -4536,6 +4595,9 @@ pub fn run() {
             socratic_save_state,
             socratic_save_session,
             ai_agent::socratic_chat,
+            ai_agent::case_study_chat,
+            case_study_save_session,
+            case_study_list_sessions,
             read_exploration_session,
             write_exploration_session,
             delete_exploration_session,

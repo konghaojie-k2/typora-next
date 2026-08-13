@@ -79,11 +79,17 @@ TestRunner.test('完结课程 + 无到期 → 仍常驻（入口保留）', () =
   TestRunner.assertEquals(spec.showCount, false);
 });
 
+TestRunner.test('完结课程 → 非提醒态 urgent=false（实机反馈：橙红渐变本身也是催促）', () => {
+  TestRunner.assertEquals(getReviewEntrySpec(true, 3).urgent, false);
+  TestRunner.assertEquals(getReviewEntrySpec(true, 0).urgent, false);
+});
+
 TestRunner.test('未完结 + 有到期 → 显示且带计数（回归）', () => {
   const spec = getReviewEntrySpec(false, 3);
   TestRunner.assertEquals(spec.visible, true);
   TestRunner.assertEquals(spec.showCount, true);
   TestRunner.assertEquals(spec.count, 3);
+  TestRunner.assertEquals(spec.urgent, true);
 });
 
 TestRunner.test('未完结 + 无到期 → 隐藏（回归）', () => {

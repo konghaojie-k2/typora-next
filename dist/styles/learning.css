@@ -7568,3 +7568,135 @@ body.learning-mode .toolbar {
   border: 1px solid rgba(16, 185, 129, 0.35);
   border-radius: 999px;
 }
+
+/* Sprint 17: Cornell 操作行（解释 / 案例研习）——位于 header 下方，
+   不放在 footer：底部 fixed 进度条（.learning-progress）会遮挡 footer */
+.cornell-sidebar-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 10px 8px;
+  flex-shrink: 0;
+}
+.cornell-footer-btn {
+  flex: 1;
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary, rgba(127, 127, 127, 0.08));
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.cornell-footer-btn:hover:not(:disabled) {
+  background: var(--color-bg-tertiary, rgba(127, 127, 127, 0.16));
+}
+.cornell-footer-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Sprint 17: 案例研习历史列表 */
+.casestudy-history-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.casestudy-history-item {
+  padding: 10px 14px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.casestudy-history-item:hover {
+  background: rgba(129, 140, 248, 0.08);
+}
+.casestudy-history-concept {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+.casestudy-history-meta {
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Sprint 17: 气泡内 markdown 渲染（notebook-modal socratic-bubble-md） */
+.socratic-bubble-md h3, .socratic-bubble-md h4 {
+  margin: 8px 0 4px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.socratic-bubble-md p { margin: 4px 0; }
+.socratic-bubble-md ul, .socratic-bubble-md ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.socratic-bubble-md pre {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: rgba(127, 127, 127, 0.12);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+.socratic-bubble-md code {
+  font-size: 12px;
+  background: rgba(127, 127, 127, 0.12);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.socratic-bubble-md pre code { background: none; padding: 0; }
+.socratic-bubble-md blockquote {
+  margin: 4px 0;
+  padding-left: 10px;
+  border-left: 3px solid var(--color-border);
+  color: var(--color-text-secondary, #6b7280);
+}
+
+/* Sprint 17: 流式气泡光标 */
+.socratic-bubble-streaming::after {
+  content: '▋';
+  margin-left: 2px;
+  animation: casestudy-blink 0.8s step-end infinite;
+  color: var(--color-accent, #2563eb);
+}
+@keyframes casestudy-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Sprint 16 实机反馈：完结课程复习入口去提醒态 —— 仅去计数不够，
+   橙红渐变本身就是「今日有到期复习项」的视觉催促；calm 修饰类改中性样式 */
+.kg-action-btn.kg-action-review.kg-action-review-calm {
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+  box-shadow: none;
+}
+
+.kg-action-btn.kg-action-review.kg-action-review-calm:hover {
+  opacity: 1;
+  background: var(--color-bg-tertiary);
+  box-shadow: none;
+}
+
+/* Sprint 16 实机反馈：图谱模式 dashboard 一屏看完 —— modal 固定 88vh
+   flex 列布局，canvas 吃掉剩余高度（D3 按真实 clientHeight 渲染），
+   header/stats/actions 恒在视口内，无滚轮 */
+.kg-dashboard-modal--has-graph {
+  height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.kg-dashboard-modal--has-graph .kg-graph-canvas {
+  flex: 1 1 auto;
+  min-height: 220px;
+}

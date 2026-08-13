@@ -85,19 +85,19 @@
 
   /**
    * Dashboard 复习入口展示决策（Sprint 16）。
-   * 完结课程：入口常驻、不带计数徽标（不再催复习）；
-   * 未完结：仅有到期项时显示，且带计数。
-   * @returns {{visible: boolean, showCount: boolean, count: number}}
+   * 完结课程：入口常驻、不带计数徽标、不用提醒态样式（不再催复习）；
+   * 未完结：仅有到期项时显示，且带计数 + 提醒态。
+   * @returns {{visible: boolean, showCount: boolean, count: number, urgent: boolean}}
    */
   function getReviewEntrySpec(courseCompleted, dueCount) {
     const due = Number.isInteger(dueCount) && dueCount > 0 ? dueCount : 0;
     if (courseCompleted) {
-      return { visible: true, showCount: false, count: 0 };
+      return { visible: true, showCount: false, count: 0, urgent: false };
     }
     if (due > 0) {
-      return { visible: true, showCount: true, count: due };
+      return { visible: true, showCount: true, count: due, urgent: true };
     }
-    return { visible: false, showCount: false, count: 0 };
+    return { visible: false, showCount: false, count: 0, urgent: false };
   }
 
   // ============================================

@@ -8,6 +8,9 @@
  * - Bottom: input + send
  * - No fixed "X/Y" progress (AI decides question order/count dynamically)
  * - 2nd confirm on end (avoid accidental close, Sprint 2 lesson)
+ *
+ * Sprint 17: UI 外壳抽至 notebook-modal.js（本类 = 引擎：cluster 加载 /
+ * tutor 对话 / 会话落盘），公共 API 与 DOM id 不变。
  */
 
 (function() {
@@ -41,6 +44,14 @@
       addEventListener: () => {},
       removeEventListener: () => {}
     };
+  }
+
+  // Sprint 17: UI 外壳依赖（浏览器由 index.html 先加载 notebook-modal.js；
+  // Node 测试只 require 本文件，需兜底引入）
+  if (!window.NotebookModal && typeof require !== 'undefined') {
+    try {
+      window.NotebookModal = require('./notebook-modal.js').NotebookModal;
+    } catch (_) { /* browser path — script tag provides it */ }
   }
 
   class SocraticModal {
@@ -87,7 +98,7 @@
         this.cluster = { concepts: [], edges: [], cluster_hash: 'empty' };
       }
 
-      // Render UI
+      // Render UI（Sprint 17: 外壳在 notebook-modal.js，id 与拆分前一致）
       this._renderDOM();
       this._bindEvents();
 
@@ -95,86 +106,46 @@
       await this._sendTutorTurn();
     }
 
-    /** Build the V2 Notebook modal DOM */
+    /** Build the V2 Notebook modal DOM（Sprint 17: 委托 NotebookModal 外壳） */
     _renderDOM() {
-      // Remove any existing
-      const existing = document.getElementById('socraticModalOverlay');
-      if (existing) existing.remove();
-
-      const overlay = document.createElement('div');
-      overlay.id = 'socraticModalOverlay';
-      overlay.className = 'socratic-modal-overlay';
-
-      const card = document.createElement('div');
-      card.id = 'socraticModalCard';
-      card.className = 'socratic-modal-card';
-
-      // Header
       const chipsHtml = this.concept_titles.length > 0
         ? this.concept_titles.map((t, i) =>
             `<span class="socratic-chip ${i === 0 ? 'socratic-chip-primary' : ''}">#${t}</span>`
           ).join('')
         : '<span class="socratic-chip-fallback">无概念（KG 稀疏 fallback）</span>';
 
-      card.innerHTML = `
-        <div class="socratic-modal-header">
-          <div class="socratic-modal-header-top">
-            <div class="socratic-modal-header-left">
-              <div class="socratic-modal-icon">🏛️</div>
-              <div>
-                <div class="socratic-modal-title">Socratic 复习</div>
-                <div class="socratic-modal-subtitle">本场概念: ${this.concept_titles.join(' · ') || '—'}</div>
-              </div>
-            </div>
-            <button id="socraticEndBtn" class="socratic-modal-end-btn">结束</button>
-          </div>
-          <div id="socraticConceptChips" class="socratic-concept-chips">
-            ${chipsHtml}
-          </div>
-        </div>
-        <div id="socraticChat" class="socratic-chat">
-          <div class="socratic-chat-placeholder">
-            🧑‍🏫 等待 tutor 第一问...
-          </div>
-        </div>
-        <div class="socratic-input-area">
-          <div class="socratic-input-row">
-            <textarea id="socraticInput" class="socratic-input" placeholder="输入你的回答... (Shift+Enter 换行, Enter 发送)"></textarea>
-            <button id="socraticSendBtn" class="socratic-send-btn">发送</button>
-          </div>
-          <div class="socratic-input-hint">Enter 发送 · Shift+Enter 换行 · ESC 结束</div>
-        </div>
-      `;
+      this._shell = new window.NotebookModal({
+        prefix: 'socratic',
+        icon: '🏛️',
+        title: 'Socratic 复习',
+        subtitle: `本场概念: ${this.concept_titles.join(' · ') || '—'}`,
+        chipsHtml,
+        placeholder: '🧑‍🏫 等待 tutor 第一问...',
+        tutorAvatar: '🏛️'
+      });
+      this._shell.render();
+      this._chatEl = this._shell.chatEl;
+      this._inputEl = this._shell.inputEl;
+      this._card = this._shell._card;
+    }
 
-      overlay.appendChild(card);
-      document.body.appendChild(overlay);
-
-      this._overlay = overlay;
-      this._card = card;
-      this._chatEl = card.querySelector('#socraticChat');
-      this._inputEl = card.querySelector('#socraticInput');
+    /** 外壳获取（懒初始化）：open() 正常路径用 render 后的真外壳；
+     *  单测直接构造未 render 时，桥接旧字段（_chatEl 等测试注入）建 headless 外壳。 */
+    _getShell() {
+      if (!this._shell) {
+        this._shell = new window.NotebookModal({ prefix: 'socratic', tutorAvatar: '🏛️' });
+        this._shell._chatEl = this._chatEl || null;
+        this._shell._inputEl = this._inputEl || null;
+        this._shell._card = this._card || null;
+      }
+      return this._shell;
     }
 
     _bindEvents() {
-      const self = this;
-      const sendBtn = this._card.querySelector('#socraticSendBtn');
-      sendBtn.addEventListener('click', () => self._handleSend());
-
-      this._inputEl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          self._handleSend();
-        }
+      this._getShell().bindEvents({
+        onSend: () => this._handleSend(),
+        onEndClick: () => this._handleEndClick()
       });
-
-      this._card.querySelector('#socraticEndBtn').addEventListener('click', () => {
-        self._handleEndClick();
-      });
-
-      this._escHandler = (e) => {
-        if (e.key === 'Escape') self._handleEndClick();
-      };
-      document.addEventListener('keydown', this._escHandler);
     }
 
     /** End/close button: if the session is already done & saved, just close;
@@ -188,9 +159,8 @@
     }
 
     async _handleSend() {
-      const text = this._inputEl.value.trim();
+      const text = this._getShell().takeInput();
       if (!text) return;
-      this._inputEl.value = '';
       this._appendUserBubble(text);
       this.turns.push({ role: 'user', content: text });
       this.notebookCards.push({ type: 'a', content: text });
@@ -228,37 +198,15 @@
     }
 
     _appendTutorBubble(content) {
-      const el = document.createElement('div');
-      el.className = 'socratic-bubble-row';
-      el.innerHTML = `
-        <div class="socratic-avatar-tutor">🏛️</div>
-        <div class="socratic-bubble-tutor">${escapeHtml(content)}</div>
-      `;
-      this._chatEl.appendChild(el);
-      this._chatEl.scrollTop = this._chatEl.scrollHeight;
+      this._getShell().appendTutorBubble(content);
     }
 
     _appendUserBubble(content) {
-      const el = document.createElement('div');
-      el.className = 'socratic-bubble-row-user';
-      el.innerHTML = `
-        <div class="socratic-bubble-user">${escapeHtml(content)}</div>
-        <div class="socratic-avatar-user">我</div>
-      `;
-      this._chatEl.appendChild(el);
-      this._chatEl.scrollTop = this._chatEl.scrollHeight;
+      this._getShell().appendUserBubble(content);
     }
 
     _appendLoadingBubble() {
-      const el = document.createElement('div');
-      el.className = 'socratic-bubble-row';
-      el.innerHTML = `
-        <div class="socratic-avatar-tutor">🏛️</div>
-        <div class="socratic-bubble-loading">思考中...</div>
-      `;
-      this._chatEl.appendChild(el);
-      this._chatEl.scrollTop = this._chatEl.scrollHeight;
-      return el;
+      return this._getShell().appendLoadingBubble();
     }
 
     _show2ndConfirm() {
@@ -285,11 +233,7 @@
 
     /** Disable input after the dialogue ends; relabel end button to "关闭" */
     _lockInput() {
-      if (this._inputEl) this._inputEl.disabled = true;
-      const sendBtn = this._card && this._card.querySelector('#socraticSendBtn');
-      if (sendBtn) sendBtn.disabled = true;
-      const endBtn = this._card && this._card.querySelector('#socraticEndBtn');
-      if (endBtn) endBtn.textContent = '关闭';
+      this._getShell().lockInput();
     }
 
     _appendDoneCard() {
@@ -304,8 +248,7 @@
     }
 
     _close() {
-      if (this._overlay) this._overlay.remove();
-      if (this._escHandler) document.removeEventListener('keydown', this._escHandler);
+      this._getShell().close();
       this.opened = false;
     }
 
@@ -400,12 +343,6 @@
 
       return true;
     }
-  }
-
-  function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = String(text || '');
-    return div.innerHTML;
   }
 
   window.SocraticModal = SocraticModal;

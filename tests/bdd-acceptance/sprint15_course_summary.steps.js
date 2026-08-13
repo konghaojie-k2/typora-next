@@ -40,7 +40,7 @@ function tmpdir(prefix) {
 /** 一份带 --- 分隔的演示总结（模拟 agent 写盘内容）。 */
 const MOCK_SUMMARY_MD = `# 扩散模型课程总结
 
-这是一门关于扩散模型的入门课。
+用直觉走进生成之美
 
 ---
 
@@ -72,11 +72,31 @@ const MOCK_SUMMARY_MD = `# 扩散模型课程总结
 
 ---
 
+## 精华提炼
+
+> 如果只能记住三件事
+
+1. 扩散就是逐步加噪再学会去噪
+2. 训练目标是预测噪声
+3. 采样是迭代反演
+
+---
+
+## Case Study：Stable Diffusion
+
+**情境**：Stability AI 要做消费级文生图。
+
+**应用**：潜空间扩散大幅降低算力门槛。
+
+**启示**：好架构让理论落地。
+
+---
+
 ## 学习回顾
 
-1. 最重要知识点 1
-2. 最重要知识点 2
-3. 最重要知识点 3
+1. 扩散模型
+2. 噪声调度
+3. UNet
 `;
 
 // ============================================
@@ -168,9 +188,21 @@ steps.then('no summary offer should be shown', function() {
   }
 });
 
-steps.then('it should yield at least 4 slide groups', function() {
-  if (!Array.isArray(this.groups) || this.groups.length < 4) {
-    throw new Error(`Expected ≥4 slide groups, got ${Array.isArray(this.groups) ? this.groups.length : 'not-array'}`);
+steps.then('it should yield at least 6 slide groups', function() {
+  if (!Array.isArray(this.groups) || this.groups.length < 6) {
+    throw new Error(`Expected ≥6 slide groups, got ${Array.isArray(this.groups) ? this.groups.length : 'not-array'}`);
+  }
+});
+
+steps.then('the summary should contain essence and case study pages without a meta design page', function() {
+  for (const section of ['## 精华提炼', '## Case Study']) {
+    if (!this.summaryMd.includes(section)) {
+      throw new Error(`Summary missing section: ${section}`);
+    }
+  }
+  // 设计思路应化进主题页脉络，禁止单设一页直接谈论设计（2026-08-12 用户反馈）
+  if (this.summaryMd.includes('## 课程设计思路')) {
+    throw new Error('Summary must not have a standalone 课程设计思路 page');
   }
 });
 
@@ -215,6 +247,15 @@ steps.then('a typora-course-summary skill should exist with valid frontmatter', 
   }
   if (!content.includes('MUST-VERIFY')) {
     throw new Error('SKILL.md missing MUST-VERIFY checklist');
+  }
+  // 2026-08-12 总结升级：脉络即设计 + 精华提炼 + Case Study 三段约束
+  for (const section of ['脉络', '精华提炼', 'Case Study']) {
+    if (!content.includes(section)) {
+      throw new Error(`SKILL.md missing section constraint: ${section}`);
+    }
+  }
+  if (!content.includes('禁止**单设一页直接解释课程设计')) {
+    throw new Error('SKILL.md must forbid a standalone course-design page');
   }
 });
 

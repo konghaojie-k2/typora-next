@@ -76,9 +76,12 @@
       }
 
       // Content area: graph or chapter list
+      // 图谱模式：modal 固定 88vh flex 列布局，canvas 吃掉剩余高度（一眼看完，无滚轮）
+      let graphCanvas = null;
       if (data.graph) {
-        const canvas = this._createGraphCanvas(data.graph);
-        modal.appendChild(canvas);
+        modal.classList.add('kg-dashboard-modal--has-graph');
+        graphCanvas = this._createGraphCanvas(data.graph);
+        modal.appendChild(graphCanvas);
       } else if (data.chapters) {
         const list = this._createChapterList(data.chapters);
         modal.appendChild(list);
@@ -91,6 +94,12 @@
       overlay.appendChild(modal);
       document.body.appendChild(overlay);
       this._overlay = overlay;
+
+      // D3 渲染推迟到 DOM 插入后：此时 flex 布局已算出 canvas 真实宽高，
+      // svg 按 clientHeight 绘制，图谱始终完整落在可视区域内
+      if (graphCanvas && typeof d3 !== 'undefined') {
+        this._renderD3Graph(graphCanvas, data.graph);
+      }
     }
 
     _createHeader(projectName, courseCompleted) {
@@ -157,13 +166,14 @@
         return canvas;
       }
 
-      this._renderD3Graph(canvas, graph);
+      // 渲染在 _createDOM 完成 DOM 插入后进行（需要真实 clientHeight）
       return canvas;
     }
 
     _renderD3Graph(container, graph) {
       const width = container.clientWidth || 700;
-      const height = 400;
+      // 高度取 flex 布局后的真实高度，兜底 400（jsdom/旧调用路径）
+      const height = container.clientHeight || 400;
       const nodes = (graph.nodes || []).map(n => ({ ...n }));
       const edges = (graph.edges || []).map(e => ({ source: e.from, target: e.to }));
 
@@ -327,10 +337,13 @@
       const dueCount = (data && data.dueCount) || 0;
       const spec = (window.CourseSummary && window.CourseSummary.getReviewEntrySpec)
         ? window.CourseSummary.getReviewEntrySpec(!!(data && data.courseCompleted), dueCount)
-        : { visible: dueCount > 0, showCount: dueCount > 0, count: dueCount };
+        : { visible: dueCount > 0, showCount: dueCount > 0, count: dueCount, urgent: dueCount > 0 };
       if (spec.visible) {
         const reviewBtn = document.createElement('button');
-        reviewBtn.className = 'kg-action-btn kg-action-review';
+        // 非提醒态（完结课程）用中性样式：橙红渐变 = 「今日有到期复习项」的视觉催促
+        reviewBtn.className = spec.urgent
+          ? 'kg-action-btn kg-action-review'
+          : 'kg-action-btn kg-action-review kg-action-review-calm';
         reviewBtn.setAttribute('data-action', 'review');
         reviewBtn.innerHTML = spec.showCount
           ? `🧠 今日复习 <span class="kg-review-count">${spec.count}</span>`

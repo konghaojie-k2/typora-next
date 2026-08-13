@@ -2958,6 +2958,139 @@ pub async fn socratic_chat(
     Ok(result)
 }
 
+/// Sprint 17: Case Study via Agent SDK (agent-bridge "case-study" stage).
+/// 与 socratic_chat 同构：spawn bridge → 解析最后一行 JSON → SocraticChatResponse
+/// （契约复用：content/session_id 语义相同；done 恒为 false——案例研习无结束态，
+/// 用户手动关闭面板）。
+#[tauri::command]
+pub async fn case_study_chat(
+    project_path: String,
+    selected_text: String,
+    context: Option<String>,
+    user_answer: Option<String>,
+    app_handle: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<crate::SocraticChatResponse, String> {
+    log::info!(
+        "[Sprint17] case_study_chat START: project={}, selected={:?}, first_turn={}, session_id={}",
+        project_path,
+        selected_text,
+        user_answer.is_none(),
+        session_id.as_deref().unwrap_or("(none)")
+    );
+
+    let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+
+    // Ensure the bundled typora-course-case-study skill is available in the
+    // project (idempotent; also refreshes stale copies in existing projects).
+    let _ = copy_bundled_skills_to_project(&project_path);
+
+    let bridge_path = get_agent_bridge_path()?;
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "selected_text": selected_text,
+            "context": context,
+            "user_answer": user_answer,
+            "session_id": session_id,
+        }
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("case-study")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    // Sprint 17 流式输出：spawn + 逐行读 stdout。bridge 的 text_delta 经
+    // {type:"case_study_delta"} JSON 行实时到达，逐行转发给前端渲染；
+    // 最终结果行（SocraticChatResponse）在进程结束后解析。
+    let mut child = cmd.spawn().map_err(|e| {
+        log::error!("[Sprint17] case_study_chat: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture bridge stdout".to_string())?;
+
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(stdout);
+    let mut result_line: Option<String> = None;
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(event) if event.get("type").and_then(|v| v.as_str()) == Some("case_study_delta") => {
+                if let Err(e) = app_handle.emit("case-study-event", &event) {
+                    log::warn!("[Sprint17] case-study-event emit failed: {}", e);
+                }
+            }
+            _ => {
+                // 非 delta 行：候选结果行（progress_log 事件行缺 content 字段，
+                // 最终反序列化时会跳过）
+                result_line = Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if !status.success() {
+        let stderr = child
+            .stderr
+            .take()
+            .map(|mut s| {
+                let mut buf = String::new();
+                use std::io::Read;
+                let _ = s.read_to_string(&mut buf);
+                buf
+            })
+            .unwrap_or_default();
+        log::error!("[Sprint17] case_study_chat: agent failed: stderr={}", stderr);
+        return Err(format!("Agent case study failed: {}", stderr));
+    }
+
+    let raw = result_line.ok_or_else(|| {
+        log::error!("[Sprint17] case_study_chat: no result line from bridge");
+        "No result from case study agent".to_string()
+    })?;
+
+    let result: crate::SocraticChatResponse = serde_json::from_str(&raw).map_err(|e| {
+        log::error!("[Sprint17] case_study_chat: parse failed: {} — raw: {}", e, raw);
+        format!(
+            "Failed to parse case study response. Raw: {}",
+            &raw[..std::cmp::min(200, raw.len())]
+        )
+    })?;
+
+    log::info!(
+        "[Sprint17] case_study_chat SUCCESS: content_len={}",
+        result.content.len()
+    );
+    Ok(result)
+}
+
 /// PB1 Round 2: Generate review cards via agent-bridge "review-gen" stage.
 /// Agent reads the chapter .md and generates per-concept quiz questions + key points.
 /// Rust parses the JSON response and returns it for writing to review-cards.json.

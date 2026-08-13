@@ -40,6 +40,12 @@ const mockInvoke = async (cmd, args) => {
       return _socraticLoadState(args);
     case 'socratic_save_state':
       return _socraticSaveState(args);
+    case 'case_study_chat':
+      return _caseStudyChat(args);
+    case 'case_study_save_session':
+      return _caseStudySaveSession(args);
+    case 'case_study_list_sessions':
+      return _caseStudyListSessions(args);
     case 'generate_review_content':
       return _generateReviewContent(args);
     case 'init_review_schedule':
@@ -304,6 +310,47 @@ function _socraticSaveSession({ projectPath, session }) {
   const filePath = path.join(sessionsDir, `${ts}.json`);
   fs.writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
   return filePath;
+}
+
+// ============================================
+// Sprint 17: Case Study
+// ============================================
+
+let _caseStudyChatCalls = [];
+function _caseStudyChat(args) {
+  _caseStudyChatCalls.push(args);
+  const isFirst = !args.userAnswer;
+  return {
+    content: isFirst
+      ? `📖 情境\n某铁路公司要整合调度数据。\n\n🔍 分析\n这里的字段约束就是 ${args.selectedText}。\n\n🔗 回扣\n对应本章知识点。`
+      : `围绕案例回答：${args.userAnswer}`,
+    done: false,
+    session_id: args.sessionId || 'mock-case-session-1'
+  };
+}
+function _getCaseStudyChatCalls() { return _caseStudyChatCalls; }
+
+function _caseStudySaveSession({ projectPath, session }) {
+  const sessionsDir = path.join(projectPath, '.learning', 'case-studies');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  const ts = (session.ended_at || new Date().toISOString()).replace(/[:.]/g, '-');
+  const filePath = path.join(sessionsDir, `${ts}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+  return filePath;
+}
+
+function _caseStudyListSessions({ projectPath }) {
+  const sessionsDir = path.join(projectPath, '.learning', 'case-studies');
+  if (!fs.existsSync(sessionsDir)) return [];
+  const sessions = [];
+  for (const f of fs.readdirSync(sessionsDir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      sessions.push(JSON.parse(fs.readFileSync(path.join(sessionsDir, f), 'utf-8')));
+    } catch (_) { /* skip broken */ }
+  }
+  sessions.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')));
+  return sessions;
 }
 
 function _socraticLoadState({ projectPath }) {
@@ -600,5 +647,6 @@ module.exports = {
     const handlers = global.__TAURI_EVENT_HANDLERS__?.['agent-event'] || [];
     handlers.forEach(h => h({ payload }));
   },
+  getCaseStudyChatCalls: () => _getCaseStudyChatCalls(),
   mockInvoke
 };
