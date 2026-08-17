@@ -305,7 +305,8 @@ TestRunner.test('full retry flow: failed → not_generated → generating → re
 
 function requireMock() {
   // Use real implementation
-  return { ChapterStatusManager: require('../../../dist/scripts/learning/progress-tracker').ChapterStatusManager };
+  const mod = require('../../../dist/scripts/learning/progress-tracker');
+  return { ChapterStatusManager: mod.ChapterStatusManager, AgentEventBridge: mod.AgentEventBridge };
 }
 
 // Regression (2026-08-04): chapter_complete must normalize the bridge's bare
@@ -327,6 +328,126 @@ TestRunner.test('chapter_complete keeps absolute file unchanged', () => {
   manager.ui = { projectPath: 'C:\\proj' };
   manager.handleAgentEvent({ type: 'chapter_complete', data: { index: 0, file: 'D:\\other\\00-A.md' } });
   TestRunner.assertEquals(manager.chapters[0].file, 'D:\\other\\00-A.md', 'absolute path untouched');
+});
+
+// Regression (2026-08-17): an 'error' agent-event (e.g. Rust run_agent_bridge
+// failing to write agent-stderr.log in a read-only install dir) must mark
+// chapters stuck in 'generating' as failed and surface the reason, instead of
+// leaving the "正在生成学习内容" overlay frozen forever.
+TestRunner.test('AgentEventBridge error event marks generating chapters as failed', () => {
+  if (typeof window === 'undefined') global.window = {};
+  const { ChapterStatusManager, AgentEventBridge } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'A' }, { title: 'B' }]);
+  manager.setStatus(0, 'generating'); // optimistic mark before invoke
+
+  const ui = {
+    projectPath: 'C:\\proj',
+    updateChapter: () => {},
+    container: { style: { display: 'block' }, querySelector: () => null }
+  };
+  const logLines = [];
+  const overlay = {
+    appendLog: (t) => logLines.push(t),
+    updateChapter: () => {}
+  };
+
+  const bridge = new AgentEventBridge(manager, ui, overlay);
+  bridge.handleEvent({ type: 'error', data: { message: 'Failed to create stderr log' } });
+
+  TestRunner.assertEquals(manager.getStatus(0), 'failed', 'generating chapter marked failed');
+  TestRunner.assertEquals(manager.getStatus(1), 'not_generated', 'untouched chapter stays not_generated');
+  TestRunner.assertEquals(logLines.length > 0 && logLines[0].includes('Failed'), true, 'error surfaced in overlay log');
+});
+
+TestRunner.test('AgentEventBridge error event is a no-op when no chapter is generating', () => {
+  if (typeof window === 'undefined') global.window = {};
+  const { ChapterStatusManager, AgentEventBridge } = requireMock();
+  const manager = new ChapterStatusManager([{ title: 'A' }]);
+
+  const ui = {
+    projectPath: 'C:\\proj',
+    updateChapter: () => {},
+    container: { style: { display: 'block' }, querySelector: () => null }
+  };
+  const overlay = { appendLog: () => {}, updateChapter: () => {} };
+
+  const bridge = new AgentEventBridge(manager, ui, overlay);
+  bridge.handleEvent({ type: 'error', data: { message: 'boom' } });
+
+  TestRunner.assertEquals(manager.getStatus(0), 'not_generated', 'no state change when nothing generating');
+});
+
+// Regression (2026-08-17 实爆): resume 面板的「继续生成/开始生成」按钮把
+// {chapters} 对象当作 projectPath 传给 triggerNextChapters → invoke 因参数
+// 类型错误直接拒绝 → triggerSlidingWindow 内部 catch 吞掉错误 → 章节永远停在
+// 乐观标记的 generating、按钮永远「生成中...」、后端零活动且无任何提示。
+// 契约：invoke 失败时 ① 已标记 generating 的章节回滚为 failed（可重试）
+//       ② 错误通过 overlay/toast 可见 ③ promise 拒绝（调用方恢复按钮）
+TestRunner.test('triggerNextChapters marks chapters failed + rejects when generate_chapters invoke fails', async () => {
+  if (typeof window === 'undefined') global.window = {};
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd) => {
+        if (cmd === 'generate_chapters') {
+          throw new Error("invalid args `projectPath`: invalid type: map, expected a string");
+        }
+        return null;
+      }
+    },
+    fs: { exists: async () => false, readTextFile: async () => '{}' },
+    event: { listen: async () => () => {} }
+  };
+  const toasts = [];
+  window.showToast = (msg) => toasts.push(msg);
+
+  requireMock(); // ensure module loaded → window.LearningProgress
+  const LP = window.LearningProgress;
+  const manager = new LP.ChapterStatusManager([{ title: 'A' }, { title: 'B' }, { title: 'C' }]);
+  LP._manager = manager;
+  LP._ui = { updateChapter: () => {} };
+  const logLines = [];
+  LP._bridge = { overlay: { appendLog: (t) => logLines.push(t) } };
+
+  let rejected = null;
+  await LP.triggerNextChapters('C:\\proj').catch(e => { rejected = e; });
+
+  TestRunner.assert(rejected !== null, 'promise must reject so button handlers can restore themselves');
+  TestRunner.assertEquals(manager.getStatus(0), 'failed', 'chapter 0 rolled back to failed');
+  TestRunner.assertEquals(manager.getStatus(1), 'failed', 'chapter 1 rolled back to failed');
+  TestRunner.assertEquals(manager.getStatus(2), 'not_generated', 'chapter 2 (outside window) untouched');
+  TestRunner.assert(
+    logLines.some(l => l.includes('projectPath')) || toasts.some(t => t.includes('projectPath')),
+    'error surfaced via overlay log or toast'
+  );
+});
+
+TestRunner.test('triggerNextChapters succeeds normally when invoke resolves', async () => {
+  if (typeof window === 'undefined') global.window = {};
+  const calls = [];
+  window.__TAURI__ = {
+    core: {
+      invoke: async (cmd, args) => {
+        calls.push({ cmd, args });
+        return null;
+      }
+    },
+    fs: { exists: async () => false, readTextFile: async () => '{}' },
+    event: { listen: async () => () => {} }
+  };
+
+  requireMock();
+  const LP = window.LearningProgress;
+  const manager = new LP.ChapterStatusManager([{ title: 'A' }, { title: 'B' }]);
+  LP._manager = manager;
+  LP._ui = { updateChapter: () => {} };
+  LP._bridge = null;
+
+  await LP.triggerNextChapters('C:\\proj');
+
+  const gen = calls.find(c => c.cmd === 'generate_chapters');
+  TestRunner.assertExists(gen, 'generate_chapters invoked');
+  TestRunner.assertEquals(typeof gen.args.projectPath, 'string', 'projectPath passed as string');
+  TestRunner.assertEquals(manager.getStatus(0), 'generating', 'chapter stays generating while bridge works');
 });
 
 // Run

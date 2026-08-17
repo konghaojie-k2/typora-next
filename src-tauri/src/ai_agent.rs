@@ -436,14 +436,28 @@ async fn run_agent_bridge(
     // MSI install / global SDK: set NODE_PATH so node_modules resolves
     apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
-    // Redirect stderr to a debug file
-    let stderr_log = std::path::PathBuf::from(&bridge_path)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("agent-stderr.log");
-    let stderr_file = std::fs::File::create(&stderr_log)
-        .map_err(|e| format!("Failed to create stderr log: {}", e))?;
-    cmd.stderr(stderr_file);
+    // Debug artifacts (agent-stderr.log / rust-debug.log / stdout-dump.txt)
+    // live in the app data logs dir, which is always writable. The old
+    // location — the bridge's parent dir — is read-only for the MSI install
+    // under "C:\Program Files\...", so File::create() there failed and
+    // aborted the whole generation with "Failed to create stderr log". The
+    // frontend then saw a frozen "正在生成学习内容" overlay because the
+    // resulting error event was dropped (no 'error' handler in the bridge).
+    let log_dir = _agent_log_dir(&app_handle);
+
+    // Redirect stderr to a debug file (best-effort: if the log dir is not
+    // writable, drop stderr instead of aborting the agent run).
+    let stderr_log = log_dir.join("agent-stderr.log");
+    match std::fs::File::create(&stderr_log) {
+        Ok(f) => { cmd.stderr(f); }
+        Err(e) => {
+            eprintln!(
+                "[ai_agent] Failed to create stderr log at {}: {} (continuing without)",
+                stderr_log.display(), e
+            );
+            cmd.stderr(Stdio::null());
+        }
+    }
 
     #[cfg(windows)]
     {
@@ -467,10 +481,7 @@ async fn run_agent_bridge(
     let stdout = child.stdout.take().ok_or("Failed to capture stdout")?;
 
     // Stream JSON lines to frontend
-    let debug_log = std::path::PathBuf::from(&bridge_path)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("rust-debug.log");
+    let debug_log = log_dir.join("rust-debug.log");
     let log_msg = |msg: &str| {
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
@@ -535,10 +546,7 @@ async fn run_agent_bridge(
     log_msg(&format!("[total] {} lines", stdout_lines.len()));
 
     // Dump raw content to file for debugging
-    let dump_path = std::path::PathBuf::from(&bridge_path)
-        .parent()
-        .unwrap_or(std::path::Path::new("."))
-        .join("stdout-dump.txt");
+    let dump_path = log_dir.join("stdout-dump.txt");
     let _ = std::fs::write(&dump_path, stdout_lines.join("\n"));
 
     // Wait for process to finish

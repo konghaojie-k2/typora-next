@@ -567,7 +567,9 @@
             }
             const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
             if (triggerNext) {
-              triggerNext(basePath);
+              triggerNext(basePath).catch(err => {
+                console.error('[ProjectResume] sliding-window trigger failed:', err);
+              });
             }
             // Course completion → show summary button + offer slide summary (once)
             if (window.CourseSummary && window.CourseSummary.isCourseCompleted(manager)) {
@@ -586,7 +588,9 @@
           }
           const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
           if (triggerNext) {
-            triggerNext({ chapters: project.chapters }, basePath)
+            // NOTE: triggerNextChapters(projectPath) 只接收路径字符串。
+            // 曾误传 ({ chapters }, basePath) → invoke 参数类型错误 → 静默卡死（2026-08-17 实爆）。
+            triggerNext(basePath)
               .catch(err => {
                 console.error('[ProjectResume] Failed to start generation:', err);
                 if (genBtn) {
@@ -760,7 +764,8 @@
       const triggerNext = window.LearningProgress && window.LearningProgress.triggerNextChapters;
       if (triggerNext) {
         console.log('[ProjectResume] Calling triggerNextChapters (sliding window)...');
-        triggerNext({ chapters: project.chapters }, basePath)
+        // NOTE: triggerNextChapters(projectPath) 只接收路径字符串，勿传 outline 对象。
+        triggerNext(basePath)
           .then(() => {
             console.log('[ProjectResume] triggerNextChapters returned OK');
           })

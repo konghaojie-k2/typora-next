@@ -730,6 +730,21 @@
       } else if (payload.type === 'chapter_failed' && typeof payload.data.index === 'number') {
         this.ui.updateChapter(payload.data.index);
         if (this.overlay) this.overlay.updateChapter(payload.data.index, 'failed');
+      } else if (payload.type === 'error') {
+        // Surface generation failures instead of leaving the overlay frozen
+        // (chapters stuck in 'generating' forever). Mark any generating
+        // chapter as failed, log the reason, and toast so the user can retry.
+        const errMsg = (payload.data && payload.data.message) || '章节生成失败，请重试';
+        console.error('[ProgressTracker] Generation error:', errMsg);
+        if (this.overlay) this.overlay.appendLog('❌ ' + errMsg);
+        if (window.showToast) window.showToast('❌ ' + errMsg, 'error');
+        this.manager.chapters.forEach((ch, i) => {
+          if (ch.status === 'generating') {
+            try { this.manager.setStatus(i, 'failed'); } catch (_) {}
+            this.ui.updateChapter(i);
+            if (this.overlay) this.overlay.updateChapter(i, 'failed');
+          }
+        });
       } else if (payload.type === 'complete') {
         this.ui.render();
         // Final refresh of file tree to ensure all generated files appear
@@ -1163,8 +1178,8 @@
       }
     }
     // Refresh UI
-    if (window.LearningProgress && window.LearningProgress._ui) {
-      const ui = window.LearningProgress._ui;
+    const ui = window.LearningProgress && window.LearningProgress._ui;
+    if (ui) {
       for (const i of indices) {
         if (ui.updateChapter) ui.updateChapter(i);
       }
@@ -1196,6 +1211,24 @@
       console.log('[SlidingWindow] generate_chapters returned', { sessionId: !!sessionId });
     } catch (err) {
       console.error('[SlidingWindow] generate_chapters failed:', err);
+      // Roll back the optimistic 'generating' marks — otherwise the UI freezes
+      // with chapters spinning forever while the backend never started
+      // (2026-08-17 实爆: 调用方把 {chapters} 对象当 projectPath 传入 → invoke
+      // 参数校验拒绝 → 错误被吞 → 章节永停 generating、按钮永停「生成中...」)。
+      // 'failed' keeps them retryable (failed → not_generated → generating).
+      for (const i of indices) {
+        try { mgr.setStatus(i, 'failed'); } catch (_) {}
+        if (ui && ui.updateChapter) ui.updateChapter(i);
+      }
+      // Surface the reason instead of failing silently.
+      const errMsg = (err && err.message) || String(err);
+      const bridge = window.LearningProgress && window.LearningProgress._bridge;
+      if (bridge && bridge.overlay && bridge.overlay.appendLog) {
+        bridge.overlay.appendLog('❌ 生成启动失败: ' + errMsg);
+      }
+      if (window.showToast) window.showToast('❌ 生成启动失败: ' + errMsg, 'error');
+      // Rethrow so callers (继续生成/开始生成 buttons) can restore their state.
+      throw err;
     } finally {
       windowState.inFlight = false;
     }
@@ -1370,7 +1403,9 @@
             return;
           }
           if (ui.updateChapter) ui.updateChapter(index);
-          window.LearningProgress.triggerNextChapters(projectPath);
+          window.LearningProgress.triggerNextChapters(projectPath).catch(err => {
+            console.error('[ProgressTracker] Retry trigger failed:', err);
+          });
         };
 
         // Sliding window: when a chapter becomes 'completed', enqueue the next
@@ -1385,7 +1420,9 @@
               return;
             }
             // The user just finished a chapter. Slide the window forward.
-            window.LearningProgress.triggerNextChapters(projectPath);
+            window.LearningProgress.triggerNextChapters(projectPath).catch(err => {
+              console.error('[ProgressTracker] sliding-window trigger failed:', err);
+            });
 
             // Course completion: show the summary button (via re-render) and
             // offer a slide summary once.
