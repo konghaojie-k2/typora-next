@@ -2749,6 +2749,13 @@ body.pdf-exporting-mac .markdown-body {
   color: var(--color-text-primary);
 }
 
+/* 复杂 frontmatter（块标量/嵌套/列表）降级为原生 YAML 代码块，
+   间距对齐卡片；其余样式复用通用 pre/code */
+.frontmatter-raw {
+  margin-top: 0;
+  margin-bottom: 24px;
+}
+
 /* ============================================
    Custom Cursor
    ============================================ */

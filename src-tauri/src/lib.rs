@@ -13,14 +13,18 @@ pub mod agent_sdk_probe;
 pub mod ai_agent;
 pub mod course_completion;
 mod docx_template;
+pub mod element_compliance;
 pub mod explain_parse;
+pub mod frontmatter;
 pub mod learning_paths;
 pub mod mac_pdf;
 pub mod mermaid_fix_log;
 pub mod paper_import;
+pub mod plan_prompt;
 pub mod quiz_quality;
 pub mod sdk_install;
 pub mod share_images;
+pub mod skills_bundle;
 pub mod translation_clean;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
@@ -280,51 +284,6 @@ fn render_markdown(content: &str) -> String {
     render_markdown_body(content)
 }
 
-/// Extract YAML frontmatter from markdown content
-fn extract_frontmatter(text: &str) -> (Option<String>, String) {
-    let trimmed = text.trim_start();
-    if !trimmed.starts_with("---") {
-        return (None, text.to_string());
-    }
-    if let Some(end_pos) = trimmed[3..].find("\n---") {
-        let yaml = trimmed[3..3 + end_pos].trim();
-        let rest = trimmed[3 + end_pos + 4..].trim_start();
-        return (Some(yaml.to_string()), rest.to_string());
-    }
-    (None, text.to_string())
-}
-
-/// Render YAML frontmatter as an HTML card
-fn render_frontmatter_card(yaml: &str) -> String {
-    let mut title = None;
-    let mut rows = String::new();
-    for line in yaml.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        if let Some((key, value)) = trimmed.split_once(':') {
-            let key = key.trim();
-            let value = value.trim().trim_matches('"').trim_matches('\'');
-            if key.to_lowercase() == "title" {
-                title = Some(value.to_string());
-            } else {
-                rows.push_str(&format!(
-                    "<div class=\"frontmatter-row\"><span class=\"frontmatter-key\">{}</span><span class=\"frontmatter-value\">{}</span></div>",
-                    escape_html(key), escape_html(value)
-                ));
-            }
-        }
-    }
-    let title_html = title.map_or(String::new(), |t| {
-        format!("<div class=\"frontmatter-title\">{}</div>", escape_html(&t))
-    });
-    format!(
-        "<div class=\"frontmatter-card\">{}<div class=\"frontmatter-body\">{}</div></div>",
-        title_html, rows
-    )
-}
-
 // ============================================================================
 // Math Post-processing - Restore math blocks as KaTeX markup
 // ============================================================================
@@ -354,20 +313,12 @@ fn postprocess_math(html: &str, math_blocks: &[(String, String, bool)]) -> Strin
     result
 }
 
-/// Escape HTML special characters
-fn escape_html(text: &str) -> String {
-    text.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-}
-
 /// Simple markdown to HTML renderer (body content only)
 /// Now includes math preprocessing to protect LaTeX from markdown parsing
 fn render_markdown_body(text: &str) -> String {
     use pulldown_cmark::{html::push_html, Event, Options, Parser, Tag, TagEnd};
 
-    let (frontmatter, body) = extract_frontmatter(text);
+    let (frontmatter, body) = frontmatter::extract_frontmatter(text);
 
     // Step 1: Pre-process to protect math blocks
     let (protected_body, math_blocks) = preprocess_math(&body);
@@ -464,7 +415,7 @@ fn render_markdown_body(text: &str) -> String {
     );
 
     if let Some(fm) = frontmatter {
-        let card = render_frontmatter_card(&fm);
+        let card = frontmatter::render_frontmatter(&fm);
         return card + &html;
     }
 
@@ -2304,7 +2255,7 @@ fn create_learning_project(
         .as_array()
         .ok_or("outline.chapters must be an array")?;
 
-    let project = serde_json::json!({
+    let mut project = serde_json::json!({
         "name": goal.unwrap_or_else(|| {
             chapters.first()
                 .and_then(|c| c["title"].as_str())
@@ -2330,6 +2281,12 @@ fn create_learning_project(
             chapters.iter().map(|c| c["duration_minutes"].as_u64().unwrap_or(0)).sum()
         })
     });
+
+    // Persist course type (technical/humanities/hybrid) from the plan so
+    // chapter generation can adapt its template. Key omitted for legacy plans.
+    if let Some(ct) = outline.get("course_type").and_then(|v| v.as_str()) {
+        project["course_type"] = serde_json::json!(ct);
+    }
 
     let json_str = serde_json::to_string_pretty(&project)
         .map_err(|e| format!("Failed to serialize project: {}", e))?;
