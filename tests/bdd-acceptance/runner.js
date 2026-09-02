@@ -309,6 +309,7 @@ async function runAcceptanceTests() {
   totalFailed += caseStudyResult.failed;
   if (caseStudySteps._cleanup) caseStudySteps._cleanup.call({});
 
+
   // Sprint 20: 课程内容元素约束 (engineering 域 + D 层硬校验)
   console.log(`\n${YELLOW}▶ Sprint 20: Element Constraint (engineering + D-layer)${RESET}`);
   const elementSteps = require('./sprint20_element_constraint.steps');
@@ -318,6 +319,18 @@ async function runAcceptanceTests() {
   totalPassed += elementResult.passed;
   totalFailed += elementResult.failed;
   if (elementSteps._cleanup) elementSteps._cleanup.call({});
+
+  // Sprint 21: 跨课程记忆（结课档案 + 全局索引 + plan 注入）
+  console.log(`\n${YELLOW}▶ Sprint 21: Cross-Course Memory (profile + index + plan injection)${RESET}`);
+  const memorySteps = require('./sprint21_cross_course_memory.steps');
+  const memoryResult = await runFeatureFile(
+    path.join(__dirname, '../sprint21/features/sprint21_cross_course_memory.feature'),
+    memorySteps
+  totalPassed += memoryResult.passed;
+  totalFailed += memoryResult.failed;
+  if (memorySteps._cleanup) memorySteps._cleanup.call({});
+
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});

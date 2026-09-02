@@ -16,6 +16,7 @@ mod docx_template;
 pub mod element_compliance;
 pub mod explain_parse;
 pub mod frontmatter;
+pub mod learner_profile;
 pub mod learning_paths;
 pub mod mac_pdf;
 pub mod mermaid_fix_log;
@@ -2514,6 +2515,24 @@ async fn persist_quiz_result(
     // Sprint 16: 全部章节完成 → 落课程级终态 course_status = "completed"
     if course_completion::mark_course_completed_if_done(&mut project) {
         log::info!("[persist_quiz_result] course completed → course_status stamped");
+
+        // Sprint 21: 结课档案 + 全局索引（best-effort，失败不阻塞 quiz 落盘）
+        if let Some(index_path) = learner_profile::learner_index_path() {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            if let Err(e) = learner_profile::record_course_completion(
+                std::path::Path::new(&project_path),
+                &index_path,
+                now,
+            ) {
+                log::warn!(
+                    "[persist_quiz_result] completion profile failed (non-fatal): {}",
+                    e
+                );
+            }
+        }
     }
     // Strip chapter.concepts down to {id, name} only (no status, no updated_at)
     if let Some(chapters) = project.get_mut("chapters").and_then(|v| v.as_array_mut()) {
@@ -2679,6 +2698,46 @@ async fn persist_quiz_result(
         .map_err(|e| format!("写入 quiz-history.json 失败: {}", e))?;
 
     Ok(())
+}
+
+/// Sprint 21: names of completed courses the next plan will reference
+/// (create-course dialog hint line). Empty when none.
+#[tauri::command]
+async fn list_learner_courses() -> Result<Vec<String>, String> {
+    Ok(learner_profile::learner_index_path()
+        .map(|p| learner_profile::list_valid_course_names(&p))
+        .unwrap_or_default())
+}
+
+/// Sprint 21 backfill: for legacy courses completed before cross-course
+/// memory existed. Frontend calls this when its read-side check detects a
+/// completed course; if the profile is missing we generate it and upsert the
+/// global index. Returns true if a profile exists afterwards.
+/// Best-effort: any failure degrades to Ok(false) with a log, never an error
+/// surfaced to the user.
+#[tauri::command]
+async fn backfill_completion_profile(project_path: String) -> Result<bool, String> {
+    let course_path = std::path::PathBuf::from(&project_path);
+    let profile_path = course_path
+        .join(".learning")
+        .join("completion-profile.json");
+    if profile_path.exists() {
+        return Ok(true);
+    }
+    let Some(index_path) = learner_profile::learner_index_path() else {
+        return Ok(false);
+    };
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    match learner_profile::record_course_completion(&course_path, &index_path, now) {
+        Ok(()) => Ok(true),
+        Err(e) => {
+            log::warn!("[backfill_completion_profile] {} (non-fatal)", e);
+            Ok(false)
+        }
+    }
 }
 
 /// Read quiz history for a project
@@ -4530,6 +4589,8 @@ pub fn run() {
             setup_project_with_session,
             persist_quiz_result,
             read_quiz_history,
+            backfill_completion_profile,
+            list_learner_courses,
             read_text_file,
             persist_chapter_file,
             exit_app,

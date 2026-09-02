@@ -572,7 +572,11 @@ pub async fn plan_course_llm(
             crate::AiProvider::Openai => "gpt-4o-mini".to_string(),
         });
 
-    let prompt = build_plan_prompt(&goal, &level, hours);
+    // Sprint 21: inject cross-course learner memory (best-effort — missing
+    // index / corrupt profiles degrade to None, i.e. the pre-Sprint-21 prompt)
+    let learner_ctx = crate::learner_profile::learner_index_path()
+        .and_then(|p| crate::learner_profile::aggregate_learner_context(&p));
+    let prompt = build_plan_prompt(&goal, &level, hours, learner_ctx.as_deref());
 
     // Call LLM via ureq (mirrors explain_selection pattern)
     // 8192: 2048 truncated long outlines mid-JSON (deepseek EOF-at-line-47

@@ -115,6 +115,18 @@
   margin-top: 10px;
 }
 
+/* Sprint 21: 跨课记忆提示行（创建课程对话框） */
+.learner-context-hint {
+  padding: 8px 12px;
+  background: var(--color-bg-secondary, #f5f5f7);
+  border: 1px solid var(--color-border, #e0e0e4);
+  border-radius: 6px;
+  color: var(--color-text-secondary, #666);
+  font-size: 12px;
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
 /* ============================================
    Loading State
    ============================================ */

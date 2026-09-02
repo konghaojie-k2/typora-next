@@ -359,6 +359,12 @@
         ? window.CourseSummary.isProjectCourseCompleted(project)
         : false;
 
+      // Sprint 21: 存量完结课程补结课档案 + 全局索引（best-effort，不阻塞加载）
+      if (courseCompleted && window.__TAURI__) {
+        window.__TAURI__.core.invoke('backfill_completion_profile', { projectPath: basePath })
+          .catch(e => console.warn('[ProjectDashboard] backfill completion profile failed (non-fatal):', e));
+      }
+
       // Show dashboard modal
       console.log('[ProjectDashboard] Showing dashboard, stats:', stats);
       return new Promise((resolve) => {

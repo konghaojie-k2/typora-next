@@ -83,6 +83,7 @@
     elements.goalInput = document.getElementById('learningGoal');
     elements.levelRadios = document.querySelectorAll('input[name="learningLevel"]');
     elements.hoursSelect = document.getElementById('learningHours');
+    elements.learnerContextHint = document.getElementById('learnerContextHint');
     elements.errorDisplay = document.getElementById('learningError');
     elements.outlineInfo = document.getElementById('learningOutlineInfo');
     elements.outlineList = document.getElementById('learningOutlineList');
@@ -272,6 +273,25 @@
     transitionTo('input');
     elements.modal.style.display = 'flex';
     setTimeout(() => elements.goalInput.focus(), 100);
+    loadLearnerContextHint();
+  }
+
+  // Sprint 21: 跨课记忆提示行——有已完结课程时告知用户本次规划将参考它们
+  async function loadLearnerContextHint() {
+    if (!window.__TAURI__ || !elements.learnerContextHint) return;
+    try {
+      const { invoke } = window.__TAURI__.core;
+      const names = await invoke('list_learner_courses');
+      if (Array.isArray(names) && names.length > 0) {
+        elements.learnerContextHint.textContent =
+          `📚 将参考 ${names.length} 门已完结课程的学习记录（${names.join('、')}）`;
+        elements.learnerContextHint.style.display = 'block';
+      } else {
+        elements.learnerContextHint.style.display = 'none';
+      }
+    } catch (e) {
+      console.warn('[LearningProject] list_learner_courses failed (non-fatal):', e);
+    }
   }
 
   function closeDialog() {
