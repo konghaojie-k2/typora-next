@@ -116,7 +116,10 @@ fn robust_fallback(cleaned: &str, raw: &str) -> ExplainParsed {
             // 结构边界：region 形如 `...文本。",\n  ` —— 去尾逗号与收尾引号。
             // 值内若含裸引号（bug 场景）会原样保留。
             let region = value_region[..q_pos].trim_end();
-            let region = region.strip_suffix(',').map(str::trim_end).unwrap_or(region);
+            let region = region
+                .strip_suffix(',')
+                .map(str::trim_end)
+                .unwrap_or(region);
             let inner = region.strip_suffix('"').unwrap_or(region);
             unescape_json_string(inner)
         }

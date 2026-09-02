@@ -69,7 +69,9 @@ fn code_fence_wrapped_json_still_works() {
 
 #[test]
 fn truncated_mid_array_keeps_complete_explanation() {
-    let r = parse_explain_output(r#"```json { "explanation": "完整的解释文本。", "suggested_questions": ["追问1", "追问2", "追问3: 截"#);
+    let r = parse_explain_output(
+        r#"```json { "explanation": "完整的解释文本。", "suggested_questions": ["追问1", "追问2", "追问3: 截"#,
+    );
     assert!(r.explanation.contains("完整的解释文本"));
 }
 

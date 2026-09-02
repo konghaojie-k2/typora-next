@@ -352,11 +352,14 @@ async fn run_agent_bridge(
     // writable, drop stderr instead of aborting the agent run).
     let stderr_log = log_dir.join("agent-stderr.log");
     match std::fs::File::create(&stderr_log) {
-        Ok(f) => { cmd.stderr(f); }
+        Ok(f) => {
+            cmd.stderr(f);
+        }
         Err(e) => {
             eprintln!(
                 "[ai_agent] Failed to create stderr log at {}: {} (continuing without)",
-                stderr_log.display(), e
+                stderr_log.display(),
+                e
             );
             cmd.stderr(Stdio::null());
         }
@@ -2861,7 +2864,10 @@ pub async fn case_study_chat(
                 buf
             })
             .unwrap_or_default();
-        log::error!("[Sprint17] case_study_chat: agent failed: stderr={}", stderr);
+        log::error!(
+            "[Sprint17] case_study_chat: agent failed: stderr={}",
+            stderr
+        );
         return Err(format!("Agent case study failed: {}", stderr));
     }
 
@@ -2871,7 +2877,11 @@ pub async fn case_study_chat(
     })?;
 
     let result: crate::SocraticChatResponse = serde_json::from_str(&raw).map_err(|e| {
-        log::error!("[Sprint17] case_study_chat: parse failed: {} — raw: {}", e, raw);
+        log::error!(
+            "[Sprint17] case_study_chat: parse failed: {} — raw: {}",
+            e,
+            raw
+        );
         format!(
             "Failed to parse case study response. Raw: {}",
             &raw[..std::cmp::min(200, raw.len())]
