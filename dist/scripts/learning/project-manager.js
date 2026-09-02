@@ -276,6 +276,26 @@
     loadLearnerContextHint();
   }
 
+  // Sprint 22: roadmap 卡片点击 → 预填创建对话框（不自动提交，用户确认后再生成）
+  function openDialogWithPrefill(prefill) {
+    openDialog();
+    if (!prefill) return;
+    if (prefill.goal) elements.goalInput.value = prefill.goal;
+    if (prefill.level) {
+      elements.levelRadios.forEach(r => {
+        r.checked = (r.value === prefill.level);
+      });
+    }
+    if (prefill.hours) {
+      // roadmap 建议时长是任意整数，吸附到 select 最近档位
+      const opts = Array.from(elements.hoursSelect.options).map(o => parseInt(o.value, 10));
+      const snapped = (window.CourseRoadmap && window.CourseRoadmap.snapHours)
+        ? window.CourseRoadmap.snapHours(prefill.hours, opts)
+        : prefill.hours;
+      elements.hoursSelect.value = String(snapped);
+    }
+  }
+
   // Sprint 21: 跨课记忆提示行——有已完结课程时告知用户本次规划将参考它们
   async function loadLearnerContextHint() {
     if (!window.__TAURI__ || !elements.learnerContextHint) return;
@@ -811,6 +831,7 @@
   // ============================================
   window.LearningProject = {
     open: openDialog,
+    openWithPrefill: openDialogWithPrefill,
     close: closeDialog,
     getState: () => ({ ...dialogState }),
     CHAPTER_STATUS

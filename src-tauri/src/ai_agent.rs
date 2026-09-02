@@ -642,6 +642,207 @@ pub async fn plan_course_llm(
     Ok(outline)
 }
 
+// ============================================
+// Sprint 22: generate_roadmap — direct ureq LLM call
+// (course-completion "next stage" directions; pure JSON-out, no agent loop —
+//  no file reading, no multi-step reasoning, no dialogue needed)
+// Prompt building + response parsing live in roadmap_prompt.rs (pure module).
+// ============================================
+
+/// Generate next-stage learning directions for a completed course.
+///
+/// Cache semantics (`.learning/roadmap.json`):
+/// - `intent = None` and cache exists → return cache (no LLM call).
+/// - `intent = Some(_)` (换一批) → current directions' goals are appended to
+///   `excluded_goals`, the LLM regenerates with the intent instruction, and
+///   the new result replaces `directions` while exclusions accumulate.
+///
+/// Returns the roadmap JSON `{version, generated_at, directions, excluded_goals}`.
+#[tauri::command]
+pub async fn generate_roadmap(
+    project_path: String,
+    intent: Option<String>,
+    app_handle: AppHandle,
+) -> Result<Value, String> {
+    log::info!(
+        "[roadmap] generate_roadmap START: project={}, intent={:?}",
+        project_path,
+        intent
+    );
+
+    let learning_dir = std::path::Path::new(&project_path).join(".learning");
+    let cache_path = learning_dir.join("roadmap.json");
+
+    let cached: Option<Value> = std::fs::read_to_string(&cache_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+
+    // 无意向 + 有缓存 → 直接返回
+    if intent.is_none() {
+        if let Some(c) = cached {
+            log::info!("[roadmap] cache hit, skipping LLM call");
+            return Ok(c);
+        }
+    }
+
+    // 换一批：累积排除（旧 directions 的 goal 全部进入 excluded_goals）
+    let mut exclude_goals: Vec<String> = cached
+        .as_ref()
+        .and_then(|c| c.get("excluded_goals"))
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    if intent.is_some() {
+        if let Some(dirs) = cached
+            .as_ref()
+            .and_then(|c| c.get("directions"))
+            .and_then(|v| v.as_array())
+        {
+            for d in dirs {
+                if let Some(g) = d.get("goal").and_then(|v| v.as_str()) {
+                    if !exclude_goals.iter().any(|e| e == g) {
+                        exclude_goals.push(g.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 课程名 + 完结档案（缺失则 best-effort 现场补齐）
+    let project_json: Value = std::fs::read_to_string(learning_dir.join("project.json"))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or(Value::Null);
+    let course_name = project_json
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("未命名课程")
+        .to_string();
+
+    let profile_path = learning_dir.join("completion-profile.json");
+    let mut profile: Option<Value> = std::fs::read_to_string(&profile_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok());
+    if profile.is_none() {
+        // 存量课程兜底：现场构建（不落盘，读侧即算即用）
+        profile = crate::learner_profile::build_completion_profile(
+            std::path::Path::new(&project_path),
+            0,
+        );
+    }
+
+    // 学习者历史（其他已完结课程；含本课条目无害——prompt 已单列本课掌握情况）
+    let learner_ctx = crate::learner_profile::learner_index_path()
+        .and_then(|p| crate::learner_profile::aggregate_learner_context(&p));
+
+    let prompt = crate::roadmap_prompt::build_roadmap_prompt(
+        &course_name,
+        profile.as_ref(),
+        learner_ctx.as_deref(),
+        intent.as_deref(),
+        &exclude_goals,
+    );
+
+    // Get config
+    let config = crate::get_config(app_handle).map_err(|e| e.to_string())?;
+    let api_key = config
+        .api_key
+        .filter(|k| !k.is_empty())
+        .ok_or("未设置 API Key，请在设置中配置")?;
+
+    let provider = config.ai_provider.unwrap_or_default();
+    let base_url = config
+        .ai_base_url
+        .filter(|u| !u.is_empty())
+        .unwrap_or_else(|| match provider {
+            crate::AiProvider::Anthropic => "https://api.anthropic.com".to_string(),
+            crate::AiProvider::Openai => "https://api.openai.com".to_string(),
+        });
+    let model = config
+        .model
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| match provider {
+            crate::AiProvider::Anthropic => "claude-3-5-haiku-20241022".to_string(),
+            crate::AiProvider::Openai => "gpt-4o-mini".to_string(),
+        });
+
+    // ureq 单次调用（mirrors plan_course_llm；2048 足够 3 张卡片）
+    let (response, is_anthropic) = match provider {
+        crate::AiProvider::Anthropic => {
+            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 2048,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("x-api-key", &api_key)
+                .set("anthropic-version", "2023-06-01")
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, true)
+        }
+        crate::AiProvider::Openai => {
+            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let req = serde_json::json!({
+                "model": model,
+                "max_tokens": 2048,
+                "messages": [{"role": "user", "content": prompt}]
+            });
+            let resp = ureq::post(&url)
+                .set("Content-Type", "application/json")
+                .set("Authorization", &format!("Bearer {}", api_key))
+                .send_json(req)
+                .map_err(|e| format!("API 请求失败: {}", e))?;
+            (resp, false)
+        }
+    };
+
+    let json: Value = response
+        .into_json()
+        .map_err(|e| format!("解析响应失败: {}", e))?;
+
+    let raw_content = if is_anthropic {
+        json["content"][0]["text"].as_str()
+    } else {
+        json["choices"][0]["message"]["content"].as_str()
+    }
+    .ok_or("响应中没有内容")?;
+
+    let directions = crate::roadmap_prompt::parse_roadmap_response(raw_content, &exclude_goals)?;
+
+    let generated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let roadmap = serde_json::json!({
+        "version": 1,
+        "generated_at": generated_at,
+        "directions": directions,
+        "excluded_goals": exclude_goals,
+    });
+
+    // 落盘缓存（best-effort：写失败不阻塞返回）
+    if let Err(e) = std::fs::write(&cache_path, serde_json::to_string_pretty(&roadmap).unwrap()) {
+        log::warn!("[roadmap] cache write failed (non-fatal): {}", e);
+    }
+
+    log::info!(
+        "[roadmap] SUCCESS: directions={}",
+        roadmap["directions"]
+            .as_array()
+            .map(|a| a.len())
+            .unwrap_or(0)
+    );
+    Ok(roadmap)
+}
+
 /// Generate chapters from outline.
 /// If `chapter_indices` is provided, only those chapters are generated (sliding-window mode).
 /// Otherwise the full outline is generated (legacy full-batch mode).
@@ -819,68 +1020,6 @@ pub async fn generate_chapters(
         }
 
         // Generation finished (success or error) — clear the guard flag.
-        let state = app_handle.state::<AppState>();
-        if let Ok(mut guard) = state.generation_in_progress.lock() {
-            *guard = false;
-        };
-    });
-
-    Ok(())
-}
-
-/// Generate a theme-based slide summary for a completed course.
-/// The agent reads all chapter files and writes `<project>/99-课程总结.md`
-/// with `---` slide separators (parsed by the frontend's explicit mode).
-/// Outcome is signaled by the bridge via `summary_complete` / `summary_failed`;
-/// this wrapper only surfaces process-level failures as `error`.
-#[tauri::command]
-pub async fn generate_summary(
-    project_path: String,
-    outline: Value,
-    app_handle: AppHandle,
-    agent_process: State<'_, AgentProcess>,
-    session_id: Option<String>,
-    app_state: State<'_, AppState>,
-) -> Result<(), String> {
-    let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
-
-    // Ensure the bundled typora-course-summary skill is available in the project
-    // (idempotent). The bridge prompt tells the agent to Read its SKILL.md.
-    let _ = copy_bundled_skills_to_project(&project_path);
-
-    // Mark generation as in-progress so the main window close guard can warn
-    // the user before aborting background summary generation.
-    {
-        if let Ok(mut guard) = app_state.generation_in_progress.lock() {
-            *guard = true;
-        }
-    }
-
-    let args = serde_json::json!({
-        "project_path": project_path,
-        "outline": outline,
-        "session_id": session_id,
-    });
-
-    let process: AgentProcess = (*agent_process).clone();
-    tauri::async_runtime::spawn(async move {
-        // Success is signaled by the bridge's summary_complete event; the Rust
-        // wrapper only surfaces hard failures (e.g. node process crash).
-        match run_agent_bridge("summary", &config, args, app_handle.clone(), process).await {
-            Ok(()) => {
-                log::info!("[ai_agent] summary stage finished cleanly");
-            }
-            Err(e) => {
-                let _ = app_handle.emit(
-                    "agent-event",
-                    serde_json::json!({
-                        "type": "error",
-                        "data": { "message": e }
-                    }),
-                );
-            }
-        }
-
         let state = app_handle.state::<AppState>();
         if let Ok(mut guard) = state.generation_in_progress.lock() {
             *guard = false;

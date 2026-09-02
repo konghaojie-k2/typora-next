@@ -3,15 +3,15 @@
 /**
  * TDD Tests for 课程完结状态（Sprint 16）
  *
- * 覆盖 course-summary.js 新增纯函数：
+ * 覆盖 course-completion.js 新增纯函数：
  * - isProjectCourseCompleted(project)：读侧派生（course_status 字段 / chapters_status 全完成）
  * - getReviewEntrySpec(courseCompleted, dueCount)：dashboard 复习入口展示决策
  */
 
 const TestRunner = require('../../shared/test-runner');
-const CourseSummary = require('../../../dist/scripts/learning/course-summary');
+const CourseCompletion = require('../../../dist/scripts/learning/course-completion');
 
-const { isProjectCourseCompleted, getReviewEntrySpec } = CourseSummary;
+const { isProjectCourseCompleted, getReviewEntrySpec } = CourseCompletion;
 
 // ============================================
 // isProjectCourseCompleted

@@ -23,6 +23,7 @@ pub mod mermaid_fix_log;
 pub mod paper_import;
 pub mod plan_prompt;
 pub mod quiz_quality;
+pub mod roadmap_prompt;
 pub mod sdk_install;
 pub mod share_images;
 pub mod skills_bundle;
@@ -4573,8 +4574,8 @@ pub fn run() {
             update_annotation,
             ai_agent::plan_course,
             ai_agent::plan_course_llm,
+            ai_agent::generate_roadmap,
             ai_agent::generate_chapters,
-            ai_agent::generate_summary,
             ai_agent::abort_generation,
             ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz,

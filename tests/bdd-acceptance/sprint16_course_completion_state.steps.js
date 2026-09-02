@@ -4,7 +4,7 @@
  * BDD Acceptance Steps for 课程完结状态（Sprint 16）
  *
  * 真实文件系统 + 真实前端模块：
- * - CourseSummary 纯函数（require dist/scripts/learning/course-summary）
+ * - CourseCompletion 纯函数（require dist/scripts/learning/course-completion）
  *   - isProjectCourseCompleted：读侧派生（course_status 字段 / chapters_status 全完成）
  *   - getReviewEntrySpec：dashboard 复习入口展示决策
  * - 真实 project.json 写盘后读回派生（tmpdir）
@@ -16,7 +16,7 @@ const os = require('os');
 const path = require('path');
 const { StepRegistry } = require('../shared/runner');
 
-const CourseSummary = require('../../dist/scripts/learning/course-summary');
+const CourseCompletion = require('../../dist/scripts/learning/course-completion');
 
 const steps = new StepRegistry();
 
@@ -109,11 +109,11 @@ steps.when('project course completion is derived', function() {
   const raw = fs.readFileSync(
     path.join(this.projectPath, '.learning', 'project.json'), 'utf-8'
   );
-  this.derived = CourseSummary.isProjectCourseCompleted(JSON.parse(raw));
+  this.derived = CourseCompletion.isProjectCourseCompleted(JSON.parse(raw));
 });
 
 steps.when('the review entry spec is computed', function() {
-  this.spec = CourseSummary.getReviewEntrySpec(this.courseCompleted, this.dueCount);
+  this.spec = CourseCompletion.getReviewEntrySpec(this.courseCompleted, this.dueCount);
 });
 
 // ============================================

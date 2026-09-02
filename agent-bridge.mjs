@@ -369,8 +369,71 @@ export async function planCourse(queryFnUnused, config, args) {
   emit('outline', { outline });
 }
 
+// Inline chapter-generation skill references (SKILL.md + content-format.md)
+// into a prompt section. Reads the project's .pi/skills copy first, falling
+// back to the legacy .claude/skills layout. Returns '' when nothing readable
+// (skill not copied yet) — callers treat that as best-effort.
+export function collectChapterSkillRefs(projectPath) {
+  const skillRefPaths = [
+    `${projectPath}/.pi/skills/chapter-generation/SKILL.md`,
+    `${projectPath}/.pi/skills/chapter-generation/references/content-format.md`,
+    // Legacy projects may still carry skills under .claude/skills
+    `${projectPath}/.claude/skills/chapter-generation/SKILL.md`,
+    `${projectPath}/.claude/skills/chapter-generation/references/content-format.md`
+  ];
+  const MAX_REF_BYTES = 24 * 1024;
+  const inlinedRefs = [];
+  const seen = new Set();
+  for (const refPath of skillRefPaths) {
+    try {
+      const content = fs.readFileSync(refPath, 'utf-8');
+      const key = path.basename(refPath);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (content.length > MAX_REF_BYTES) {
+        inlinedRefs.push(`=== ${key} (truncated to ${MAX_REF_BYTES} bytes) ===\n${content.slice(0, MAX_REF_BYTES)}\n... (省略 ${content.length - MAX_REF_BYTES} 字节)`);
+      } else {
+        inlinedRefs.push(`=== ${key} ===\n${content}`);
+      }
+    } catch (e) {
+      // missing legacy path is fine
+    }
+  }
+  return inlinedRefs.length
+    ? `\n\n以下是项目里 chapter-generation skill 的核心参考资料，请先阅读理解：\n\n${inlinedRefs.join('\n\n')}\n`
+    : '';
+}
+
+// Build the per-chapter generation prompt (pure, unit-testable).
+// courseType is optional — emitted only when the host supplied a value.
+// hasSession switches item 1 between "already in session context" and
+// "inlined above / re-Read if incomplete" (fresh sessions never saw the skill).
+export function buildChapterPrompt({ index, chapter, projectPath, previousChapters, courseType, hasSession }) {
+  const courseTypeLine = courseType ? `- course_type: ${courseType}\n` : '';
+  const skillNote = hasSession
+    ? '1. chapter-generation skill 的 SKILL.md 和 content-format.md 已经在 init session 里读过，session context 里就有；除非内容不全再 Read 补充，否则直接用 Write 写文件。'
+    : `1. chapter-generation skill 的 SKILL.md 和 content-format.md 已附在上方；如未附或内容不全，再 Read ${JSON.stringify(`${projectPath}/.pi/skills/chapter-generation/references/content-format.md`)} 补充。之后直接用 Write 写文件。`;
+  const prevContext = index > 0
+    ? `前面已生成的章节：\n${previousChapters.map((t, idx) => `${idx + 1}. ${t}`).join('\n')}`
+    : '这是第一章。';
+  return `请使用 chapter-generation skill 生成第 ${index + 1} 章。
+- chapter_index: ${index}
+- chapter_title: ${JSON.stringify(chapter.title)}
+- duration_minutes: ${chapter.duration_minutes}
+- concepts: ${JSON.stringify(chapter.concepts)}
+${courseTypeLine}- project_path: ${JSON.stringify(projectPath)}
+- previous_chapters: ${JSON.stringify(previousChapters)}
+
+${prevContext}
+
+重要：
+${skillNote}
+2. 写完三个文件后，按 SKILL.md 的 MUST-VERIFY checklist 逐项检查，不通过就改。
+3. 三个文件必须都存在且 quiz.json 顶层必须有 \`questions\` 字段（不是空对象、不是其他名字）。`;
+}
+
 export async function generateChapters(queryFnUnused, config, args) {
-  const { project_path, outline, chapter_indices } = args;
+  const { project_path, outline, chapter_indices, course_type } = args;
   const allChapters = outline.chapters;
   const total = allChapters.length;
 
@@ -397,24 +460,18 @@ export async function generateChapters(queryFnUnused, config, args) {
       status: 'generating'
     });
 
-    const prevContext = i > 0
-      ? `前面已生成的章节：\n${allChapters.slice(0, i).map((ch, idx) => `${idx + 1}. ${ch.title}`).join('\n')}`
-      : '这是第一章。';
-
-    const chapterPrompt = `请使用 chapter-generation skill 生成第 ${i + 1} 章。
-- chapter_index: ${i}
-- chapter_title: ${JSON.stringify(chapter.title)}
-- duration_minutes: ${chapter.duration_minutes}
-- concepts: ${JSON.stringify(chapter.concepts)}
-- project_path: ${JSON.stringify(project_path)}
-- previous_chapters: ${JSON.stringify(allChapters.slice(0, i).map((ch) => ch.title))}
-
-${prevContext}
-
-重要：
-1. chapter-generation skill 的 SKILL.md 和 content-format.md 已经在 init session 里读过，session context 里就有；除非内容不全再 Read 补充，否则直接用 Write 写文件。
-2. 写完三个文件后，按 SKILL.md 的 MUST-VERIFY checklist 逐项检查，不通过就改。
-3. 三个文件必须都存在且 quiz.json 顶层必须有 \`questions\` 字段（不是空对象、不是其他名字）。`;
+    // Fresh-session mode (no session_id): the agent never saw the skill refs,
+    // so inline them into the chapter prompt instead of claiming they're in
+    // session context.
+    const chapterPrompt = (args.session_id ? '' : collectChapterSkillRefs(project_path))
+      + buildChapterPrompt({
+        index: i,
+        chapter,
+        projectPath: project_path,
+        previousChapters: allChapters.slice(0, i).map((ch) => ch.title),
+        courseType: course_type,
+        hasSession: Boolean(args.session_id)
+      });
 
     try {
       const { output: raw } = await runPiTurn({
@@ -458,68 +515,6 @@ ${prevContext}
   }
 
   emit('complete', { total_generated: indicesToGenerate.length });
-}
-
-/**
- * summary stage：课程学完后生成主题式幻灯片总结。
- * Agent 读全部章节 → 跨章节提炼 4-6 个大主题 → 写 <project>/99-课程总结.md，
- * 内容用 `---` 作幻灯片硬分隔（主视图 parseExplicitStructure 直接识别）。
- * 结果通过 summary_complete / summary_failed 事件上报。
- */
-export async function generateSummary(queryFnUnused, config, args) {
-  const { project_path, outline, session_id } = args;
-  const SUMMARY_FILE = '99-课程总结.md';
-  const summaryPath = path.join(project_path, SUMMARY_FILE);
-  const chapters = (outline && outline.chapters) || [];
-
-  emit('status', { message: 'AI 正在提炼课程主题，生成总结…' });
-
-  const chapterList = chapters
-    .map((ch, i) => `${i + 1}. ${ch.title}`)
-    .join('\n');
-  const courseName = (outline && outline.name) || (chapters[0] && chapters[0].title) || '课程总结';
-
-  const prompt = `请使用 typora-course-summary skill 为以下已完成的课程生成**主题式幻灯片总结**。
-
-- project_path: ${JSON.stringify(project_path)}
-- 课程章节（按顺序）：
-${chapterList}
-
-重要：
-1. 先 Read typora-course-summary skill 的 SKILL.md（路径二选一：${JSON.stringify(project_path + '/.pi/skills/typora-course-summary/SKILL.md')} 或 ${JSON.stringify(project_path + '/.claude/skills/typora-course-summary/SKILL.md')}），严格按它的结构和 MUST-VERIFY checklist 执行。
-2. 用 find 列出 ${JSON.stringify(project_path)} 根目录下所有章节 .md 文件（跳过 ${JSON.stringify(SUMMARY_FILE)} 自身），逐个 Read 读取内容，跨章节提炼 4-6 个大主题。
-3. 用 Write 将总结写入文件：${JSON.stringify(summaryPath)}（幻灯片语法：每张幻灯片之间用单独一行 --- 分隔）。
-4. 课程名用：${JSON.stringify(courseName)}。`;
-
-  // 若项目里没拷到 skill（旧项目），退化为内联指令，保证功能可用
-  const inlineFallback = `
-
-（备用指令——若找不到 typora-course-summary SKILL.md 则按此执行：）
-1. 读全部章节 .md，跨章节提炼 4-6 个大主题，总结而非逐章复述。
-2. 写入 ${JSON.stringify(summaryPath)}。
-3. 第一页封面以 # 写课程名（${JSON.stringify(courseName)}）+ 一行 ≤15 字 tagline；
-   每主题一页以 ## 主题名 开头 + 一个 mermaid 图 + ≤3 条要点（每条 ≤12 字）；
-   页与页之间用单独一行 ---（前后各留一个空行）分隔；最后一页「学习回顾」只列 3-5 个知识点名词。
-4. 少字多图：严禁段落、严禁长句。全中文，只输出幻灯片 markdown 正文。`;
-  const skillPrompt = prompt + inlineFallback;
-
-  try {
-    await runPiTurn({
-      prompt: skillPrompt,
-      config,
-      cwd: project_path,
-      tools: ['read', 'write', 'find', 'grep'],
-      sessionId: session_id,
-      onToolLog: (text) => emit('progress_log', { text })
-    });
-
-    if (!fs.existsSync(summaryPath)) {
-      throw new Error(`Agent did not write expected summary file: ${SUMMARY_FILE}`);
-    }
-    emit('summary_complete', { file: SUMMARY_FILE });
-  } catch (e) {
-    emit('summary_failed', { message: e.message });
-  }
 }
 
 export async function explainText(queryFnUnused, config, args) {
@@ -599,6 +594,53 @@ export async function repairQuizQuality(queryFnUnused, config, args) {
 
   if (!raw || raw.trim().length < 2) {
     throw new Error('quiz-repair: agent response empty');
+  }
+}
+
+/**
+ * 构造 element-repair 的定向重写 prompt（纯函数，可单测）。
+ * 只删/改被标记的编程代码块，其余内容原样保留。空 repairs 返回空串。
+ */
+export function buildElementRepairPrompt(project_path, repairs) {
+  if (!project_path || !Array.isArray(repairs) || !repairs.length) {
+    return '';
+  }
+  return `刚生成的章节包含不应用于本课程类型的编程代码块，请定向修复。
+- project_path: ${JSON.stringify(project_path)}
+- repairs: ${JSON.stringify(repairs)}
+
+对每个 file：
+1. 用 Read 读取 {project_path}/{file}
+2. 只处理 violations 里列出的那个编程代码块（给定行号 lang）：
+   - engineering 课：删掉该代码块，改用**真实公式 + 工艺/结构 mermaid 图 + 真实工业实例（设备型号/槽型/工艺参数/产地产能）**写同一内容
+   - humanities 课：删掉该代码块，改用**具体作品实例（曲目+乐章+时间点 / 作品+年代 / 文献出处）**写同一内容
+3. 用 Write 写回整个文件：除该处代码块改为学科化表达外，**其余内容原样保留，一字不改**。
+
+全部修复后回复一行总结。`;
+}
+
+/**
+ * element-repair stage（D 层元素合规）：对校验违规的编程代码块做一轮定向重写。
+ * 只处理被判违规的代码块，其余内容不动。
+ */
+export async function repairElementCompliance(queryFnUnused, config, args) {
+  const { project_path, repairs } = args;
+  if (!project_path || !Array.isArray(repairs) || !repairs.length) {
+    return;
+  }
+
+  const prompt = buildElementRepairPrompt(project_path, repairs);
+
+  const { output: raw } = await runPiTurn({
+    prompt,
+    config,
+    cwd: project_path,
+    tools: ['read', 'write'],
+    sessionId: args.session_id || null
+  });
+
+  if (!raw || raw.trim().length < 2) {
+    throw new Error('element-repair: agent response empty');
   }
 }
 
@@ -884,34 +926,7 @@ export async function initSession(queryFnUnused, config, args) {
 
   // Inline chapter-generation skill references into the init prompt so the
   // agent has them in session context (avoids N redundant Reads at generate).
-  const skillRefPaths = [
-    `${project_path}/.pi/skills/chapter-generation/SKILL.md`,
-    `${project_path}/.pi/skills/chapter-generation/references/content-format.md`,
-    // Legacy projects may still carry skills under .claude/skills
-    `${project_path}/.claude/skills/chapter-generation/SKILL.md`,
-    `${project_path}/.claude/skills/chapter-generation/references/content-format.md`
-  ];
-  const MAX_REF_BYTES = 24 * 1024;
-  const inlinedRefs = [];
-  const seen = new Set();
-  for (const refPath of skillRefPaths) {
-    try {
-      const content = fs.readFileSync(refPath, 'utf-8');
-      const key = path.basename(refPath);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      if (content.length > MAX_REF_BYTES) {
-        inlinedRefs.push(`=== ${key} (truncated to ${MAX_REF_BYTES} bytes) ===\n${content.slice(0, MAX_REF_BYTES)}\n... (省略 ${content.length - MAX_REF_BYTES} 字节)`);
-      } else {
-        inlinedRefs.push(`=== ${key} ===\n${content}`);
-      }
-    } catch (e) {
-      // missing legacy path is fine
-    }
-  }
-  const refsSection = inlinedRefs.length
-    ? `\n\n以下是项目里 chapter-generation skill 的核心参考资料，请先阅读理解：\n\n${inlinedRefs.join('\n\n')}\n`
-    : '';
+  const refsSection = collectChapterSkillRefs(project_path);
 
   const { sessionFile } = await runPiTurn({
     prompt: `请使用 project-onboarding skill 了解这个项目，并返回项目摘要。
@@ -1047,12 +1062,6 @@ async function main() {
         log('info', 'Generate stage completed');
         process.exit(0);
         break;
-      case 'summary':
-        log('info', 'Starting summary stage', { project_path: taskArgs.project_path, chapterCount: taskArgs.outline?.chapters?.length, session_id: taskArgs.session_id || null });
-        await generateSummary(null, config, taskArgs);
-        log('info', 'Summary stage completed');
-        process.exit(0);
-        break;
       case 'explain':
         log('info', 'Starting explain stage', { text_length: taskArgs.text?.length, context_length: taskArgs.context?.length, output_file: taskArgs.output_file, session_id: taskArgs.session_id || null });
         await explainText(null, config, taskArgs);
@@ -1097,6 +1106,12 @@ async function main() {
         log('info', 'Starting quiz-repair stage', { project_path: taskArgs.project_path, fileCount: taskArgs.repairs?.length });
         await repairQuizQuality(null, config, taskArgs);
         log('info', 'Quiz-repair stage completed');
+        process.exit(0);
+      }
+      case 'element-repair': {
+        log('info', 'Starting element-repair stage', { project_path: taskArgs.project_path, fileCount: taskArgs.repairs?.length });
+        await repairElementCompliance(null, config, taskArgs);
+        log('info', 'Element-repair stage completed');
         process.exit(0);
       }
       case 'paper-reader': {

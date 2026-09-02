@@ -6628,7 +6628,7 @@ window.agentBridge = {
   };
 
   // Expose showToast for learning modules that already call window.showToast
-  // (guarded) but never had it wired — my course-summary feature depends on it.
+  // (guarded) but never had it wired.
   window.showToast = showToast;
 
   // ============================================

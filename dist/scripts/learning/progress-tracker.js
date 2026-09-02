@@ -324,7 +324,6 @@
           <div class="learning-progress-title">学习进度</div>
           <div style="display:flex;gap:8px;align-items:center;">
             ${actionBtn}
-            ${this._renderSummaryButton()}
             <button class="learning-kg-btn" id="learningKGBtn" title="知识图谱">🧠 图谱</button>
             <button class="learning-exit-btn" id="learningExitBtn" title="退出课程模式">退出</button>
             <button class="learning-progress-close-btn" id="learningProgressClose">×</button>
@@ -421,21 +420,6 @@
     }
 
     /**
-     * 课程总结幻灯片按钮：仅当全部章节学完后显示（CourseSummary 判定）。
-     * 文件已生成 → 点击放映；未生成 → 点击触发生成。
-     */
-    _renderSummaryButton() {
-      // 2026-08-13：总结质量未达标，入口暂时隐藏（SUMMARY_ENTRY_ENABLED=false）
-      if (!window.CourseSummary || !window.CourseSummary.SUMMARY_ENTRY_ENABLED) {
-        return '';
-      }
-      if (!window.CourseSummary.isCourseCompleted(this.manager)) {
-        return '';
-      }
-      return '<button class="learning-summary-btn" id="learningSummaryBtn" title="课程总结幻灯片">📊 总结</button>';
-    }
-
-    /**
      * Bind click events
      */
     _bindEvents() {
@@ -444,8 +428,7 @@
       const orb = document.getElementById('learningModeOrb');
       if (closeBtn) {
         closeBtn.addEventListener('click', () => {
-          this.container.style.display = 'none';
-          if (orb) orb.style.display = 'flex';
+          collapseToOrb(this.container, orb);
         });
       }
 
@@ -462,16 +445,6 @@
       if (kgBtn) {
         kgBtn.addEventListener('click', () => {
           if (this.onOpenDashboard) this.onOpenDashboard();
-        });
-      }
-
-      // Course summary button → view (file exists) or generate
-      const summaryBtn = this.container.querySelector('#learningSummaryBtn');
-      if (summaryBtn) {
-        summaryBtn.addEventListener('click', () => {
-          if (window.CourseSummary && this.projectPath) {
-            window.CourseSummary.onSummaryButtonClick(this.projectPath, this.manager);
-          }
         });
       }
 
@@ -911,16 +884,14 @@
      * Minimize overlay to orb
      */
     minimize() {
-      if (this.overlay) this.overlay.style.display = 'none';
-      if (this.orb) this.orb.style.display = 'flex';
+      collapseToOrb(this.overlay, this.orb);
     }
 
     /**
      * Restore overlay from orb
      */
     restore() {
-      if (this.overlay) this.overlay.style.display = 'flex';
-      if (this.orb) this.orb.style.display = 'none';
+      expandFromOrb(this.overlay, this.orb);
     }
 
     /**
@@ -1235,6 +1206,52 @@
   }
 
   // ============================================
+  // Panel ↔ Orb collapse/expand animation
+  // ============================================
+
+  function _prefersReducedMotion() {
+    return typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  /**
+   * Animate a panel shrinking back into the floating orb, then hide it.
+   * @param {HTMLElement} panel
+   * @param {HTMLElement|null} orb
+   */
+  function collapseToOrb(panel, orb) {
+    if (!panel) return;
+    const finish = () => {
+      panel.classList.remove('learning-collapsing-to-orb');
+      panel.style.display = 'none';
+      if (orb) orb.style.display = 'flex';
+    };
+    if (_prefersReducedMotion()) { finish(); return; }
+    let done = false;
+    const once = () => { if (!done) { done = true; finish(); } };
+    panel.addEventListener('animationend', once, { once: true });
+    setTimeout(once, 400); // safety net if animationend is missed
+    panel.classList.add('learning-collapsing-to-orb');
+  }
+
+  /**
+   * Show a panel with an expand-from-orb animation (reverse of collapseToOrb).
+   * @param {HTMLElement} panel
+   * @param {HTMLElement|null} orb
+   * @param {string} [display='flex'] - the panel's normal display value
+   */
+  function expandFromOrb(panel, orb, display) {
+    if (!panel) return;
+    if (orb) orb.style.display = 'none';
+    panel.style.display = display || 'flex';
+    if (_prefersReducedMotion()) return;
+    panel.classList.add('learning-expanding-from-orb');
+    panel.addEventListener('animationend', () => {
+      panel.classList.remove('learning-expanding-from-orb');
+    }, { once: true });
+  }
+
+  // ============================================
   // Public API
   // ============================================
   window.LearningProgress = {
@@ -1244,6 +1261,8 @@
     GenerationOverlay,
     STATUS_ICONS,
     STATUS_LABELS,
+    collapseToOrb,
+    expandFromOrb,
 
     /**
      * Configure the sliding-window pre-generation size.
@@ -1424,11 +1443,11 @@
               console.error('[ProgressTracker] sliding-window trigger failed:', err);
             });
 
-            // Course completion: show the summary button (via re-render) and
-            // offer a slide summary once.
-            if (window.CourseSummary && window.CourseSummary.isCourseCompleted(manager)) {
+            // Course completion: re-render the panel (完结态 UI 由 dashboard 承担)
+            if (window.CourseCompletion && window.CourseCompletion.isProjectCourseCompleted({
+              chapters: (manager.chapters || []).map(ch => ({ status: ch.status }))
+            })) {
               ui.render();
-              window.CourseSummary.maybeOfferSummary(projectPath, manager);
             }
           }
         };
@@ -1449,8 +1468,7 @@
         if (orb) {
           orb.onclick = () => {
             if (overlay._done) {
-              container.style.display = 'flex';
-              orb.style.display = 'none';
+              expandFromOrb(container, orb);
               ui.render();
             } else {
               overlay.restore();
@@ -1548,6 +1566,6 @@
 
   // Export for Node.js testing
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { ChapterStatusManager, ProgressUI, AgentEventBridge, STATUS_ICONS, STATUS_LABELS };
+    module.exports = { ChapterStatusManager, ProgressUI, AgentEventBridge, STATUS_ICONS, STATUS_LABELS, collapseToOrb, expandFromOrb };
   }
 })();

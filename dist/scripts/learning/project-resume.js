@@ -355,8 +355,8 @@
       }));
 
       // Sprint 16: 课程完结终态（落盘字段或全章节完成派生）
-      const courseCompleted = window.CourseSummary && window.CourseSummary.isProjectCourseCompleted
-        ? window.CourseSummary.isProjectCourseCompleted(project)
+      const courseCompleted = window.CourseCompletion && window.CourseCompletion.isProjectCourseCompleted
+        ? window.CourseCompletion.isProjectCourseCompleted(project)
         : false;
 
       // Sprint 21: 存量完结课程补结课档案 + 全局索引（best-effort，不阻塞加载）
@@ -390,6 +390,7 @@
           stats,
           chapters,
           projectName: (project && project.name) || '学习项目',
+          projectPath: basePath,
           dueCount,
           courseCompleted
         });
@@ -577,10 +578,11 @@
                 console.error('[ProjectResume] sliding-window trigger failed:', err);
               });
             }
-            // Course completion → show summary button + offer slide summary (once)
-            if (window.CourseSummary && window.CourseSummary.isCourseCompleted(manager)) {
+            // 课程完结 → 重渲染面板（复习入口等完结态 UI 由 dashboard 承担）
+            if (window.CourseCompletion && window.CourseCompletion.isProjectCourseCompleted({
+              chapters: (manager.chapters || []).map(ch => ({ status: ch.status }))
+            })) {
               ui.render();
-              window.CourseSummary.maybeOfferSummary(basePath, manager);
             }
           }
         };
@@ -632,8 +634,12 @@
         // Click outside to close panel → show orb
         const onClickOutside = (e) => {
           if (!container.contains(e.target) && !orb.contains(e.target)) {
-            container.style.display = 'none';
-            if (orb) orb.style.display = 'flex';
+            if (window.LearningProgress && window.LearningProgress.collapseToOrb) {
+              window.LearningProgress.collapseToOrb(container, orb);
+            } else {
+              container.style.display = 'none';
+              if (orb) orb.style.display = 'flex';
+            }
             document.removeEventListener('click', onClickOutside);
           }
         };
@@ -644,8 +650,12 @@
         // Orb click → restore panel
         if (orb) {
           orb.onclick = () => {
-            container.style.display = 'flex';
-            orb.style.display = 'none';
+            if (window.LearningProgress && window.LearningProgress.expandFromOrb) {
+              window.LearningProgress.expandFromOrb(container, orb);
+            } else {
+              container.style.display = 'flex';
+              orb.style.display = 'none';
+            }
           };
         }
 
@@ -706,10 +716,11 @@
               stats,
               chapters,
               projectName: (project && project.name) || '学习项目',
+              projectPath: basePath,
               dueCount,
               // Sprint 16: 课程完结终态
-              courseCompleted: window.CourseSummary && window.CourseSummary.isProjectCourseCompleted
-                ? window.CourseSummary.isProjectCourseCompleted(project)
+              courseCompleted: window.CourseCompletion && window.CourseCompletion.isProjectCourseCompleted
+                ? window.CourseCompletion.isProjectCourseCompleted(project)
                 : false
             });
           } catch (e) {

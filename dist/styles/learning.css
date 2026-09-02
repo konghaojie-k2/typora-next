@@ -127,6 +127,108 @@
   line-height: 1.5;
 }
 
+/* Sprint 22: 📍 下一站 roadmap（知识图谱仪表盘，完结课程） */
+.roadmap-section {
+  margin-top: 14px;
+  border-top: 1px solid var(--color-border, #e0e0e4);
+  padding-top: 12px;
+}
+
+.roadmap-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.roadmap-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text, #333);
+}
+
+.roadmap-controls {
+  display: flex;
+  gap: 6px;
+}
+
+.roadmap-refresh,
+.roadmap-chip {
+  padding: 3px 10px;
+  font-size: 12px;
+  border: 1px solid var(--color-border, #d0d0d5);
+  border-radius: 999px;
+  background: var(--color-bg-secondary, #f5f5f7);
+  color: var(--color-text-secondary, #666);
+  cursor: pointer;
+}
+
+.roadmap-refresh:hover,
+.roadmap-chip:hover {
+  border-color: #a3a0fb;
+  color: var(--color-text, #333);
+}
+
+.roadmap-status {
+  font-size: 13px;
+  color: var(--color-text-secondary, #666);
+  padding: 8px 0;
+}
+
+.roadmap-error {
+  color: #b45309;
+}
+
+.roadmap-retry {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 12px;
+  border: 1px solid var(--color-border, #d0d0d5);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.roadmap-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.roadmap-card {
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border, #e0e0e4);
+  border-radius: 8px;
+  background: var(--color-bg-secondary, #f5f5f7);
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+
+.roadmap-card:hover {
+  border-color: #a3a0fb;
+  transform: translateY(-1px);
+}
+
+.roadmap-card-goal {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text, #333);
+  margin-bottom: 4px;
+}
+
+.roadmap-card-reason {
+  font-size: 12px;
+  color: var(--color-text-secondary, #666);
+  line-height: 1.5;
+  margin-bottom: 6px;
+}
+
+.roadmap-card-meta {
+  font-size: 11px;
+  color: var(--color-text-tertiary, #999);
+}
+
 /* ============================================
    Loading State
    ============================================ */

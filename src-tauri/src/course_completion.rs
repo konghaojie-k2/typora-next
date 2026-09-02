@@ -4,7 +4,7 @@
 //! 项目仍被「今日复习 N」催促。本模块提供写侧规则：全部章节完成时在
 //! project.json 顶层落 `course_status = "completed"`（课程级终态）。
 //!
-//! 读侧派生（含存量项目兼容）在前端 course-summary.js 的
+//! 读侧派生（含存量项目兼容）在前端 course-completion.js 的
 //! isProjectCourseCompleted。
 
 use serde_json::Value;

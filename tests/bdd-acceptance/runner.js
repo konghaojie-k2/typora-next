@@ -266,16 +266,9 @@ async function runAcceptanceTests() {
   totalPassed += externalRefreshResult.passed;
   totalFailed += externalRefreshResult.failed;
 
-  // Sprint 15: Course completion slide summary (AI-generated theme recap)
-  console.log(`\n${YELLOW}▶ Sprint 15: Course Completion Slide Summary${RESET}`);
-  const courseSummarySteps = require('./sprint15_course_summary.steps');
-  const courseSummaryResult = await runFeatureFile(
-    path.join(__dirname, '../sprint15/features/course_completion_summary.feature'),
-    courseSummarySteps
-  );
-  totalPassed += courseSummaryResult.passed;
-  totalFailed += courseSummaryResult.failed;
-  if (courseSummarySteps._cleanup) courseSummarySteps._cleanup.call({});
+  // Sprint 15 (course-completion slide summary) was REMOVED in Sprint 22 —
+  // feature deleted by user decision (quality bar not met; replaced by the
+  // course roadmap feature). Its steps/feature/unit tests are gone.
 
   // Sprint 16: Course completion state (terminal status + review entry de-nag)
   console.log(`\n${YELLOW}▶ Sprint 16: Course Completion State${RESET}`);
@@ -309,6 +302,16 @@ async function runAcceptanceTests() {
   totalFailed += caseStudyResult.failed;
   if (caseStudySteps._cleanup) caseStudySteps._cleanup.call({});
 
+  // Sprint 19: Course-type adaptive chapter template (humanities/technical branches)
+  console.log(`\n${YELLOW}▶ Sprint 19: Course-Type Adaptive Chapters${RESET}`);
+  const courseTypeSteps = require('./sprint19_course_type.steps');
+  const courseTypeResult = await runFeatureFile(
+    path.join(__dirname, '../sprint19/features/sprint19_course_type.feature'),
+    courseTypeSteps
+  );
+  totalPassed += courseTypeResult.passed;
+  totalFailed += courseTypeResult.failed;
+  if (courseTypeSteps._cleanup) courseTypeSteps._cleanup.call({});
 
   // Sprint 20: 课程内容元素约束 (engineering 域 + D 层硬校验)
   console.log(`\n${YELLOW}▶ Sprint 20: Element Constraint (engineering + D-layer)${RESET}`);
@@ -316,6 +319,7 @@ async function runAcceptanceTests() {
   const elementResult = await runFeatureFile(
     path.join(__dirname, '../sprint20/features/sprint20_element_constraint.feature'),
     elementSteps
+  );
   totalPassed += elementResult.passed;
   totalFailed += elementResult.failed;
   if (elementSteps._cleanup) elementSteps._cleanup.call({});
@@ -326,10 +330,20 @@ async function runAcceptanceTests() {
   const memoryResult = await runFeatureFile(
     path.join(__dirname, '../sprint21/features/sprint21_cross_course_memory.feature'),
     memorySteps
+  );
   totalPassed += memoryResult.passed;
   totalFailed += memoryResult.failed;
   if (memorySteps._cleanup) memorySteps._cleanup.call({});
 
+  // Sprint 22: 结课 roadmap（📍 下一站）+ 课程总结删除反向断言
+  console.log(`\n${YELLOW}▶ Sprint 22: Course Roadmap + Summary Deletion${RESET}`);
+  const roadmapSteps = require('./sprint22_course_roadmap.steps');
+  const roadmapResult = await runFeatureFile(
+    path.join(__dirname, '../sprint22/features/sprint22_course_roadmap.feature'),
+    roadmapSteps
+  );
+  totalPassed += roadmapResult.passed;
+  totalFailed += roadmapResult.failed;
 
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
