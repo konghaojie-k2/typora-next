@@ -1,6 +1,8 @@
-# Chapter Content Format Specification (v1)
+# Chapter Content Format Specification (v1.3)
 
 > Canonical format for AI-generated learning chapters. Sourced from `docs/specs/content-format-spec.md` and embedded here so the agent can read it without leaving the skill.
+
+> **课程类型**：章节按 `course_type`（technical / engineering / humanities / hybrid）分支——技术课用代码/公式/流程图；**engineering 课用真公式/工艺流/结构图/真实工业实例且禁编程代码块**；人文课用具体作品实例/时间线/表格替代凑数伪代码。类型判定与特化规则见 SKILL.md 的「课程类型判定」「类型特化」两节。
 
 ## 1. Writing style
 
@@ -8,12 +10,12 @@
 2. **逻辑连贯** (coherent): if there's a next chapter, end with a transition
 3. **有自己的思考** (insightful): don't just list facts — explain *why*
 4. **适度总结** (summarized): brief summaries after key concepts
-5. **可视化** (visual): Mermaid diagrams and tables encouraged
+5. **可视化** (visual): Mermaid diagrams and tables encouraged — **按内容形态选型**（演变→`timeline`、体系→`mindmap`/`flowchart TB`、流程→`flowchart LR`、交互→`sequenceDiagram`、对比→表格；把生平画成 flowchart 是形态错配）
 
 Markdown rules:
 - Standard Markdown
-- Math: `$...$` inline, `$$...$$` block
-- Code blocks: always tag the language (` ```python `, etc.)
+- Math: `$...$` inline, `$$...$$` block — 技术课正常使用；**engineering 课在真有化学/热力学/工艺公式时用（Faraday 定律、电流效率、槽电压、比电耗、刻蚀速率），禁凑数伪公式**；人文课仅内容真需要时出现（如乐理频率比）
+- Code blocks: always tag the language (` ```python `, etc.) — **engineering/humanities 课禁止为凑数虚构代码块（编程代码块/伪代码）**；engineering 用**真实工业实例**（设备/槽型/工艺参数/产地产能）、humanities 用**具体作品实例**（曲目+乐章+时间点 / 作品+年代 / 文献出处）作为"落到实物"的载体；mermaid 图（` ```mermaid `）两类都允许
 
 ## 2. Required learning elements per chapter
 
@@ -26,6 +28,8 @@ Markdown rules:
 ## 3. Mandatory chapter structure
 
 Every chapter MUST follow this numbered section template. The structure is designed to ensure consistency across all chapters in a course.
+
+> 下例展示 **technical 变体**（`$$formula$$` + 代码 + flowchart）。**engineering 变体**把公式保留为真公式 + 工艺/结构 mermaid，把代码槽位换成**真实工业实例块**；**humanities 变体**把 tech 的三个槽位换成：具体作品实例块（见 §3.1）+ 按内容形态选型的可视化（演变用 `timeline`、体系用 `mindmap`/表格；纯赏析小节可以无图）。骨架、callout、表格、quiz 结构所有类型一致。engineering/humanities **禁止编程代码块**。
 
 ```markdown
 # {NN}: {chapter title}
@@ -122,6 +126,60 @@ flowchart LR
 
 {transition sentence connecting what was just learned to what's next}
 ```
+
+### 3.1 humanities 槽位示例（替换 technical 的公式/代码/流程图槽位）
+
+```markdown
+## 1.1 {first concept}
+
+### {concept} 的核心直觉
+
+{real-life analogy}
+
+{narrative explanation —— 叙事展开，不硬造公式}
+
+> 🎧 **具体作品实例**：《勃兰登堡协奏曲》第二首 第三乐章 2'30'' 处，
+> 赋格主题在各声部依次进入——听到"叠罗汉"般的层次感，就是复调的直观体验。
+
+{时间演变/体系结构用下面形态匹配的可视化；纯赏析可不加}
+
+```mermaid
+timeline
+    title 巴赫的任职时期
+    1708 : 魏玛 · 宫廷管风琴师 → 管风琴曲
+    1717 : 克滕 · 宫廷乐长 → 协奏曲/组曲
+    1723 : 莱比锡 · 教堂乐长 → 康塔塔/受难曲
+```
+```
+
+### 3.2 engineering 槽位示例（替换 technical 的代码槽位；保真公式 + 工艺/结构 mermaid）
+
+```markdown
+## 1.1 {first concept}
+
+### {concept} 的核心直觉
+
+{real-life analogy（跨域生活类比）}
+
+{工程解释链接类比到公式}  ——  不硬造公式，但真有公式就写：
+
+$$
+\text{槽电压} \; U = E_\text{分解} + I R_\text{内} + \Delta E_\text{极化}
+$$
+
+```mermaid
+flowchart LR
+    A["氧化铝 Al₂O₃"] --> B["溶解于冰晶石熔体"]
+    B --> C["电解槽 阴极→铝 阳极→O₂+CO₂"]
+    C --> D["精炼 → 铝锭"]
+```
+
+> 🏭 **真实工业实例**：400kA 预焙阳极电解槽，槽电压约 4.1~4.3V，
+> 吨铝直流电耗约 1.3 万 kWh；阳极电流密度约 0.8 A/cm²。
+
+{对比用 markdown 表格：电解 vs 熔盐化学还原 …}
+```
+
 
 ## 4. quiz.json schema (v1)
 
@@ -257,3 +315,5 @@ If a question text or option text contains Chinese quotes `""`, you MUST either:
 |------|---------|--------|
 | 2026-06-04 | v1.0 | Initial version, extracted from implementation plan |
 | 2026-06-15 | v1.1 | Embedded into chapter-generation skill (no semantic changes) |
+| 2026-08-22 | v1.2 | 课程类型自适应（technical/humanities/hybrid）：§1 数学/代码规则参数化，§3 增加 humanities 槽位示例，可视化按内容形态选型 |
+| 2026-08-23 | v1.3 | 新增 engineering 域（真实科学与工程/工业过程）：真公式 + 工艺/结构 mermaid + 真实工业实例，禁编程代码块；§3.2 增加 engineering 槽位示例 |

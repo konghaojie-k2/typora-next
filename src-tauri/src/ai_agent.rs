@@ -5,7 +5,11 @@ use std::sync::{Arc, Mutex};
 use tauri::Manager;
 use tauri::{AppHandle, Emitter, State};
 
+use crate::plan_prompt::{build_plan_prompt, parse_plan_response};
 use crate::{get_config, AppConfig, AppState};
+// Re-export so existing `ai_agent::copy_bundled_skills_to_project` call sites
+// (lib.rs) keep resolving after the logic moved to the skills_bundle module.
+pub use crate::skills_bundle::{copy_bundled_skills_to_project, get_bundled_skills_dir};
 
 /// Agent message types emitted to frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -187,113 +191,12 @@ fn get_agent_bridge_path() -> Result<std::path::PathBuf, String> {
     Ok(chosen.clone())
 }
 
-/// Find the directory containing bundled skills (src-tauri/skills/).
-/// Mirrors `get_agent_bridge_path`'s candidate search.
-pub fn get_bundled_skills_dir() -> Result<std::path::PathBuf, String> {
-    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {}", e))?;
-    let exe_dir = exe.parent().ok_or("exe has no parent")?;
-
-    let candidates = [
-        exe_dir.join("skills"),
-        exe_dir.join("_up_").join("skills"), // Tauri resources (Windows MSI)
-        exe_dir.join("resources").join("skills"), // Tauri resources alt layout
-        exe_dir.join("..").join("Resources").join("skills"), // macOS .app: Contents/Resources/skills
-        exe_dir.join("..").join("Resources").join("_up_").join("skills"), // macOS _up_ mapping
-        exe_dir.join("..").join("skills"),   // target/release/../skills = target/skills
-        exe_dir.join("..").join("..").join("skills"), // target/release/../../skills = project-root/skills
-        exe_dir.join("..").join("src-tauri").join("skills"), // target/release/ -> target/src-tauri/skills
-        exe_dir
-            .join("..")
-            .join("..")
-            .join("src-tauri")
-            .join("skills"), // target/release/ -> project-root/src-tauri/skills
-        exe_dir
-            .join("..")
-            .join("..")
-            .join("..")
-            .join("src-tauri")
-            .join("skills"), // worktree root/src-tauri/skills
-        exe_dir.join("..").join("..").join("..").join("skills"), // project root/skills (fallback)
-    ];
-
-    for c in &candidates {
-        if c.exists() && c.is_dir() {
-            return Ok(c.clone());
-        }
-    }
-
-    Err(format!(
-        "Bundled skills directory not found. Tried: {:?}",
-        candidates
-    ))
-}
-
 /// Quick check if the Pi SDK is available.
 /// Pure filesystem probe, no process spawn (the pi SDK is ESM-only, so the old
 /// `node -e "require(...)"` probe can never succeed against it).
 fn check_sdk_quick() -> Result<bool, String> {
     let bridge_path = get_agent_bridge_path().ok();
     Ok(crate::agent_sdk_probe::probe_agent_sdk_fs(bridge_path.as_deref()).found)
-}
-
-/// Copy bundled skills into a project's `.pi/skills/` so the pi SDK discovers
-/// them (pi's native discovery path). Called at project-setup time. Each skill
-/// is a subdirectory containing `SKILL.md` — mirrored under `{project}/.pi/skills/`.
-/// Legacy projects keep their `.claude/skills/` copies; the bridge also reads
-/// skill references from there as a fallback.
-pub fn copy_bundled_skills_to_project(project_path: &str) -> Result<(), String> {
-    let src_dir = get_bundled_skills_dir()?;
-    let dst_dir = std::path::PathBuf::from(project_path)
-        .join(".pi")
-        .join("skills");
-
-    std::fs::create_dir_all(&dst_dir)
-        .map_err(|e| format!("Failed to create {}: {}", dst_dir.display(), e))?;
-
-    // Iterate top-level skill directories
-    for entry in std::fs::read_dir(&src_dir)
-        .map_err(|e| format!("Failed to read {}: {}", src_dir.display(), e))?
-    {
-        let entry = entry.map_err(|e| format!("Dir entry error: {}", e))?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let skill_name = match path.file_name().and_then(|n| n.to_str()) {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-        let dst_skill_dir = dst_dir.join(&skill_name);
-        std::fs::create_dir_all(&dst_skill_dir)
-            .map_err(|e| format!("Failed to create {}: {}", dst_skill_dir.display(), e))?;
-
-        // Copy all files in the skill dir (typically just SKILL.md)
-        for file_entry in std::fs::read_dir(&path)
-            .map_err(|e| format!("Failed to read skill {}: {}", path.display(), e))?
-        {
-            let file_entry = file_entry.map_err(|e| format!("File entry error: {}", e))?;
-            let src_file = file_entry.path();
-            if !src_file.is_file() {
-                continue;
-            }
-            let dst_file = dst_skill_dir.join(file_entry.file_name().to_string_lossy().to_string());
-            std::fs::copy(&src_file, &dst_file).map_err(|e| {
-                format!(
-                    "Failed to copy {} -> {}: {}",
-                    src_file.display(),
-                    dst_file.display(),
-                    e
-                )
-            })?;
-        }
-    }
-
-    log::info!(
-        "[copy_bundled_skills_to_project] copied from {} to {}",
-        src_dir.display(),
-        dst_dir.display()
-    );
-    Ok(())
 }
 
 /// Read the agent session_id from a project's .learning/agent-session.json.
@@ -621,156 +524,8 @@ pub async fn plan_course(
 // ============================================
 // Sprint N+1: plan_course_llm — direct ureq LLM call
 // (replaces plan_course Agent SDK path; plan is a simple JSON-out task)
+// Prompt building + response parsing live in plan_prompt.rs (pure module).
 // ============================================
-
-/// Pure function — extracted for testability.
-/// Mirrors the prompt that previously lived in agent-bridge.mjs planCourse().
-pub fn build_plan_prompt(goal: &str, level: &str, hours: u32) -> String {
-    let level_names = [
-        ("beginner", "小白（零基础）"),
-        ("intermediate", "有编程基础"),
-        ("advanced", "专业进阶"),
-    ];
-    let level_label = level_names
-        .iter()
-        .find(|(k, _)| *k == level)
-        .map(|(_, v)| *v)
-        .unwrap_or(level);
-
-    format!(
-        r#"你是一个资深的学习设计师。请根据以下信息设计一个结构化的学习大纲。
-
-学习目标：{goal}
-难度级别：{level_label}
-预计投入时间：{hours} 小时
-
-要求：
-1. 大纲要深入浅出、逻辑连贯
-2. 从基础到进阶，循序渐进
-3. 每章包含：标题、预计时长（分钟）、涉及的核心概念
-4. 总时长控制在用户指定范围内（允许 ±20% 偏差）
-5. 章节数量：1小时≈2-3章，3小时≈6-8章，8小时≈12-16章
-
-输出格式（必须是纯 JSON）：
-```json
-{{
-  "project_slug": "diffusion-model",
-  "chapters": [
-    {{
-      "title": "章节标题",
-      "duration_minutes": 25,
-      "concepts": ["概念1", "概念2"]
-    }}
-  ],
-  "total_duration": 170
-}}
-```
-
-注意：
-- project_slug 是用英文小写字母和短横线组成的目录名（kebab-case），用于作为文件系统目录名，比如 "diffusion-model" / "attention-mechanism" / "react-basics"。最多 50 字符。"#,
-        goal = goal,
-        level_label = level_label,
-        hours = hours,
-    )
-}
-
-/// Pure function — extracted for testability.
-/// Strips markdown code block wrappers if present, then parses JSON.
-/// Mirrors `extractJSON` from agent-bridge.mjs plus normalization that
-/// previously lived there.
-pub fn parse_plan_response(raw: &str) -> Result<Value, String> {
-    // Strip markdown code block wrappers
-    let cleaned = raw.trim();
-    let cleaned = if cleaned.starts_with("```") {
-        cleaned
-            .lines()
-            .skip(1) // skip ```json or ```
-            .take_while(|l| !l.trim_start().starts_with("```"))
-            .collect::<Vec<_>>()
-            .join("\n")
-    } else {
-        cleaned.to_string()
-    };
-
-    // Parse JSON
-    let mut outline: Value = serde_json::from_str(&cleaned).map_err(|e| {
-        format!(
-            "解析大纲 JSON 失败: {} — 原始响应: {}",
-            e,
-            &raw[..raw.len().min(200)]
-        )
-    })?;
-
-    // Validate chapters
-    let chapters = outline
-        .get("chapters")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "大纲格式错误：缺少 chapters 数组".to_string())?;
-
-    // Normalize chapters (fill in defaults for missing fields)
-    let normalized: Vec<Value> = chapters
-        .iter()
-        .enumerate()
-        .map(|(i, ch)| {
-            let title = ch
-                .get("title")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| format!("第 {} 章", i + 1));
-            let duration_minutes = ch
-                .get("duration_minutes")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(20) as u32;
-            let concepts: Vec<String> = ch
-                .get("concepts")
-                .and_then(|v| v.as_array())
-                .map(|arr| {
-                    arr.iter()
-                        .filter_map(|v| v.as_str().map(String::from))
-                        .collect()
-                })
-                .unwrap_or_default();
-            serde_json::json!({
-                "title": title,
-                "duration_minutes": duration_minutes,
-                "concepts": concepts,
-            })
-        })
-        .collect();
-
-    let total_duration: u32 = normalized
-        .iter()
-        .map(|ch| {
-            ch.get("duration_minutes")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as u32
-        })
-        .sum();
-
-    outline["chapters"] = Value::Array(normalized);
-    outline["total_duration"] = Value::Number(total_duration.into());
-
-    // Sanitize project_slug (English kebab-case). Fallback to a safe default.
-    let slug_is_valid = outline
-        .get("project_slug")
-        .and_then(|v| v.as_str())
-        .map(|s| {
-            !s.is_empty()
-                && s.len() <= 50
-                && s.chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-                && s.chars()
-                    .next()
-                    .map(|c| c.is_ascii_alphanumeric())
-                    .unwrap_or(false)
-        })
-        .unwrap_or(false);
-    if !slug_is_valid {
-        outline["project_slug"] = Value::String("learning-project".to_string());
-    }
-
-    Ok(outline)
-}
 
 /// Plan a learning course via direct LLM call (no Agent SDK).
 /// Returns the outline JSON synchronously — simpler and faster than the
@@ -895,6 +650,33 @@ pub async fn generate_chapters(
 ) -> Result<(), String> {
     let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
 
+    // Re-copy bundled skills (best-effort) so existing projects pick up skill
+    // updates on the next generation.
+    let _ = copy_bundled_skills_to_project(&project_path);
+
+    // course_type single source of truth is .learning/project.json (written at
+    // plan time by create_learning_project). The frontend outline only carries
+    // chapters, so read it here and hand it to the bridge. Absent/invalid →
+    // omitted; the skill then infers the type from chapter title/concepts.
+    let course_type = std::fs::read_to_string(
+        std::path::PathBuf::from(&project_path)
+            .join(".learning")
+            .join("project.json"),
+    )
+    .ok()
+    .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+    .and_then(|pj| {
+        pj.get("course_type")
+            .and_then(|v| v.as_str())
+            .map(str::to_lowercase)
+    })
+    .filter(|ct| {
+        matches!(
+            ct.as_str(),
+            "technical" | "engineering" | "humanities" | "hybrid"
+        )
+    });
+
     // Mark generation as in-progress so the main window close guard can warn
     // the user before aborting background chapter generation.
     {
@@ -903,16 +685,22 @@ pub async fn generate_chapters(
         }
     }
 
-    let args = serde_json::json!({
+    let mut args = serde_json::json!({
         "project_path": project_path,
         "outline": outline,
         "chapter_indices": chapter_indices,
         "session_id": session_id,
     });
+    // Pre-capture clone before `course_type` gets moved by the if-let below.
+    let elem_course_type = course_type.clone().unwrap_or_default();
+    if let Some(ct) = course_type {
+        args["course_type"] = serde_json::json!(ct);
+    }
 
     let process: AgentProcess = (*agent_process).clone();
     tauri::async_runtime::spawn(async move {
         let repair_process = process.clone();
+        let element_repair_process = process.clone();
         match run_agent_bridge("generate", &config, args, app_handle.clone(), process).await {
             Ok(()) => {
                 // C 层（quiz-distractor-quality）：校验 quiz 质量，违规一轮重写。
@@ -1195,101 +983,6 @@ More text"#;
             .trim_matches('-')
             .to_string();
         format!("{:02}-{}.md", index, safe)
-    }
-
-    // ============================================
-    // Sprint N+1: plan_course_llm tests
-    // ============================================
-
-    #[test]
-    fn test_build_plan_prompt_includes_goal_level_hours() {
-        let p = build_plan_prompt("学 Rust", "beginner", 3);
-        assert!(p.contains("学 Rust"), "prompt should include goal");
-        assert!(
-            p.contains("小白（零基础）"),
-            "prompt should translate beginner to label"
-        );
-        assert!(p.contains("3 小时"), "prompt should include hours");
-        assert!(
-            p.contains("project_slug"),
-            "prompt should describe the output schema"
-        );
-    }
-
-    #[test]
-    fn test_build_plan_prompt_falls_back_to_raw_level_when_unknown() {
-        let p = build_plan_prompt("goal", "unknown-level", 1);
-        // Unknown level should be passed through verbatim
-        assert!(p.contains("unknown-level"));
-    }
-
-    #[test]
-    fn test_parse_plan_response_strips_code_block() {
-        let raw = "```json\n{\"project_slug\":\"demo\",\"chapters\":[{\"title\":\"A\",\"duration_minutes\":10,\"concepts\":[\"x\"]}],\"total_duration\":10}\n```";
-        let v = parse_plan_response(raw).expect("should parse");
-        assert_eq!(v["project_slug"], "demo");
-        assert_eq!(v["chapters"].as_array().unwrap().len(), 1);
-        assert_eq!(v["chapters"][0]["title"], "A");
-    }
-
-    #[test]
-    fn test_parse_plan_response_normalizes_missing_chapter_fields() {
-        let raw = r#"{"chapters":[{"title":""},{"duration_minutes":15,"concepts":["a","b"]}]}"#;
-        let v = parse_plan_response(raw).expect("should parse");
-        let chapters = v["chapters"].as_array().unwrap();
-        // Empty title → fallback
-        assert_eq!(chapters[0]["title"], "第 1 章");
-        // Missing duration → default 20
-        assert_eq!(chapters[0]["duration_minutes"], 20);
-        assert_eq!(chapters[1]["duration_minutes"], 15);
-        // Missing concepts → empty array
-        assert_eq!(chapters[0]["concepts"].as_array().unwrap().len(), 0);
-    }
-
-    #[test]
-    fn test_parse_plan_response_recomputes_total_duration() {
-        let raw = r#"{"chapters":[{"title":"A","duration_minutes":10},{"title":"B","duration_minutes":15}],"total_duration":999}"#;
-        let v = parse_plan_response(raw).expect("should parse");
-        // Recomputed, not the model's claim
-        assert_eq!(v["total_duration"], 25);
-    }
-
-    #[test]
-    fn test_parse_plan_response_sanitizes_invalid_slug() {
-        // Empty slug
-        let v = parse_plan_response(r#"{"chapters":[],"project_slug":""}"#).unwrap();
-        assert_eq!(v["project_slug"], "learning-project");
-        // Slug with uppercase
-        let v = parse_plan_response(r#"{"chapters":[],"project_slug":"FooBar"}"#).unwrap();
-        assert_eq!(v["project_slug"], "learning-project");
-        // Slug too long
-        let v = parse_plan_response(&format!(
-            r#"{{"chapters":[],"project_slug":"{}"}}"#,
-            "a".repeat(60)
-        ))
-        .unwrap();
-        assert_eq!(v["project_slug"], "learning-project");
-        // Slug starts with hyphen
-        let v = parse_plan_response(r#"{"chapters":[],"project_slug":"-bad"}"#).unwrap();
-        assert_eq!(v["project_slug"], "learning-project");
-        // Valid slug should be preserved
-        let v = parse_plan_response(r#"{"chapters":[],"project_slug":"diffusion-model"}"#).unwrap();
-        assert_eq!(v["project_slug"], "diffusion-model");
-    }
-
-    #[test]
-    fn test_parse_plan_response_rejects_missing_chapters() {
-        let raw = r#"{"project_slug":"demo"}"#;
-        assert!(
-            parse_plan_response(raw).is_err(),
-            "should reject without chapters"
-        );
-    }
-
-    #[test]
-    fn test_parse_plan_response_rejects_malformed_json() {
-        assert!(parse_plan_response("not json at all").is_err());
-        assert!(parse_plan_response("```json\n{invalid}\n```").is_err());
     }
 }
 
