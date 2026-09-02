@@ -744,6 +744,54 @@ pub async fn generate_chapters(
                         Err(e) => log::warn!("[ai_agent] quiz-repair best-effort failed: {}", e),
                     }
                 }
+                // D 层（元素合规）：engineering/humanities 课程扫出编程代码块 → 一轮 element-repair。
+                // best-effort——重写失败不影响生成主流程。
+                if matches!(
+                    elem_course_type.as_str(),
+                    "engineering" | "humanities" | "hybrid"
+                ) {
+                    let elem_repairs = collect_element_violations(&project_path, &elem_course_type);
+                    if !elem_repairs.is_empty() {
+                        let n: usize = elem_repairs
+                            .iter()
+                            .filter_map(|r| r.get("violations").and_then(|v| v.as_array()))
+                            .map(|a| a.len())
+                            .sum();
+                        let _ = app_handle.emit(
+                            "agent-event",
+                            serde_json::json!({
+                                "type": "status",
+                                "data": { "message": format!("检测到 {} 处不应出现的代码块元素，自动重写中…", n) }
+                            }),
+                        );
+                        let elem_args = serde_json::json!({
+                            "project_path": project_path,
+                            "repairs": elem_repairs
+                        });
+                        match run_agent_bridge(
+                            "element-repair",
+                            &config,
+                            elem_args,
+                            app_handle.clone(),
+                            element_repair_process,
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                let _ = app_handle.emit(
+                                    "agent-event",
+                                    serde_json::json!({
+                                        "type": "status",
+                                        "data": { "message": "不当代码块已重写为学科化表达" }
+                                    }),
+                                );
+                            }
+                            Err(e) => {
+                                log::warn!("[ai_agent] element-repair best-effort failed: {}", e)
+                            }
+                        }
+                    }
+                }
                 let _ = app_handle.emit(
                     "agent-event",
                     serde_json::json!({
@@ -874,6 +922,45 @@ fn collect_quiz_repairs(project_path: &str) -> Vec<serde_json::Value> {
                     serde_json::json!({
                         "question_id": v.question_id,
                         "kind": v.kind,
+                        "detail": v.detail
+                    })
+                })
+                .collect::<Vec<_>>()
+        }));
+    }
+    repairs
+}
+
+/// D 层：扫描项目内 `{NN}-*.md`，对 engineering/humanities 课程找出编程代码块违规。
+/// 返回可直接喂给 `element-repair` 的 repair 清单；失败/无违规 → 空。
+fn collect_element_violations(project_path: &str, course_type: &str) -> Vec<serde_json::Value> {
+    let dir = std::path::Path::new(project_path);
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut repairs = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with(".md") {
+            continue;
+        }
+        let content = match std::fs::read_to_string(entry.path()) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let violations = crate::element_compliance::check_chapter(course_type, &name, &content);
+        if violations.is_empty() {
+            continue;
+        }
+        repairs.push(serde_json::json!({
+            "file": name,
+            "violations": violations
+                .iter()
+                .map(|v| {
+                    serde_json::json!({
+                        "lang": v.lang,
+                        "line": v.line,
                         "detail": v.detail
                     })
                 })

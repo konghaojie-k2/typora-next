@@ -309,6 +309,15 @@ async function runAcceptanceTests() {
   totalFailed += caseStudyResult.failed;
   if (caseStudySteps._cleanup) caseStudySteps._cleanup.call({});
 
+  // Sprint 20: 课程内容元素约束 (engineering 域 + D 层硬校验)
+  console.log(`\n${YELLOW}▶ Sprint 20: Element Constraint (engineering + D-layer)${RESET}`);
+  const elementSteps = require('./sprint20_element_constraint.steps');
+  const elementResult = await runFeatureFile(
+    path.join(__dirname, '../sprint20/features/sprint20_element_constraint.feature'),
+    elementSteps
+  totalPassed += elementResult.passed;
+  totalFailed += elementResult.failed;
+  if (elementSteps._cleanup) elementSteps._cleanup.call({});
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});
