@@ -1179,7 +1179,7 @@ window.agentBridge = {
     elements.markdownBody.innerHTML = `
       <div class="welcome-message">
         <h1>Typora Next</h1>
-        <p>一个现代化的 Markdown 编辑器</p>
+        <p>一个现代化的 Markdown 阅读器</p>
         <p>按 <kbd>Ctrl+O</kbd> 打开文件，或拖拽文件到此处</p>
       </div>
     `;
@@ -1203,6 +1203,9 @@ window.agentBridge = {
 
       // Initialize code highlighting
       initCodeHighlighting();
+
+      // Fix CJK width mismatch in code blocks (ASCII wireframe alignment)
+      if (window.CJKAlign) CJKAlign.apply(elements.markdownBody);
 
       // Initialize math rendering
       initMathRendering();
@@ -1289,6 +1292,7 @@ window.agentBridge = {
     }
 
     initCodeHighlighting(container);
+    if (window.CJKAlign) CJKAlign.apply(container);
     initMathRendering(container);
     await initMermaid(container);
     initImageHandling(container);

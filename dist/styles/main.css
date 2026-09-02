@@ -2010,6 +2010,12 @@ pre code {
   background: transparent;
 }
 
+/* CJK 字宽补偿：cjk-align.js 实测字宽后在 code 元素上设置 --cjk-letter-spacing，
+   使每个 CJK 字符恰好占 2 个拉丁列（修复 ASCII 线框图错位） */
+pre code .cjk-align {
+  letter-spacing: var(--cjk-letter-spacing, 0px);
+}
+
 /* Code Block Header */
 pre[data-language]::before {
   content: attr(data-language);
