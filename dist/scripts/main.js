@@ -4608,6 +4608,17 @@ window.agentBridge = {
     try {
       showExportProgress('正在准备导出...', 0);
 
+      // 内联 <svg> HTML 块 → mermaid 围栏 + 图片条目（docx-export 会丢弃原始
+      // HTML 事件，重写后复用既有 svg→png→docx 管线；详见 export-svg-blocks.js）
+      let exportMarkdown = tab.content;
+      const inlineSvg = (window.ExportSvgBlocks && window.ExportSvgBlocks.prepareForWordExport)
+        ? await window.ExportSvgBlocks.prepareForWordExport(tab.content)
+        : { markdown: tab.content, images: [] };
+      exportMarkdown = inlineSvg.markdown;
+
+      // mermaid 渲染循环必须基于【原始】markdown——exportMarkdown 里合成的
+      // svg 围栏会被捞进来当 mermaid 语法解析（UnknownDiagramError），
+      // svg 图片本身走 inlineSvg.images 在 invoke 前并入 mermaidImages
       const mermaidBlocks = findMermaidBlocks(tab.content);
       const mermaidImages = {};
       if (mermaidBlocks.length > 0) {
@@ -4676,8 +4687,8 @@ window.agentBridge = {
                   window.mermaid.initialize(compactConfig);
                 }
                 const fallback = /^\s*classDiagram\b/m.test(source) ? safeClassConfig : undefined;
-                const { svg, width, height } = await renderMermaidSourceToPng(source, fallback);
-                mermaidImages[source] = { svg, width, height };
+                const { svg } = await renderMermaidSourceToPng(source, fallback);
+                mermaidImages[source] = { svg };
               } catch (err) {
                 const preview = source.split('\n').slice(0, 2).join(' ').substring(0, 80);
                 console.error('Mermaid render failed for:', preview, err);
@@ -4737,8 +4748,11 @@ window.agentBridge = {
       }
 
       try {
+        for (const item of inlineSvg.images) {
+          mermaidImages[item.key] = { svg: item.svg };
+        }
         const result = await invoke('export_word', {
-          markdown: tab.content,
+          markdown: exportMarkdown,
           fileName: tab.name,
           filePath: tab.path || '',
           mermaidImages,

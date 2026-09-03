@@ -7,6 +7,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Cursor, Read, Write};
 use std::path::Path;
+use std::sync::OnceLock;
 use zip::{ZipArchive, ZipWriter};
 
 /// Apply a user-supplied template DOCX to a generated DOCX.
@@ -86,8 +87,232 @@ pub fn apply_template(docx_bytes: &[u8], template_path: &Path) -> Result<Vec<u8>
     Ok(out_buf.into_inner())
 }
 
-/// Build a map of style **name** (lowercased, e.g. "heading 1") → template
-/// **styleId** (e.g. "3") from a template styles.xml.
+/// Max display width for a Mermaid/SVG diagram inside a Word document, in CSS
+/// pixels. Matches `docx_export::MAX_IMAGE_WIDTH_PX` so the diagram fills the
+/// page body without overflowing.
+pub const DOCX_MERMAID_MAX_WIDTH_PX: u32 = 540;
+
+/// Render an SVG diagram to a high-resolution PNG suitable for Word export.
+///
+/// The returned `MermaidImage` uses `DOCX_MERMAID_MAX_WIDTH_PX` as the target
+/// display width (so small intrinsic SVG viewBoxes are scaled up to fill the
+/// page) while the PNG itself is rendered at `RENDER_SCALE` × that size for
+/// crisp output. Height is kept proportional to the SVG's intrinsic aspect
+/// ratio.
+pub fn render_svg_to_mermaid_image(svg: &str) -> Result<docx_export::MermaidImage, String> {
+    const RENDER_SCALE: f32 = 3.0;
+
+    let mut opts = usvg::Options::default();
+    opts.fontdb = system_font_db();
+    // Fallback font family when the SVG references an unavailable font.
+    opts.font_family = "Arial".to_string();
+
+    let tree = usvg::Tree::from_str(svg, &opts).map_err(|e| format!("SVG parse failed: {}", e))?;
+
+    let original_width = tree.size().width();
+    let original_height = tree.size().height();
+    if original_width <= 0.0 || original_height <= 0.0 {
+        return Err("SVG has zero size".to_string());
+    }
+
+    // Target display size in Word (CSS pixels).
+    let display_width = DOCX_MERMAID_MAX_WIDTH_PX;
+    let display_height =
+        ((display_width as f32) * original_height / original_width).round() as u32;
+
+    // High-resolution pixmap for crisp printing.
+    let target_width = ((display_width as f32) * RENDER_SCALE).round() as u32;
+    let target_height = ((display_height as f32) * RENDER_SCALE).round().max(1.0) as u32;
+
+    let mut pixmap =
+        tiny_skia::Pixmap::new(target_width, target_height).ok_or("Cannot create pixmap")?;
+    // Render onto a transparent background so the image blends with the Word page
+    // instead of carrying a white rectangle around the diagram.
+    pixmap.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 0));
+
+    // Scale the tree so the diagram actually fills the high-res pixmap. An
+    // identity transform draws at the SVG's intrinsic 1× size in the corner,
+    // leaving the diagram occupying only 1/RENDER_SCALE of the image.
+    let scale = target_width as f32 / original_width;
+    let transform = tiny_skia::Transform::from_scale(scale, scale);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+
+    let bytes = pixmap
+        .encode_png()
+        .map_err(|e| format!("PNG encode failed: {}", e))?;
+
+    Ok(docx_export::MermaidImage {
+        bytes,
+        width_px: display_width,
+        height_px: display_height,
+    })
+}
+
+fn system_font_db() -> std::sync::Arc<fontdb::Database> {
+    static DB: OnceLock<std::sync::Arc<fontdb::Database>> = OnceLock::new();
+    DB.get_or_init(|| {
+        let mut db = fontdb::Database::new();
+        db.load_system_fonts();
+        std::sync::Arc::new(db)
+    })
+    .clone()
+}
+
+/// docx-rs 生成的 styles.xml 基本是空的（Normal 无字体字号、docDefaults 空、
+/// 标题只有加粗和字号），Word 会按 Calibri + 等线 + 单倍行距渲染，观感很差。
+/// 这是一套内置的默认样式：导出未选择用户模板时自动套用，
+/// 选中文字体（微软雅黑）、1.4 倍行距、带颜色和间距的标题层级。
+/// styleId 与生成端一致（Normal/Heading1-6/Caption/Hyperlink），无需重写引用。
+const DEFAULT_DOC_DEFAULTS: &str = r#"<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="微软雅黑" w:cs="Calibri" /><w:sz w:val="22" /><w:szCs w:val="22" /><w:lang w:val="en-US" w:eastAsia="zh-CN" /></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr /></w:pPrDefault></w:docDefaults>"#;
+
+const DEFAULT_NORMAL_STYLE: &str = r#"<w:style w:type="paragraph" w:styleId="Normal"><w:name w:val="Normal" /><w:qFormat /><w:pPr><w:spacing w:before="0" w:after="120" w:line="336" w:lineRule="auto" /></w:pPr><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="微软雅黑" w:cs="Calibri" /><w:sz w:val="22" /><w:szCs w:val="22" /></w:rPr></w:style>"#;
+
+const DEFAULT_CAPTION_STYLE: &str = r#"<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="caption" /><w:basedOn w:val="Normal" /><w:next w:val="Normal" /><w:qFormat /><w:pPr><w:jc w:val="center" /><w:spacing w:before="60" w:after="160" /></w:pPr><w:rPr><w:color w:val="595959" /><w:sz w:val="18" /><w:szCs w:val="18" /></w:rPr></w:style>"#;
+
+const DEFAULT_HYPERLINK_STYLE: &str = r#"<w:style w:type="character" w:styleId="Hyperlink"><w:name w:val="Hyperlink" /><w:qFormat /><w:rPr><w:color w:val="0563C1" /><w:u w:val="single" /></w:rPr></w:style>"#;
+
+/// Generate one heading style block. `sz` in half-points, `color` may be
+/// empty (inherit text color).
+fn heading_style_xml(level: u8, sz: u32, color: &str, before: u32, after: u32) -> String {
+    let color_pr = if color.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<w:color w:val="{}" />"#, color)
+    };
+    // H1 加底部细线，其余层级仅靠颜色/字号区分
+    let border_pr = if level == 1 {
+        r#"<w:pBdr><w:bottom w:val="single" w:sz="4" w:space="2" w:color="1F4E79" /></w:pBdr>"#
+    } else {
+        ""
+    };
+    format!(
+        r#"<w:style w:type="paragraph" w:styleId="Heading{level}"><w:name w:val="heading {level}" /><w:basedOn w:val="Normal" /><w:next w:val="Normal" /><w:qFormat /><w:pPr>{border}<w:keepNext /><w:spacing w:before="{before}" w:after="{after}" /><w:outlineLvl w:val="{outline}" /></w:pPr><w:rPr>{fonts}<w:b /><w:bCs />{color}<w:sz w:val="{sz}" /><w:szCs w:val="{sz}" /></w:rPr></w:style>"#,
+        level = level,
+        border = border_pr,
+        before = before,
+        after = after,
+        outline = level as u32 - 1,
+        fonts = r#"<w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="微软雅黑" w:cs="Calibri" />"#,
+        color = color_pr,
+        sz = sz,
+    )
+}
+
+/// All built-in default styles as (styleId, XML fragment) pairs.
+fn default_style_fragments() -> Vec<(String, String)> {
+    let frags: Vec<(String, String)> = vec![
+        ("Normal".into(), DEFAULT_NORMAL_STYLE.into()),
+        (
+            "Heading1".into(),
+            heading_style_xml(1, 36, "1F4E79", 360, 160),
+        ),
+        (
+            "Heading2".into(),
+            heading_style_xml(2, 32, "1F4E79", 320, 140),
+        ),
+        (
+            "Heading3".into(),
+            heading_style_xml(3, 28, "2E74B5", 280, 120),
+        ),
+        (
+            "Heading4".into(),
+            heading_style_xml(4, 26, "2E74B5", 240, 100),
+        ),
+        ("Heading5".into(), heading_style_xml(5, 24, "", 240, 100)),
+        ("Heading6".into(), heading_style_xml(6, 22, "", 240, 100)),
+        ("Caption".into(), DEFAULT_CAPTION_STYLE.into()),
+        ("Hyperlink".into(), DEFAULT_HYPERLINK_STYLE.into()),
+    ];
+    frags
+}
+
+/// Replace-or-append each built-in style into the generated styles.xml.
+/// Styles not covered here (e.g. the injected TOC1-5) are preserved as-is.
+fn patch_default_styles(xml: &str) -> String {
+    let mut out = xml.to_string();
+
+    if let Ok(re) = Regex::new(r"(?s)<w:docDefaults>.*?</w:docDefaults>") {
+        out = re.replace(&out, DEFAULT_DOC_DEFAULTS).into_owned();
+    }
+
+    for (style_id, fragment) in default_style_fragments() {
+        let pattern = format!(
+            r#"(?s)<w:style\b[^>]*w:styleId="{}"[^>]*>.*?</w:style>"#,
+            regex::escape(&style_id)
+        );
+        let replaced = Regex::new(&pattern).ok().and_then(|re| {
+            if re.is_match(&out) {
+                Some(re.replace(&out, fragment.as_str()).into_owned())
+            } else {
+                None
+            }
+        });
+        match replaced {
+            Some(next) => out = next,
+            None => {
+                // 生成端没有这个样式 → 追加到根元素末尾
+                if let Some(pos) = out.rfind("</w:styles>") {
+                    out.insert_str(pos, &fragment);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Apply the built-in default styling to a generated DOCX (used when the
+/// user exports Word without choosing a template file). Only
+/// `word/styles.xml` is patched; the document body is untouched.
+pub fn apply_default_styling(docx_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut src = ZipArchive::new(Cursor::new(docx_bytes))
+        .map_err(|e| format!("无法读取生成的 DOCX: {}", e))?;
+    let styles = read_zip_entry(&mut src, "word/styles.xml")?;
+    let xml = std::str::from_utf8(&styles)
+        .map_err(|_| "styles.xml 不是有效 UTF-8".to_string())?
+        .to_string();
+    let patched = patch_default_styles(&xml).into_bytes();
+
+    let total = src.len();
+    let mut entries: Vec<(String, Vec<u8>)> = Vec::with_capacity(total);
+    for i in 0..total {
+        let mut entry = src.by_index(i).map_err(|e| e.to_string())?;
+        let name = entry.name().to_string();
+        let mut data = Vec::new();
+        entry
+            .read_to_end(&mut data)
+            .map_err(|e| format!("ZIP 读取 {} 失败: {}", name, e))?;
+        if name == "word/styles.xml" {
+            data = patched.clone();
+        }
+        entries.push((name, data));
+    }
+
+    let mut out_buf = Cursor::new(Vec::new());
+    {
+        let mut out = ZipWriter::new(&mut out_buf);
+        for (name, data) in &entries {
+            let options =
+                zip::write::SimpleFileOptions::default().compression_method(if data.len() > 0 {
+                    zip::CompressionMethod::Deflated
+                } else {
+                    zip::CompressionMethod::Stored
+                });
+            out.start_file(name, options)
+                .map_err(|e| format!("ZIP 写入 {} 失败: {}", name, e))?;
+            out.write_all(data)
+                .map_err(|e| format!("ZIP 写入 {} 失败: {}", name, e))?;
+        }
+        out.finish().map_err(|e| format!("ZIP 封包失败: {}", e))?;
+    }
+
+    Ok(out_buf.into_inner())
+}
+
+/// Build a map of style **name** (normalized: lowercased, whitespace
+/// stripped, e.g. "heading1") → template **styleId** (e.g. "3") from a
+/// template styles.xml. Normalization is required because our generated
+/// documents reference styleIds like "Heading1" while Word templates name
+/// the same style "heading 1" (with a space) — lowercase alone won't match.
 fn parse_template_style_names(styles_xml: &[u8]) -> HashMap<String, String> {
     let mut map = HashMap::new();
     let s = match std::str::from_utf8(styles_xml) {
@@ -100,7 +325,11 @@ fn parse_template_style_names(styles_xml: &[u8]) -> HashMap<String, String> {
         let inner = &cap[2];
         let name_re = Regex::new(r#"<w:name\s+w:val="([^"]+)""#).unwrap();
         if let Some(name_cap) = name_re.captures(inner) {
+            // Normalize: lowercase + strip whitespace, so the template's
+            // "heading 1" matches our generated styleId "Heading1" looked
+            // up as "heading1".
             let key = name_cap[1].to_lowercase();
+            let key: String = key.split_whitespace().collect();
             map.entry(key).or_insert(id);
         }
     }
@@ -259,8 +488,9 @@ mod tests {
         let map = parse_template_style_names(&styles);
 
         assert_eq!(map.get("normal").map(String::as_str), Some("1"));
-        assert_eq!(map.get("heading 1").map(String::as_str), Some("3"));
-        assert_eq!(map.get("heading 2").map(String::as_str), Some("4"));
+        // Keys are normalized: lowercased, whitespace stripped.
+        assert_eq!(map.get("heading1").map(String::as_str), Some("3"));
+        assert_eq!(map.get("heading2").map(String::as_str), Some("4"));
     }
 
     #[test]
@@ -269,7 +499,7 @@ mod tests {
             r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/><w:outlineLvl w:val="0"/></w:pPr><w:r><w:rPr><w:b/><w:sz w:val="32"/></w:rPr><w:t>Hello</w:t></w:r></w:p>"#,
         );
         let mut map = HashMap::new();
-        map.insert("heading 1".to_string(), "3".to_string());
+        map.insert("heading1".to_string(), "3".to_string());
         rewrite_style_references(&mut xml, &map);
 
         assert!(
@@ -292,7 +522,8 @@ mod tests {
         rewrite_style_references(&mut xml, &map);
 
         // Heading run: b and sz stripped, color stays.
-        let heading_block = &xml[xml.find("Hello").unwrap() - 200..xml.find("Hello").unwrap() + 50];
+        let hello_pos = xml.find("Hello").unwrap();
+        let heading_block = &xml[hello_pos.saturating_sub(200)..(hello_pos + 50).min(xml.len())];
         assert!(
             !heading_block.contains("<w:b/>"),
             "heading run should have <w:b/> stripped"
@@ -303,7 +534,8 @@ mod tests {
         );
 
         // Normal paragraph run should be untouched.
-        let body_block = &xml[xml.find("Body").unwrap() - 200..xml.find("Body").unwrap() + 50];
+        let body_pos = xml.find("Body").unwrap();
+        let body_block = &xml[body_pos.saturating_sub(200)..(body_pos + 50).min(xml.len())];
         assert!(
             body_block.contains("<w:b/>"),
             "normal run should keep its <w:b/>"

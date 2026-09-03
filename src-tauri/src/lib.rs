@@ -850,10 +850,12 @@ fn show_in_folder(path: String) -> Result<(), String> {
 
 /// SVG payload for a pre-rendered Mermaid diagram sent by the frontend.
 #[derive(Debug, Deserialize)]
+/// Pre-rendered SVG received from the frontend for a Word export. Only the
+/// SVG markup is needed now; the display size is computed on the Rust side so
+/// that diagrams always fill the Word page body width rather than inheriting a
+/// small intrinsic viewBox size.
 struct MermaidSvgInfo {
     svg: String,
-    width: u32,
-    height: u32,
 }
 
 fn system_font_db() -> Arc<fontdb::Database> {
@@ -867,43 +869,6 @@ fn system_font_db() -> Arc<fontdb::Database> {
 }
 
 /// Render an SVG string to a high-resolution PNG byte vector.
-fn render_svg_to_png(svg: &str, logical_width: u32) -> Result<Vec<u8>, String> {
-    const RENDER_SCALE: f32 = 3.0;
-
-    let mut opts = usvg::Options::default();
-    opts.fontdb = system_font_db();
-    // Fallback font family when the SVG references an unavailable font.
-    opts.font_family = "Arial".to_string();
-
-    let tree = usvg::Tree::from_str(svg, &opts).map_err(|e| format!("SVG parse failed: {}", e))?;
-
-    let original_width = tree.size().width();
-    let original_height = tree.size().height();
-    if original_width <= 0.0 || original_height <= 0.0 {
-        return Err("SVG has zero size".to_string());
-    }
-
-    let target_width = ((logical_width.max(1) as f32) * RENDER_SCALE).round() as u32;
-    let target_height = ((target_width as f32) * original_height / original_width).round() as u32;
-
-    let mut pixmap =
-        tiny_skia::Pixmap::new(target_width, target_height.max(1)).ok_or("Cannot create pixmap")?;
-    // Render onto a transparent background so the image blends with the Word page
-    // instead of carrying a white rectangle around the diagram.
-    pixmap.fill(tiny_skia::Color::from_rgba8(0, 0, 0, 0));
-
-    // Scale the tree so the diagram actually fills the high-res pixmap. An
-    // identity transform draws at the SVG's intrinsic 1× size in the corner,
-    // leaving the diagram occupying only 1/RENDER_SCALE of the image.
-    let scale = target_width as f32 / original_width;
-    let transform = tiny_skia::Transform::from_scale(scale, scale);
-    resvg::render(&tree, transform, &mut pixmap.as_mut());
-
-    pixmap
-        .encode_png()
-        .map_err(|e| format!("PNG encode failed: {}", e))
-}
-
 /// Export markdown to Word document using the cross-platform Rust converter.
 #[tauri::command]
 async fn export_word(
@@ -945,15 +910,12 @@ async fn export_word(
         .unwrap_or_default()
         .into_iter()
         .filter_map(|(source, info)| {
-            let bytes = render_svg_to_png(&info.svg, info.width).ok()?;
-            Some((
-                source,
-                docx_export::MermaidImage {
-                    bytes,
-                    width_px: info.width,
-                    height_px: info.height,
-                },
-            ))
+            let image = docx_template::render_svg_to_mermaid_image(&info.svg).ok()?;
+            log_export(&format!(
+                "[export_word] mermaid 图片 {}x{} ({} bytes)",
+                image.width_px, image.height_px, image.bytes.len()
+            ));
+            Some((source, image))
         })
         .collect();
 
@@ -1013,7 +975,20 @@ async fn export_word(
             bytes
         }
     } else {
-        bytes
+        // 未选择用户模板 → 套用内置默认样式（中文字体、行距、标题层级）。
+        match docx_template::apply_default_styling(&bytes) {
+            Ok(b) => {
+                log_export("[export_word] 已应用内置默认样式");
+                b
+            }
+            Err(e) => {
+                log_export(&format!(
+                    "[export_word] 默认样式应用失败，回退原始输出: {}",
+                    e
+                ));
+                bytes
+            }
+        }
     };
 
     let _ = app.emit(
