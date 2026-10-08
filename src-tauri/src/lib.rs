@@ -26,6 +26,7 @@ pub mod mac_pdf;
 pub mod memory_rank;
 pub mod mermaid_fix_log;
 pub mod paper_import;
+pub mod pending_open;
 pub mod persona_prompt;
 pub mod plan_prompt;
 pub mod proxy_config;
@@ -264,12 +265,7 @@ async fn take_pending_open_files(state: tauri::State<'_, AppState>) -> Result<Ve
 }
 
 /// True for .md / .markdown paths (case-insensitive).
-fn is_markdown_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.eq_ignore_ascii_case("md") || e.eq_ignore_ascii_case("markdown"))
-        .unwrap_or(false)
-}
+use pending_open::is_markdown_path;
 
 /// Handle OS "open file" requests (macOS Finder "Open With" / double-click):
 /// keep only existing markdown files, buffer them for the frontend's
@@ -5211,20 +5207,20 @@ pub fn run() {
                 Err(e) => log::warn!("file-assoc self-heal failed: {e}"),
             }
 
-            // Check command line arguments for .md file path (file association)
+            // Buffer markdown paths from command-line args (file-association
+            // cold start). The frontend drains them via
+            // take_pending_open_files once at init, so delivery does not
+            // depend on the event listener being registered in time
+            // (issue #6: the old sleep(500ms)+emit could fire before the
+            // listener was up — file silently not loaded until the user
+            // double-clicked again, which went through single-instance).
             let args: Vec<String> = std::env::args().collect();
-            if args.len() > 1 {
-                let file_path = &args[1];
-                if file_path.ends_with(".md") || file_path.ends_with(".markdown") {
-                    let path = std::path::PathBuf::from(file_path);
-                    if path.exists() {
-                        let app_handle = app.handle().clone();
-                        let path_str = file_path.clone();
-                        // Emit event to frontend after a short delay to ensure window is ready
-                        std::thread::spawn(move || {
-                            std::thread::sleep(std::time::Duration::from_millis(500));
-                            let _ = app_handle.emit("open-file-from-args", path_str);
-                        });
+            for file_path in pending_open::markdown_from_argv(&args) {
+                if std::path::Path::new(&file_path).exists() {
+                    if let Some(state) = app.handle().try_state::<AppState>() {
+                        if let Ok(mut pending) = state.pending_open_paths.lock() {
+                            pending.push(file_path);
+                        }
                     }
                 }
             }
