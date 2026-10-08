@@ -5,6 +5,12 @@
  * for AI-generated chat content and dynamic UI snippets. Full-document rendering
  * goes through the Rust backend (pulldown-cmark).
  *
+ * Math handling mirrors the main preview pipeline (Rust preprocess_math +
+ * initMathRendering): $...$ / $$...$$ are extracted into placeholders BEFORE
+ * the markdown transforms (so LaTeX survives *, &, _, and \n→<br>), then
+ * restored as KaTeX HTML. Without katex (Node tests) or on render error,
+ * the raw text is kept as-is.
+ *
  * Usage:
  *   markdownToHtml('**bold** and `code`')
  *   // → '<strong>bold</strong> and <code>code</code>'
@@ -26,6 +32,34 @@
   }
 
   /**
+   * Resolve the global katex (script tag in browser; injectable in tests).
+   * @returns {object|null}
+   */
+  function getKatex() {
+    if (typeof katex !== 'undefined' && katex && katex.renderToString) return katex;
+    if (typeof window !== 'undefined' && window.katex && window.katex.renderToString) return window.katex;
+    return null;
+  }
+
+  /**
+   * Render a math block via KaTeX; fall back to the raw text on any failure.
+   * Same semantics as the main preview's initMathRendering (throwOnError: false).
+   * @param {{tex: string, display: boolean}} m
+   * @returns {string} HTML
+   */
+  function renderMathBlock(m) {
+    const katex = getKatex();
+    if (katex) {
+      try {
+        return katex.renderToString(m.tex, { displayMode: m.display, throwOnError: false });
+      } catch (e) {
+        // fall through to raw text
+      }
+    }
+    return escapeHtml((m.display ? '$$' : '$') + m.tex + (m.display ? '$$' : '$'));
+  }
+
+  /**
    * Convert lightweight markdown to HTML.
    * Block-level elements are processed first, then inline formatting.
    *
@@ -35,8 +69,30 @@
   function markdownToHtml(content) {
     if (!content) return '';
 
+    // Step 0: pull fenced code blocks out of the raw text (their $ must not
+    // become math), then extract math into placeholders so the markdown
+    // transforms below cannot touch the LaTeX source.
+    const codeBlocks = [];
+    let text = String(content).replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
+      codeBlocks.push(code);
+      return '\n%%CHATCODE_' + (codeBlocks.length - 1) + '%%\n';
+    });
+
+    const mathBlocks = [];
+    // Block math first ($$ takes priority, same as Rust extract_math_blocks)
+    text = text.replace(/(?<!\\)\$\$([\s\S]+?)(?<!\\)\$\$/g, function (_, tex) {
+      mathBlocks.push({ tex: tex.trim(), display: true });
+      return '\n%%CHATMATH_' + (mathBlocks.length - 1) + '%%\n';
+    });
+    // Inline math: no newline inside, must not start/end with whitespace,
+    // opening $ must not be escaped (aligns with KaTeX auto-render rules)
+    text = text.replace(/(?<!\\)\$(?!\s)([^$\n]+?)(?<!\s)\$/g, function (_, tex) {
+      mathBlocks.push({ tex: tex, display: false });
+      return '%%CHATMATH_' + (mathBlocks.length - 1) + '%%';
+    });
+
     // Step 1: escape HTML entities
-    let html = escapeHtml(content);
+    let html = escapeHtml(text);
 
     // Step 2: block-level elements
 
@@ -120,6 +176,19 @@
     html = html.replace(/\n\n/g, '<br><br>');
     // Single newline = line break
     html = html.replace(/\n/g, '<br>');
+
+    // Step 5: restore code blocks (escaped) and math (KaTeX or raw fallback)
+    // Display math is block-level — drop the line breaks hugging it first,
+    // while the placeholder is still plain text.
+    html = html.replace(/<br>%%CHATMATH_(\d+)%%<br>/g, function (_, i) {
+      return mathBlocks[+i] && mathBlocks[+i].display ? '%%CHATMATH_' + i + '%%' : '<br>%%CHATMATH_' + i + '%%<br>';
+    });
+    html = html.replace(/%%CHATCODE_(\d+)%%/g, function (_, i) {
+      return '<pre><code>' + escapeHtml(String(codeBlocks[+i] || '').trim()) + '</code></pre>';
+    });
+    html = html.replace(/%%CHATMATH_(\d+)%%/g, function (_, i) {
+      return renderMathBlock(mathBlocks[+i]);
+    });
 
     return html;
   }

@@ -94,3 +94,14 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     Then the concept should appear as a single record
     And the record should carry both parts for resuming
     And an unselected free-talk session should stay its own record
+
+  Scenario: AI 回答里的数学公式渲染为 KaTeX（与主预览同方案）
+    Given a real companion modal in a temp learning project
+    When the tutor bubble renders markdown containing math
+    Then display and inline math should render via KaTeX with intact LaTeX
+    And math inside code fences should stay as literal code
+    And without katex the raw text should survive
+
+  Scenario: 气泡内标题压缩到气泡尺度（不被文档级 h1/h2 撑开）
+    Given the app source files are loaded
+    Then the bubble stylesheet should compact h1 and h2 for chat scale

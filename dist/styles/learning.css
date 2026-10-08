@@ -3582,12 +3582,18 @@ body.learning-mode .toolbar {
   color: var(--color-text-secondary, #6b7280);
 }
 
-/* 气泡内 markdown 渲染（notebook-modal socratic-bubble-md） */
+/* 气泡内 markdown 渲染（notebook-modal socratic-bubble-md）。
+   h1/h2 必须一起覆盖：全局 main.css 的 h1/h2 是文档级样式（4xl/3xl 字号 +
+   大间距 + 下边框），AI 回复里的 #/## 落进去会把气泡撑开（2026-09-22 实爆） */
+.socratic-bubble-md h1, .socratic-bubble-md h2,
 .socratic-bubble-md h3, .socratic-bubble-md h4 {
   margin: 8px 0 4px;
-  font-size: 14px;
   font-weight: 600;
+  padding: 0;
+  border-bottom: none;
 }
+.socratic-bubble-md h1, .socratic-bubble-md h2 { font-size: 15px; }
+.socratic-bubble-md h3, .socratic-bubble-md h4 { font-size: 14px; }
 .socratic-bubble-md p { margin: 4px 0; }
 .socratic-bubble-md ul, .socratic-bubble-md ol {
   margin: 4px 0;

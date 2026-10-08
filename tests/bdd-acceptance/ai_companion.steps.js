@@ -794,6 +794,83 @@ steps.then('an unselected free-talk session should stay its own record', functio
 });
 
 // ============================================
+// Scenario：AI 回答里的数学公式渲染为 KaTeX（与主预览同方案）
+// ============================================
+
+// markdown-utils.escapeHtml 依赖 document.createElement 的 textContent→innerHTML
+// 联动；本文件顶部的 makeEl 不联动（innerHTML 恒空串），数学场景内临时换成联动版。
+function installLinkedCreateElement() {
+  const prev = global.document.createElement;
+  global.document.createElement = function (tag) {
+    const el = prev(tag);
+    let html = '';
+    Object.defineProperty(el, 'textContent', {
+      configurable: true,
+      set(v) { html = String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+    });
+    Object.defineProperty(el, 'innerHTML', { configurable: true, get() { return html; } });
+    return el;
+  };
+  return function restore() { global.document.createElement = prev; };
+}
+
+steps.when('the tutor bubble renders markdown containing math', function() {
+  this._restoreCreate = installLinkedCreateElement();
+  // 真实 vendor KaTeX（quirks mode 警告是 Node 无 doctype，浏览器不触发）
+  const origWarn = console.warn;
+  console.warn = () => {};
+  try {
+    global.katex = require('../../dist/vendor/katex/katex.min.js');
+  } finally {
+    console.warn = origWarn;
+  }
+  const { markdownToHtml } = require('../../dist/scripts/markdown-utils');
+  this.markdownToHtml = markdownToHtml;
+  // 实爆案例（2026-09-22）：伴学面板 Torr→bar 换算，display + inline + 代码块混合
+  this.rendered = markdownToHtml(
+    '第一步，把炉压换算成 bar：\n\n' +
+    '$$30\\ \\text{Torr} \\div 750 \\approx 0.040\\ \\text{bar}$$\n\n' +
+    '第二步，$1\\ \\text{atm} = 1.01325\\ \\text{bar}$，数值上只差 1.3%。\n\n' +
+    '示例：\n```js\nconst s = "$x^2$";\n```'
+  );
+});
+
+steps.then('display and inline math should render via KaTeX with intact LaTeX', function() {
+  const html = this.rendered;
+  if (!html.includes('katex-display')) throw new Error(`display math not rendered: ${html.slice(0, 200)}`);
+  if (!html.includes('class="katex"')) throw new Error('inline math not rendered');
+  if (html.includes('katex-error')) throw new Error('katex render error leaked into bubble');
+  if (html.includes('$$30')) throw new Error('raw $$ text survived unrendered');
+});
+
+steps.then('math inside code fences should stay as literal code', function() {
+  if (!this.rendered.includes('<pre><code>')) throw new Error('fence should render as code block');
+  if (!this.rendered.includes('$x^2$')) throw new Error('code content must stay literal');
+});
+
+steps.then('without katex the raw text should survive', function() {
+  delete global.katex;
+  const html = this.markdownToHtml('炉压 $x^2$ 左右');
+  if (!html.includes('$x^2$')) throw new Error(`raw math text lost without katex: ${html}`);
+  if (this._restoreCreate) { this._restoreCreate(); this._restoreCreate = null; }
+});
+
+steps.then('the bubble stylesheet should compact h1 and h2 for chat scale', function() {
+  const css = fs.readFileSync(LEARNING_CSS, 'utf-8');
+  if (!/\.socratic-bubble-md h1/.test(css)) {
+    throw new Error('bubble h1 not styled — falls through to document-scale h1');
+  }
+  if (!/\.socratic-bubble-md h2/.test(css)) {
+    throw new Error('bubble h2 not styled — falls through to document-scale h2');
+  }
+  // 压缩规则必须去掉全局 h1/h2 的下边框，否则气泡里出现文档级分隔线
+  const block = css.match(/\.socratic-bubble-md h1[^{]*\{[\s\S]*?\}/);
+  if (!block || !/border-bottom:\s*none/.test(block[0])) {
+    throw new Error('bubble h1/h2 must drop the document underline');
+  }
+});
+
+// ============================================
 // Cleanup
 // ============================================
 
