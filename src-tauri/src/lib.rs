@@ -118,10 +118,13 @@ pub struct AppState {
     /// True while chapter generation is running in the background. Used to guard
     /// the main window close event so users don't accidentally abort generation.
     generation_in_progress: Mutex<bool>,
-    /// Markdown paths delivered by the OS "open file" event (macOS Finder /
-    /// "Open With" arrive via RunEvent::Opened, NOT command-line args) before
-    /// the frontend listener is ready. Drained once by take_pending_open_files.
-    pending_open_paths: Mutex<Vec<String>>,
+    /// Markdown paths delivered before the frontend listener is ready
+    /// (macOS RunEvent::Opened, or Windows/Linux command-line args on cold
+    /// start). Drained once by take_pending_open_files at frontend init;
+    /// closes permanently after that first drain so warm-start deliveries
+    /// (which go out over the event channel anyway) don't leave stale
+    /// entries that a later cold start would resurrect as ghost opens.
+    pending_open_paths: Mutex<pending_open::PendingOpenBuffer>,
 }
 
 /// File result containing path and content
@@ -255,13 +258,14 @@ async fn notify_external_file_opened(window: tauri::Window) -> Result<(), String
     Ok(())
 }
 
-/// Drain markdown file paths buffered by the OS "open file" event
-/// (RunEvent::Opened, the macOS file-association path) before the frontend
-/// event listener was registered. Called once by the frontend at init.
+/// Drain markdown file paths buffered before the frontend event listener
+/// was registered (cold start, either OS "open file" event or command-line
+/// args). Called once by the frontend at init; the buffer closes after this
+/// first drain (see PendingOpenBuffer).
 #[tauri::command]
 async fn take_pending_open_files(state: tauri::State<'_, AppState>) -> Result<Vec<String>, String> {
     let mut pending = state.pending_open_paths.lock().map_err(|e| e.to_string())?;
-    Ok(std::mem::take(&mut *pending))
+    Ok(pending.drain())
 }
 
 /// True for .md / .markdown paths (case-insensitive).
@@ -5181,7 +5185,7 @@ pub fn run() {
             watched_path: Mutex::new(None),
             project_json_lock: Mutex::new(()),
             generation_in_progress: Mutex::new(false),
-            pending_open_paths: Mutex::new(Vec::new()),
+            pending_open_paths: Mutex::new(pending_open::PendingOpenBuffer::default()),
         })
         .manage(ai_agent::AgentProcess::default())
         .setup(|app| {

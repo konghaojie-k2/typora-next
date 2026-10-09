@@ -29,3 +29,34 @@ pub fn markdown_from_argv(args: &[String]) -> Vec<String> {
         .cloned()
         .collect()
 }
+
+/// Buffer for markdown paths that arrive before the frontend listener is
+/// registered (cold start). The frontend drains it once at init via
+/// take_pending_open_files.
+///
+/// After that first drain the buffer closes permanently: later arrivals
+/// (macOS warm start, RunEvent::Opened on a running instance) reach the
+/// frontend through the event channel, and buffering them too would leave
+/// a stale entry that the NEXT cold start's drain would resurrect as a
+/// ghost open.
+#[derive(Default)]
+pub struct PendingOpenBuffer {
+    paths: Vec<String>,
+    drained: bool,
+}
+
+impl PendingOpenBuffer {
+    /// Buffer a path for the init-time drain. No-op once the frontend has
+    /// drained (the event channel covers delivery from then on).
+    pub fn push(&mut self, path: String) {
+        if !self.drained {
+            self.paths.push(path);
+        }
+    }
+
+    /// Take all buffered paths and close the buffer.
+    pub fn drain(&mut self) -> Vec<String> {
+        self.drained = true;
+        std::mem::take(&mut self.paths)
+    }
+}

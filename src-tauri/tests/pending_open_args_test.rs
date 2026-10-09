@@ -78,3 +78,35 @@ fn edge_cases_are_rejected() {
         r"C:\some.md\dir"
     )));
 }
+
+/// 场景: 排空后缓冲永久关闭，运行期写入被忽略
+///
+/// 缓冲是「前端 init 时一次性排空」的设计。macOS 热启动（RunEvent::Opened
+/// 打到已运行实例）走 emit 即时打开；若同时写入缓冲，该条目要等下次冷
+/// 启动才被排空 → 幽灵文件。因此第一次 drain 后缓冲必须关闭。
+#[test]
+fn buffer_closes_after_first_drain() {
+    let mut buf = pending_open::PendingOpenBuffer::default();
+
+    // 冷启动窗口期：写入正常累积
+    buf.push(r"C:\docs\a.md".to_string());
+    buf.push(r"C:\docs\b.md".to_string());
+
+    // 前端 init 排空：取走全部，窗口关闭
+    let drained = buf.drain();
+    assert_eq!(drained, vec![r"C:\docs\a.md", r"C:\docs\b.md"]);
+
+    // 运行期写入（热启动双投递的缓冲侧）必须被忽略
+    buf.push(r"C:\docs\stale.md".to_string());
+    assert!(buf.drain().is_empty(), "排空后写入的路径不得残留");
+}
+
+/// 空缓冲 drain 也应关闭窗口（用户直接启动应用、无文件参数的场景：
+/// 之后的运行期写入同样不该残留）
+#[test]
+fn drain_on_empty_buffer_still_closes_window() {
+    let mut buf = pending_open::PendingOpenBuffer::default();
+    assert!(buf.drain().is_empty());
+    buf.push(r"C:\docs\stale.md".to_string());
+    assert!(buf.drain().is_empty());
+}
