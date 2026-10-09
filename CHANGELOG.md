@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.4.8] - 2026-10-09
+
+### Features
+
+- **AI 伴学「🖼️ 画个图」按需可视化**：学习中遇到抽象概念（如硅 (111) 面原子排列、Jackson 因子）而课程该处没有配图时，划词气泡菜单新增第四项「🖼️ 画个图」。新增 typora-course-visualize skill：先在 Wikimedia Commons 检索真图（mime 过滤 + upload 直链），未命中再按 inline-svg-spec 手绘 SVG 示意（气泡不渲染 mermaid，故禁用）。气泡 markdown 渲染新增 ` ```svg ` 占位符通道——先于通用代码围栏提取、转义后还原为活图，还原前 sanitize 剥除 script / on* 事件属性 / foreignObject。面板内首轮自动出图、追问续 session、结束落盘 `.learning/visualizations/`，伴学记录归并后可续聊（覆盖原文件）
+
+### Fixes
+
+- **划线后再点伴学菜单一闪而过**：划线完成时 `removeAllRanges()` 清空了选区，而全局 mouseup 监听没有对「点击落在工具栏内部」做豁免（mousedown 有、mouseup 没有，不对称），导致点 ✨ 按钮的抬起瞬间工具栏被销毁。现 mouseup 补上同款豁免；伴学文本来源也增加回退——选区已空时从 `lastAnnotationId` 对应的划线元素取文本，不再依赖 window.getSelection
+- **冷启动双击 .md 不自动加载**（issue #6）：应用尚未启动时双击关联文件，argv 里的文件路径在窗口就绪前到达、事件丢失，打开的是空界面。现 argv 路径改走 pending 缓冲（PendingOpenBuffer，取走即永久关闭），前端初始化完成后主动拉取
+
 ## [0.4.7] - 2026-10-08
 
 ### Features
