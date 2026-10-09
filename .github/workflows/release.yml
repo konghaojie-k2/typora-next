@@ -121,15 +121,19 @@ jobs:
             # Determine platform key from directory name
             dir_name=$(basename "$artifact_dir")
             platform=""
+            # mac 更新器统一走 universal 包：单架构 .app.tar.gz 与 universal 同名
+            # （TyporaNext.app.tar.gz），同名资产上传到 release 只存活一个，
+            # 各架构自己的签名对不上存活文件 → 验签必败。universal 一个文件对
+            # 两种芯片都合法，darwin-x86_64 / darwin-aarch64 都指向它。
+            # universal 包在 aarch64 job 的 artifact 里（target/universal-apple-darwin/）。
             case "$dir_name" in
               *x86_64-pc-windows-msvc*)   platform="windows-x86_64" ;;
-              *x86_64-apple-darwin*)       platform="darwin-x86_64" ;;
-              *aarch64-apple-darwin*)      platform="darwin-aarch64" ;;
-              *universal-apple-darwin*)    platform="darwin-universal" ;;
+              *aarch64-apple-darwin*)     platform="darwin" ;;
+              *x86_64-apple-darwin*)      platform="" ;;  # x64 dmg 仍上传供手动下载，更新不走它
             esac
             [ -z "$platform" ] && continue
 
-            # Find installer file (prefer .tar.gz for macOS, .exe for Windows, skip .msi)
+            # Find installer file (prefer .exe for Windows, universal .tar.gz for macOS)
             installer=""
             if [[ "$platform" == windows-* ]]; then
               installer=$(find "$artifact_dir" -name "*.exe" ! -name "*.exe.sig" 2>/dev/null | head -1)
@@ -138,10 +142,11 @@ jobs:
                 installer=$(find "$artifact_dir" -name "*.msi" ! -name "*.msi.sig" 2>/dev/null | head -1)
               fi
             else
-              installer=$(find "$artifact_dir" -name "*.tar.gz" 2>/dev/null | head -1)
-              # Fallback to .dmg
+              installer=$(find "$artifact_dir" -path "*universal-apple-darwin*" -name "*.tar.gz" 2>/dev/null | head -1)
+              # 更新器只吃 .app.tar.gz；universal 缺失是发布事故，直接失败而非静默跳过
               if [ -z "$installer" ]; then
-                installer=$(find "$artifact_dir" -name "*.dmg" ! -name "*.dmg.sig" 2>/dev/null | head -1)
+                echo "Error: universal updater bundle (.app.tar.gz) not found in $dir_name"
+                exit 1
               fi
             fi
 
@@ -163,29 +168,20 @@ jobs:
 
             echo "  $platform → $installer_name"
 
-            # Add to platforms JSON
-            PLATFORMS=$(echo "$PLATFORMS" | jq \
-              --arg p "$platform" \
-              --arg u "$url" \
-              --arg s "$sig_content" \
-              '. + {($p): {"signature": $s, "url": $u}}')
+            # Add to platforms JSON（darwin 一次写两个架构键，url/签名同为 universal）
+            if [[ "$platform" == "darwin" ]]; then
+              PLATFORMS=$(echo "$PLATFORMS" | jq \
+                --arg u "$url" \
+                --arg s "$sig_content" \
+                '. + {"darwin-x86_64": {"signature": $s, "url": $u}, "darwin-aarch64": {"signature": $s, "url": $u}}')
+            else
+              PLATFORMS=$(echo "$PLATFORMS" | jq \
+                --arg p "$platform" \
+                --arg u "$url" \
+                --arg s "$sig_content" \
+                '. + {($p): {"signature": $s, "url": $u}}')
+            fi
           done
-
-          # If universal is available, copy it to both darwin archs
-          UNIVERSAL=$(echo "$PLATFORMS" | jq -r '.["darwin-universal"] // empty')
-          if [ -n "$UNIVERSAL" ]; then
-            echo "Using universal binary for both darwin-x86_64 and darwin-aarch64"
-            # Only override if the specific arch entry is missing
-            EXISTING_X86=$(echo "$PLATFORMS" | jq -r '.["darwin-x86_64"] // empty')
-            EXISTING_ARM=$(echo "$PLATFORMS" | jq -r '.["darwin-aarch64"] // empty')
-            if [ -z "$EXISTING_X86" ]; then
-              PLATFORMS=$(echo "$PLATFORMS" | jq '. + {"darwin-x86_64": .["darwin-universal"]}')
-            fi
-            if [ -z "$EXISTING_ARM" ]; then
-              PLATFORMS=$(echo "$PLATFORMS" | jq '. + {"darwin-aarch64": .["darwin-universal"]}')
-            fi
-            PLATFORMS=$(echo "$PLATFORMS" | jq 'del(.["darwin-universal"])')
-          fi
 
           # Write latest.json
           PUB_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -201,6 +197,15 @@ jobs:
           echo ""
           echo "=== latest.json ==="
           cat latest.json
+
+      - name: Drop non-universal macOS updater bundles
+        shell: bash
+        run: |
+          # 三个 mac 构建的 .app.tar.gz 同名（TyporaNext.app.tar.gz），同名资产并发上传
+          # 互踩 404（v0.4.8 曾因此丢 sig）。latest.json 已统一指向 universal，
+          # 其余同名文件直接删掉，只保留 universal 的 tar.gz + sig。
+          find artifacts -type f \( -name "*.app.tar.gz" -o -name "*.app.tar.gz.sig" \) \
+            ! -path "*universal-apple-darwin*" -print -delete
 
       - name: Create/Update Release
         uses: softprops/action-gh-release@v2
