@@ -10,6 +10,11 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     And the companion menu should open the unified panel with the picked mode
     And the stylesheet should style the companion entry and mode controls
 
+  Scenario: 划线后再点伴学，菜单不闪退且能取到划线文本
+    Given the app source files are loaded
+    Then global mouseup should not dismiss the toolbar for clicks inside it
+    And the companion menu should fall back to the active annotation text
+
   Scenario: 侧栏提供不划词的「我有话说」入口
     Given the app source files are loaded
     Then the cornell sidebar should have an own-voice button that opens free talk

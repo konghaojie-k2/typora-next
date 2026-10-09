@@ -141,7 +141,7 @@ steps.then('the companion button visibility should be gated on course mode', fun
 steps.then('the example mode click should call openAICompanion with the selected text', function() {
   const btnIdx = this.mainJs.indexOf("querySelector('#aiCompanionBtn')");
   if (btnIdx < 0) throw new Error('aiCompanionBtn not bound in selection toolbar');
-  const body = this.mainJs.slice(btnIdx, btnIdx + 1200);
+  const body = this.mainJs.slice(btnIdx, btnIdx + 1600);
   if (!body.includes('openAICompanion(text, mode)')) {
     throw new Error('companion menu click does not call openAICompanion(text, mode)');
   }

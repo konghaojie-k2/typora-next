@@ -151,6 +151,54 @@ steps.then('the stylesheet should style the companion entry and mode controls', 
 });
 
 // ============================================
+// Scenario：划线后再点伴学（菜单一闪而过实机回归）
+// ============================================
+
+/** 花括号配对提取 marker 后的第一个函数体（同 annotation_notes.steps.js 先例） */
+function extractBodyAfterMarker(source, marker) {
+  const start = source.indexOf(marker);
+  if (start === -1) return '';
+  const open = source.indexOf('{', start);
+  if (open === -1) return '';
+  let depth = 0;
+  for (let i = open; i < source.length; i++) {
+    if (source[i] === '{') depth++;
+    else if (source[i] === '}') {
+      depth--;
+      if (depth === 0) return source.slice(open, i + 1);
+    }
+  }
+  return '';
+}
+
+steps.then('global mouseup should not dismiss the toolbar for clicks inside it', function() {
+  // main.js 有两个 mouseup 监听（3682 行命名 handler + 划词工具栏的内联 handler），
+  // 必须锚定内联版，否则提取到别的函数体
+  const body = extractBodyAfterMarker(this.mainJs, "document.addEventListener('mouseup', (e) =>");
+  if (!body) throw new Error('缺少全局 mouseup 处理器');
+  // 划线会 removeAllRanges() 清空选区但保留工具栏；此时点 ✨，mouseup 看到选区
+  // collapsed → setTimeout(hideSelectionToolbar, 150)，而 click 在 mouseup 之后才展开
+  // 菜单 → 菜单刚展开 150ms 就被收起。mousedown 已有工具栏内部豁免，mouseup 必须对称。
+  if (!body.includes('selectionToolbar.contains(e.target)')) {
+    throw new Error(
+      'mouseup 缺少工具栏内部点击豁免——划线后点 ✨ 会被当成「点击外部」收起，伴学菜单一闪而过'
+    );
+  }
+});
+
+steps.then('the companion menu should fall back to the active annotation text', function() {
+  const idx = this.mainJs.indexOf("companionMenu.querySelectorAll('button')");
+  if (idx < 0) throw new Error('缺少伴学菜单项点击处理器');
+  const body = this.mainJs.slice(idx, idx + 900);
+  // 划线后选区已空，只读 live selection 会静默 return；必须回退到 lastAnnotationId 的划线文本
+  if (!body.includes('lastAnnotationId') || !body.includes('data-annotation-id')) {
+    throw new Error(
+      '伴学菜单只从 live selection 取文本——划线后选区已清空，应回退到 lastAnnotationId 的划线文本'
+    );
+  }
+});
+
+// ============================================
 // Scenario：侧栏入口
 // ============================================
 

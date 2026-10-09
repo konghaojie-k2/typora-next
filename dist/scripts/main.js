@@ -6158,7 +6158,12 @@ window.agentBridge = {
           const mode = btn.dataset.mode;
           companionMenu.style.display = 'none';
           const selection = window.getSelection();
-          const text = selection && !selection.isCollapsed ? selection.toString().trim() : '';
+          let text = selection && !selection.isCollapsed ? selection.toString().trim() : '';
+          // 划线后选区已被清空（removeAllRanges），伴学文本回退到当前划线的内容
+          if (!text && lastAnnotationId) {
+            text = Array.from(document.querySelectorAll(`[data-annotation-id="${lastAnnotationId}"]`))
+              .map(el => el.textContent).join('').trim();
+          }
           if (!text || text.length < 2) return;
           hideSelectionToolbar();
           if (window.LearningModeIntegration && window.LearningModeIntegration.openAICompanion) {
@@ -6543,6 +6548,12 @@ window.agentBridge = {
     document.addEventListener('mouseup', (e) => {
       // 批注编辑器内的点击：不参与划词逻辑（否则会 hideSelectionToolbar 清掉 lastAnnotationId）
       if (annotationNoteEditor && annotationNoteEditor.contains(e.target)) {
+        return;
+      }
+      // 工具栏内部的点击：与 mousedown 对称豁免。划线会 removeAllRanges() 清空选区
+      // 但保留工具栏，此时点 ✨ 会被下面的 collapsed 分支当成「点击外部」→
+      // setTimeout 收起工具栏，而 click 在 mouseup 之后才展开伴学菜单 → 菜单一闪而过
+      if (selectionToolbar && selectionToolbar.contains(e.target)) {
         return;
       }
       // When clicking on an annotation, click handler shows toolbar; don't hide it here
