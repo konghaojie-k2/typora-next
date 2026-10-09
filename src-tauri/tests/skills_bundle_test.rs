@@ -69,3 +69,20 @@ fn test_copy_bundled_skills_copies_wiki_fetch_script() {
     );
     let _ = std::fs::remove_dir_all(&dst);
 }
+
+/// AI 伴学「画个图」：typora-course-visualize skill 必须随拷贝进项目
+/// （visualize stage 的 prompt 按名引用，缺拷贝则 agent 找不到 skill）。
+#[test]
+fn test_copy_bundled_skills_copies_visualize_skill() {
+    let dst = std::env::temp_dir().join(format!("skills-copy-visualize-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dst);
+    let project_path = dst.to_string_lossy().to_string();
+    copy_bundled_skills_to_project(&project_path).expect("copy should succeed");
+    let skill_md = dst
+        .join(".pi")
+        .join("skills")
+        .join("typora-course-visualize")
+        .join("SKILL.md");
+    assert!(skill_md.exists(), "typora-course-visualize SKILL.md must reach the project");
+    let _ = std::fs::remove_dir_all(&dst);
+}

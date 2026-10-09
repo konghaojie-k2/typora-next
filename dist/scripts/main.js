@@ -5916,6 +5916,7 @@ window.agentBridge = {
         <button data-mode="explain">💡 给个解释</button>
         <button data-mode="example">📋 举个例子</button>
         <button data-mode="talk">💬 我有话说</button>
+        <button data-mode="visualize">🖼️ 画个图</button>
       </div>
     `;
     document.body.appendChild(selectionToolbar);

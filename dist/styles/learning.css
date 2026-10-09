@@ -3891,6 +3891,10 @@ body.learning-mode .toolbar {
   background: rgba(124, 58, 237, 0.15);
   color: #7c3aed;
 }
+.companion-mode-tag.t-visualize {
+  background: rgba(2, 132, 199, 0.15);
+  color: #0369a1;
+}
 
 /* 侧栏「我有话说」主按钮 */
 .cornell-footer-btn-primary {

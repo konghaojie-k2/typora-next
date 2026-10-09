@@ -16,10 +16,10 @@ const { CompanionCore } = require('../../dist/scripts/learning/ai-companion-moda
 // 模式元数据
 // ============================================
 
-TestRunner.test('exactly three modes: explain / example / talk', () => {
+TestRunner.test('exactly four modes: explain / example / talk / visualize', () => {
   const keys = Object.keys(CompanionCore.MODES);
-  TestRunner.assert(keys.length === 3, `should have 3 modes, got ${keys.length}`);
-  for (const key of ['explain', 'example', 'talk']) {
+  TestRunner.assert(keys.length === 4, `should have 4 modes, got ${keys.length}`);
+  for (const key of ['explain', 'example', 'talk', 'visualize']) {
     TestRunner.assert(!!CompanionCore.MODES[key], `mode '${key}' should exist`);
   }
 });

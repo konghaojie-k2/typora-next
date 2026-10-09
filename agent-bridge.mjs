@@ -6,7 +6,8 @@
  *   node agent-bridge.mjs <stage> <config_json>
  *
  * Stages (contracts unchanged from the claude-kernel bridge):
- *   check / plan / generate / explain / socratic / case-study / review-gen /
+ *   check / plan / generate / explain / socratic / case-study / own-voice /
+ *   visualize / review-gen /
  *   review-gen-batch / generate-extra-quiz / paper-reader / init / chat / explore
  *
  * stdout = JSON lines for Rust (emit protocol unchanged), stderr = logs.
@@ -1126,6 +1127,54 @@ export async function ownVoiceChat(queryFnUnused, config, args) {
   return { content: output.trim(), done: false, session_id };
 }
 
+/**
+ * Visualize stage（AI 伴学「🖼️ 画个图」）：划词选概念 → AI 配图讲解。
+ * 与 caseStudyChat 同构（runPiTurn + sessionId 续聊 + 流式 delta），差异：
+ * - 挂载 wikimedia 受限 bash（wikiFetch: true）——skill 先检索真图，
+ *   未命中再按 inline-svg-spec 手绘 SVG（```svg 围栏，气泡渲染通道）
+ * - 事件名 visualize_delta
+ */
+export async function visualizeChat(queryFnUnused, config, args) {
+  const { project_path, selected_text, context, user_answer } = args;
+
+  if (!project_path) {
+    throw new Error('project_path is required for visualize');
+  }
+  if (!selected_text || !selected_text.trim()) {
+    throw new Error('selected_text is required for visualize');
+  }
+
+  // 首轮信号 = 无 session（同 case-study：面板首轮可能已带学生要求）
+  const isFirstTurn = !args.session_id;
+  log('info', 'Starting visualize', { project_path, selected_text, first_turn: isFirstTurn });
+
+  const prompt = isFirstTurn
+    ? `请使用 typora-course-visualize skill 为学生选中的概念配图讲解。\n` +
+      `选中概念: ${JSON.stringify(selected_text)}\n` +
+      (context ? `章节上下文: ${JSON.stringify(context)}\n` : '') +
+      (user_answer && user_answer.trim() ? `学生要求: ${JSON.stringify(user_answer)}\n` : '')
+    : user_answer;
+
+  const { output, sessionFile } = await runPiTurn({
+    prompt,
+    config,
+    cwd: project_path,
+    tools: ['read', 'write', 'find', 'grep'],
+    sessionId: args.session_id,
+    // 维基真图检索：受限 bash 只放行 wikimedia-commons 的 wiki-fetch.mjs
+    wikiFetch: true,
+    onDelta: (delta) => emit('visualize_delta', { delta })
+  });
+
+  if (!output || output.trim().length === 0) {
+    throw new Error('Agent returned empty visualize response');
+  }
+
+  const session_id = sessionFile || args.session_id || null;
+  log('info', 'Visualize turn complete', { content_length: output.trim().length, has_session: !!session_id });
+  return { content: output.trim(), done: false, session_id };
+}
+
 export async function generatePaperReaderGuide(queryFnUnused, config, args) {
   const { paper_file, output_file, persona, session_id } = args;
   if (!paper_file) {
@@ -1448,6 +1497,13 @@ async function main() {
         const ownVoiceResult = await ownVoiceChat(null, config, taskArgs);
         console.log(JSON.stringify(ownVoiceResult));
         log('info', 'Own-voice stage completed', { content_length: ownVoiceResult.content.length });
+        process.exit(0);
+      }
+      case 'visualize': {
+        log('info', 'Starting visualize stage', { project_path: taskArgs.project_path, selected_text: taskArgs.selected_text, session_id: taskArgs.session_id || null });
+        const visualizeResult = await visualizeChat(null, config, taskArgs);
+        console.log(JSON.stringify(visualizeResult));
+        log('info', 'Visualize stage completed', { content_length: visualizeResult.content.length });
         process.exit(0);
       }
       case 'review-gen': {

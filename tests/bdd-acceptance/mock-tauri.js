@@ -52,6 +52,12 @@ const mockInvoke = async (cmd, args) => {
       return _ownVoiceSaveSession(args);
     case 'own_voice_list_sessions':
       return _ownVoiceListSessions(args);
+    case 'visualize_chat':
+      return _visualizeChat(args);
+    case 'visualize_save_session':
+      return _visualizeSaveSession(args);
+    case 'visualize_list_sessions':
+      return _visualizeListSessions(args);
     case 'explain_selection':
       return _explainSelection(args);
     case 'persist_explanation':
@@ -399,6 +405,51 @@ function _ownVoiceSaveSession({ projectPath, session, overwriteFile }) {
 
 function _ownVoiceListSessions({ projectPath }) {
   const sessionsDir = path.join(projectPath, '.learning', 'own-voices');
+  if (!fs.existsSync(sessionsDir)) return [];
+  const sessions = [];
+  for (const f of fs.readdirSync(sessionsDir)) {
+    if (!f.endsWith('.json')) continue;
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(sessionsDir, f), 'utf-8'));
+      s.file = f; // 会话身份：续聊时回传给 save 以覆盖原文件
+      sessions.push(s);
+    } catch (_) { /* skip broken */ }
+  }
+  sessions.sort((a, b) => String(b.ended_at || '').localeCompare(String(a.ended_at || '')));
+  return sessions;
+}
+
+// ============================================
+// AI 伴学（画个图）—— 与案例研习/我有话说同构（session + 落盘目录 visualizations）
+// ============================================
+
+let _visualizeChatCalls = [];
+function _visualizeChat(args) {
+  _visualizeChatCalls.push(args);
+  const isFirst = !args.userAnswer;
+  return {
+    content: isFirst
+      ? `这张图看 ${args.selectedText} 的结构：\n\`\`\`svg\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 120"><rect x="0" y="0" width="680" height="120" fill="#F7F5F0"/></svg>\n\`\`\`\n\n看图要点：注意关键部位。`
+      : `按你的要求改图：${args.userAnswer}`,
+    done: false,
+    session_id: args.sessionId || 'mock-visualize-session-1'
+  };
+}
+function _getVisualizeChatCalls() { return _visualizeChatCalls; }
+
+function _visualizeSaveSession({ projectPath, session, overwriteFile }) {
+  const sessionsDir = path.join(projectPath, '.learning', 'visualizations');
+  fs.mkdirSync(sessionsDir, { recursive: true });
+  // 续聊：沿用原文件名覆盖写盘，不得新建重复条目（与 Rust case_study_store 同契约）
+  const ts = (session.ended_at || new Date().toISOString()).replace(/[:.]/g, '-');
+  const fileName = overwriteFile || `${ts}.json`;
+  const filePath = path.join(sessionsDir, fileName);
+  fs.writeFileSync(filePath, JSON.stringify(session, null, 2), 'utf-8');
+  return filePath;
+}
+
+function _visualizeListSessions({ projectPath }) {
+  const sessionsDir = path.join(projectPath, '.learning', 'visualizations');
   if (!fs.existsSync(sessionsDir)) return [];
   const sessions = [];
   for (const f of fs.readdirSync(sessionsDir)) {
@@ -765,6 +816,7 @@ module.exports = {
   },
   getCaseStudyChatCalls: () => _getCaseStudyChatCalls(),
   getOwnVoiceChatCalls: () => _getOwnVoiceChatCalls(),
+  getVisualizeChatCalls: () => _getVisualizeChatCalls(),
   getExplainSelectionCalls: () => _getExplainSelectionCalls(),
   mockInvoke,
   // 后装载的 steps 套件若被更早的套件整替换过 global.window，用它重新挂载

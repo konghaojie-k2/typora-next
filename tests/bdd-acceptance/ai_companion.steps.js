@@ -110,13 +110,14 @@ steps.then('the selection toolbar should contain a single companion button', fun
   }
 });
 
-steps.then('the companion menu should offer exactly three modes', function() {
-  for (const mode of ['explain', 'example', 'talk']) {
+steps.then('the companion menu should offer exactly four modes', function() {
+  for (const mode of ['explain', 'example', 'talk', 'visualize']) {
     if (!this.mainJs.includes(`data-mode="${mode}"`)) {
       throw new Error(`companion menu missing mode: ${mode}`);
     }
   }
-  if (!this.mainJs.includes('💡 给个解释') || !this.mainJs.includes('📋 举个例子') || !this.mainJs.includes('💬 我有话说')) {
+  if (!this.mainJs.includes('💡 给个解释') || !this.mainJs.includes('📋 举个例子')
+    || !this.mainJs.includes('💬 我有话说') || !this.mainJs.includes('🖼️ 画个图')) {
     throw new Error('companion menu labels incomplete');
   }
 });
@@ -143,7 +144,7 @@ steps.then('the companion menu should open the unified panel with the picked mod
 });
 
 steps.then('the stylesheet should style the companion entry and mode controls', function() {
-  for (const cls of ['.companion-menu', '.companion-mode-seg', '.companion-mode-tag', '.companion-chip']) {
+  for (const cls of ['.companion-menu', '.companion-mode-seg', '.companion-mode-tag', '.companion-chip', '.companion-mode-tag.t-visualize']) {
     if (!this.learningCss.includes(cls)) {
       throw new Error(`learning.css missing ${cls}`);
     }
@@ -220,10 +221,10 @@ steps.then('the sidebar history entry should merge both session kinds', function
   }
   const idx = this.modeIntegration.indexOf('async function openCompanionHistory');
   if (idx < 0) throw new Error('mode-integration missing openCompanionHistory');
-  const body = this.modeIntegration.slice(idx, idx + 4200);
-  // 三类数据源都要拉，归并规则交给 CompanionCore.buildRecords（一条 = 一个起点）
+  const body = this.modeIntegration.slice(idx, idx + 4600);
+  // 四类数据源都要拉，归并规则交给 CompanionCore.buildRecords（一条 = 一个起点）
   for (const required of ['case_study_list_sessions', 'own_voice_list_sessions',
-    'list_project_explanations', 'CompanionCore.buildRecords', 'openAICompanion']) {
+    'visualize_list_sessions', 'list_project_explanations', 'CompanionCore.buildRecords', 'openAICompanion']) {
     if (!body.includes(required)) throw new Error(`unified history does not wire ${required}`);
   }
   if (!this.modeIntegration.includes('companion-history-kind')) {
@@ -313,6 +314,79 @@ steps.then('the companion modal should support resuming a saved talk session', f
 });
 
 // ============================================
+// Scenario：visualize 链路端到端接线（🖼️ 画个图）
+// ============================================
+
+steps.then('the bridge should wire the visualize stage with streaming deltas', function() {
+  if (!this.bridgeContent.includes("case 'visualize'")) {
+    throw new Error('agent-bridge.mjs missing visualize stage');
+  }
+  if (!this.bridgeContent.includes('typora-course-visualize skill')) {
+    throw new Error('agent-bridge.mjs does not reference the visualize skill by name');
+  }
+  if (!this.bridgeContent.includes("emit('visualize_delta'")) {
+    throw new Error('bridge does not emit visualize_delta');
+  }
+  // 维基真图检索需要受限 bash（wiki-fetch 白名单脚本）
+  if (!/visualizeChat[\s\S]{0,1200}wikiFetch:\s*true/.test(this.bridgeContent)) {
+    throw new Error('visualize stage does not enable the wikimedia sandboxed bash (wikiFetch: true)');
+  }
+});
+
+steps.then('Rust should register the visualize commands', function() {
+  if (!this.aiAgentRs.includes('pub async fn visualize_chat')) {
+    throw new Error('ai_agent.rs missing visualize_chat');
+  }
+  if (!this.aiAgentRs.includes('emit("visualize-event"')) {
+    throw new Error('ai_agent.rs does not emit visualize-event');
+  }
+  for (const cmd of ['ai_agent::visualize_chat', 'visualize_save_session', 'visualize_list_sessions']) {
+    if (!this.libRs.includes(cmd)) throw new Error(`lib.rs missing registration: ${cmd}`);
+  }
+});
+
+steps.then('the visualize skill should exist with its trigger phrase', function() {
+  const skillPath = require('path').join(__dirname, '../../src-tauri/skills/typora-course-visualize/SKILL.md');
+  if (!fs.existsSync(skillPath)) throw new Error('typora-course-visualize/SKILL.md missing');
+  this.visualizeSkill = fs.readFileSync(skillPath, 'utf-8');
+  if (!this.visualizeSkill.includes('name: typora-course-visualize')) {
+    throw new Error('SKILL.md frontmatter name wrong');
+  }
+  if (!this.visualizeSkill.includes('请使用 typora-course-visualize skill')) {
+    throw new Error('SKILL.md missing host trigger phrase');
+  }
+});
+
+steps.then('the visualize skill should prefer real images over hand-drawn svg', function() {
+  // 决策顺序：先 wikimedia-commons 检索真图（mime 过滤 + upload 直链），未命中才手绘 SVG
+  for (const marker of ['commons.wikimedia.org', 'upload.wikimedia.org', 'wiki-fetch.mjs']) {
+    if (!this.visualizeSkill.includes(marker)) {
+      throw new Error(`visualize skill missing wikimedia retrieval: ${marker}`);
+    }
+  }
+  const wikiIdx = this.visualizeSkill.indexOf('commons.wikimedia.org');
+  const svgIdx = this.visualizeSkill.indexOf('```svg');
+  if (svgIdx === -1) throw new Error('visualize skill missing svg fence output format');
+  if (svgIdx < wikiIdx) throw new Error('决策顺序错误：真图检索必须先于手绘 SVG（真图质量 > LLM 手绘）');
+});
+
+steps.then('the visualize skill should forbid mermaid and require svg fences', function() {
+  // 气泡渲染器不支持 mermaid——skill 必须显式禁止，否则气泡里显示代码文本
+  if (!/mermaid/i.test(this.visualizeSkill)) {
+    throw new Error('visualize skill must mention the mermaid ban (bubble renderer has no mermaid)');
+  }
+  if (!/禁止.{0,12}mermaid|不要.{0,12}mermaid|mermaid.{0,12}(不渲染|无法渲染|不会渲染)/i.test(this.visualizeSkill)) {
+    throw new Error('visualize skill does not explicitly forbid mermaid output');
+  }
+  // SVG 规范锚点：浅色底卡 + 680 viewBox + 全 inline 属性（与课程插图一致）
+  for (const marker of ['680', 'inline']) {
+    if (!this.visualizeSkill.includes(marker)) {
+      throw new Error(`visualize skill missing svg spec anchor: ${marker}`);
+    }
+  }
+});
+
+// ============================================
 // Scenario：面板路由与落盘（真实模块 + mock tauri）
 // ============================================
 
@@ -321,6 +395,7 @@ steps.given('a real companion modal in a temp learning project', function() {
   // 清空 mock 调用记录（module 级状态跨 scenario 存活）
   mockTauri.getOwnVoiceChatCalls().splice(0);
   mockTauri.getExplainSelectionCalls().splice(0);
+  mockTauri.getVisualizeChatCalls().splice(0);
 });
 
 steps.when('the panel is opened in talk mode', async function() {
@@ -479,8 +554,8 @@ steps.then('the sidebar history entry should list saved explanations', function(
   for (const required of ['list_project_explanations', 'buildRecords']) {
     if (!body.includes(required)) throw new Error(`history does not list explanations: ${required}`);
   }
-  if (!this.companionJs.includes("caseSessions") || !this.companionJs.includes("talkSessions")) {
-    throw new Error('buildRecords does not take all three sources');
+  if (!this.companionJs.includes("caseSessions") || !this.companionJs.includes("talkSessions") || !this.companionJs.includes("visualizeSessions")) {
+    throw new Error('buildRecords does not take all four sources');
   }
   // 任何一条记录的点击都带整条 record 进面板续聊（含解释/举例/我有话说的全部部分）
   if (!body.includes('openAICompanion(item.record.selected_text, item.primary, { record: item.record })')) {
@@ -749,6 +824,139 @@ steps.then('the panel should stay open and allow retrying the save', function() 
 });
 
 // ============================================
+// Scenario：画图模式（🖼️ 画个图，session + 流式，与举例同构）
+// ============================================
+
+steps.when('the panel is opened in visualize mode', function() {
+  this.modal = new AICompanionModal({
+    projectPath: this.projectPath,
+    selectedText: CONCEPT,
+    context: { chapterTitle: '第0章', chapterGoal: '掌握 RDFS 词汇', surroundingText: '' },
+    chapterFile: EXAMPLE_CHAPTER,
+    initialMode: 'visualize'
+  });
+  return this.modal.open();
+});
+
+steps.then('the visualize chat should be invoked with the concept and no user answer', function() {
+  const calls = mockTauri.getVisualizeChatCalls();
+  const last = calls[calls.length - 1];
+  if (!last) throw new Error('visualize_chat was not invoked');
+  if (last.selectedText !== CONCEPT) throw new Error(`selectedText mismatch: ${last.selectedText}`);
+  if (last.userAnswer !== null && last.userAnswer !== undefined) {
+    throw new Error(`first turn should have no userAnswer, got: ${last.userAnswer}`);
+  }
+  if (last.projectPath !== this.projectPath) throw new Error('projectPath missing');
+});
+
+steps.when('the student asks a follow-up in visualize mode', async function() {
+  this.followUpQ = '把悬键标出来再画一张';
+  this.modal._shell.inputEl.value = this.followUpQ;
+  this.modal._handleSend();
+  // mock invoke 是同步返回的 Promise，让微任务队列排空
+  await new Promise((r) => setTimeout(r, 20));
+});
+
+steps.then('the visualize chat should be invoked with the answer and the captured session id', function() {
+  const calls = mockTauri.getVisualizeChatCalls();
+  const last = calls[calls.length - 1];
+  if (!last || last.userAnswer !== this.followUpQ) {
+    throw new Error(`follow-up call missing userAnswer: ${last && last.userAnswer}`);
+  }
+  if (last.sessionId !== 'mock-visualize-session-1') {
+    throw new Error(`follow-up should resume the pi session, got: ${last.sessionId}`);
+  }
+});
+
+steps.then('ending the panel should persist the visualize session with its start key', function() {
+  if (this.modal.opened !== false) throw new Error('panel should be closed after successful save');
+  const dir = path.join(this.projectPath, '.learning', 'visualizations');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  if (files.length !== 1) throw new Error(`expected 1 session file, got ${files.length}`);
+  const session = JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf-8'));
+  if (session.start_key !== '00-ch::' + CONCEPT) {
+    throw new Error(`start_key should mark the record's start point, got: ${session.start_key}`);
+  }
+  if (session.selected_text !== CONCEPT) throw new Error('selected_text missing');
+  if (session.chapter_file !== EXAMPLE_CHAPTER) throw new Error('chapter_file missing');
+  if (session.end_reason !== 'user_ended') throw new Error('end_reason should be user_ended');
+  if (session.session_id !== 'mock-visualize-session-1') throw new Error('session_id from response should be recorded');
+  if (session.turns.length !== 4) throw new Error(`expected 4 turns, got ${session.turns.length}`);
+});
+
+// ============================================
+// Scenario：画图续聊（伴学记录 🖼️ → 覆盖原会话）
+// ============================================
+
+steps.given('a saved visualize session on disk', async function() {
+  await mockTauri.mockInvoke('visualize_save_session', {
+    projectPath: this.projectPath,
+    session: {
+      version: '1.0',
+      start_key: '00-ch::' + CONCEPT,
+      selected_text: CONCEPT,
+      chapter_file: EXAMPLE_CHAPTER,
+      session_id: 'mock-visualize-session-1',
+      started_at: '2026-10-09T09:00:00.000Z',
+      ended_at: '2026-10-09T09:05:00.000Z',
+      end_reason: 'user_ended',
+      turns: [
+        { role: 'user', content: CONCEPT },
+        { role: 'tutor', content: '看图：\n```svg\n<svg viewBox="0 0 680 120"></svg>\n```' }
+      ]
+    }
+  });
+  // 走真实 listing 拿会话（file 字段由 list_sessions 注入，续聊靠它覆盖原文件）
+  const listed = await mockTauri.mockInvoke('visualize_list_sessions', { projectPath: this.projectPath });
+  this.savedVisualize = listed[0];
+  this.savedVisualizeTurns = (this.savedVisualize.turns || []).length;
+  this.callsBeforeResume = mockTauri.getVisualizeChatCalls().length;
+});
+
+steps.when('the panel is reopened from the saved visualize session', async function() {
+  this.modal = new AICompanionModal({
+    projectPath: this.projectPath,
+    record: {
+      start_key: this.savedVisualize.start_key,
+      selected_text: this.savedVisualize.selected_text,
+      chapter_file: this.savedVisualize.chapter_file,
+      visualize: this.savedVisualize
+    }
+  });
+  await this.modal.open();
+});
+
+steps.then('the replayed visualize thread should not trigger a new LLM call', function() {
+  const calls = mockTauri.getVisualizeChatCalls();
+  if (calls.length !== this.callsBeforeResume) throw new Error('opening history must not burn tokens');
+  if (this.modal.turns.length !== this.savedVisualizeTurns) {
+    throw new Error(`expected ${this.savedVisualizeTurns} replayed turns, got ${this.modal.turns.length}`);
+  }
+  if (this.modal.turns.some((t) => t.mode !== 'visualize')) {
+    throw new Error('replayed turns should be tagged as visualize');
+  }
+});
+
+steps.when('the student continues the figure and ends the panel', async function() {
+  this.modal._shell.inputEl.value = '改成俯视角度再画一张';
+  this.modal._handleSend();
+  await new Promise((r) => setTimeout(r, 20));
+  await this.modal._confirmEnd();
+});
+
+steps.then('the visualize session should be overwritten in place', function() {
+  const dir = path.join(this.projectPath, '.learning', 'visualizations');
+  const files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
+  if (files.length !== 1 || files[0] !== this.savedVisualize.file) {
+    throw new Error(`续聊必须覆盖原文件 ${this.savedVisualize.file}，got ${files.join(', ')}`);
+  }
+  const session = JSON.parse(fs.readFileSync(path.join(dir, files[0]), 'utf-8'));
+  if (session.turns.length !== this.savedVisualizeTurns + 2) {
+    throw new Error(`expected ${this.savedVisualizeTurns + 2} turns after resume, got ${session.turns.length}`);
+  }
+});
+
+// ============================================
 // Scenario：一条记录 = 一个起点（同概念跨模式归并）
 // ============================================
 
@@ -804,12 +1012,13 @@ steps.given('an explanation record and an example session on the same concept', 
 });
 
 steps.when('the learning records are collected', async function() {
-  const [caseSessions, talkSessions, explanations] = await Promise.all([
+  const [caseSessions, talkSessions, visualizeSessions, explanations] = await Promise.all([
     mockTauri.mockInvoke('case_study_list_sessions', { projectPath: this.projectPath }),
     mockTauri.mockInvoke('own_voice_list_sessions', { projectPath: this.projectPath }),
+    mockTauri.mockInvoke('visualize_list_sessions', { projectPath: this.projectPath }),
     mockTauri.mockInvoke('list_project_explanations', { projectPath: this.projectPath })
   ]);
-  this.records = CompanionCore.buildRecords({ explanations, caseSessions, talkSessions });
+  this.records = CompanionCore.buildRecords({ explanations, caseSessions, talkSessions, visualizeSessions });
 });
 
 steps.then('the concept should appear as a single record', function() {
@@ -839,6 +1048,53 @@ steps.then('an unselected free-talk session should stay its own record', functio
   if (globals[0].record.explain || globals[0].record.example) {
     throw new Error('global record must not absorb other parts');
   }
+});
+
+// ============================================
+// Scenario：画图部分并入同一起点的记录
+// ============================================
+
+steps.given('an explanation record and a visualize session on the same concept', function() {
+  const concept = '位置编码';
+  this.conv = {
+    id: 'cue-1', selected_text: concept, chapter: '03-attention', rounds: 1,
+    created_at: '2026-10-09T10:00:00.000Z', last_ts: '2026-10-09T10:00:00.000Z',
+    qa_history: [{ q: '位置编码是什么？', a: '把位置信息编进向量。', ts: '2026-10-09T10:00:00.000Z' }]
+  };
+  // 🖼️ 画图：同一个起点（start_key 由面板落盘时打上）
+  this.visualizeSession = {
+    version: '1.0',
+    start_key: '03-attention::' + concept,
+    selected_text: concept,
+    chapter_file: '03-attention.md',
+    session_id: 'mock-visualize-1',
+    started_at: '2026-10-09T10:05:00.000Z',
+    ended_at: '2026-10-09T10:08:00.000Z',
+    end_reason: 'user_ended',
+    turns: [
+      { role: 'user', content: concept },
+      { role: 'tutor', content: '看图：\n```svg\n<svg viewBox="0 0 680 120"></svg>\n```' }
+    ]
+  };
+  mockTauri.mockInvoke('visualize_save_session', {
+    projectPath: this.projectPath, session: this.visualizeSession
+  });
+  mockTauri.mockInvoke('persist_explanation', {
+    projectPath: this.projectPath, chapter: '03-attention', conversation: this.conv
+  });
+});
+
+steps.then('the concept record should carry the visualize part for resuming', function() {
+  const hit = this.records.filter((r) => r.title === '位置编码');
+  if (hit.length !== 1) {
+    throw new Error(`同一概念应归并为一条记录，got ${hit.length} 条：${this.records.map((r) => r.title).join(', ')}`);
+  }
+  if (hit[0].rounds !== 2) throw new Error(`expected 2 rounds (解释1+画图1), got ${hit[0].rounds}`);
+  if (hit[0].primary !== 'explain') throw new Error('起点是解释，主模式应为 explain');
+  if (hit[0].modes !== '💡1 🖼️1') throw new Error(`mode summary wrong: ${hit[0].modes}`);
+  const rec = hit[0].record;
+  if (!rec.explain || !rec.visualize) throw new Error('record should carry both explain and visualize parts');
+  if (rec.start_key !== '03-attention::位置编码') throw new Error(`start_key wrong: ${rec.start_key}`);
 });
 
 // ============================================
@@ -900,6 +1156,56 @@ steps.then('without katex the raw text should survive', function() {
   delete global.katex;
   const html = this.markdownToHtml('炉压 $x^2$ 左右');
   if (!html.includes('$x^2$')) throw new Error(`raw math text lost without katex: ${html}`);
+  if (this._restoreCreate) { this._restoreCreate(); this._restoreCreate = null; }
+});
+
+// ============================================
+// Scenario：AI 回答里的 SVG 围栏渲染为活图（🖼️ 画个图渲染通道）
+// ============================================
+
+steps.when('the tutor bubble renders markdown containing an svg fence', function() {
+  this._restoreCreate = installLinkedCreateElement();
+  const { markdownToHtml } = require('../../dist/scripts/markdown-utils');
+  // 合法元素（title/rect/fill）+ 三类危险载荷（onload / script / foreignObject 套 onerror）
+  this.rendered = markdownToHtml(
+    '这是一张示意图：\n' +
+    '```svg\n' +
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 120" width="100%" onload="alert(1)">' +
+    '<title>晶面示意</title>' +
+    '<rect x="0" y="0" width="680" height="120" fill="#F7F5F0"/>' +
+    '<script>alert(2)</script>' +
+    '<foreignObject><body xmlns="http://www.w3.org/1999/xhtml"><img src=x onerror="alert(3)"></body></foreignObject>' +
+    '</svg>\n' +
+    '```\n' +
+    '图后正文。'
+  );
+});
+
+steps.then('the svg fence should render as live markup instead of a code block', function() {
+  if (!this.rendered.includes('<svg')) {
+    throw new Error(`svg fence did not render as live markup: ${this.rendered.slice(0, 200)}`);
+  }
+  if (this.rendered.includes('&lt;svg')) {
+    throw new Error('svg was escaped —— 应还原为活图而非文本');
+  }
+  if (this.rendered.includes('<pre><code>')) {
+    throw new Error('svg fence 被当成普通代码块渲染了');
+  }
+  // 合法内容必须保留（清洗不能误伤）
+  if (!this.rendered.includes('<title>晶面示意</title>') || !this.rendered.includes('fill="#F7F5F0"')) {
+    throw new Error(`合法 svg 内容丢失: ${this.rendered.slice(0, 200)}`);
+  }
+  if (!this.rendered.includes('图后正文。')) {
+    throw new Error('围栏后的正文被吞');
+  }
+});
+
+steps.then('script and event handlers inside the svg should be stripped', function() {
+  if (/<script/i.test(this.rendered)) throw new Error('script survived svg sanitization');
+  if (/onload|onerror/i.test(this.rendered)) throw new Error('event handler attribute survived');
+  if (/<foreignObject/i.test(this.rendered)) {
+    throw new Error('foreignObject survived —— 可内嵌任意 HTML 绕过 escape');
+  }
   if (this._restoreCreate) { this._restoreCreate(); this._restoreCreate = null; }
 });
 

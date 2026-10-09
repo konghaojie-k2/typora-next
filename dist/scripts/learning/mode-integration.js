@@ -1851,13 +1851,14 @@
   }
 
   /**
-   * 伴学记录：一条记录 = 一个起点（💡/📋/💬 三种模式归并，新→旧）。
-   * 点击续聊：带整条记录进伴学面板，三种模式都能接着聊。
+   * 伴学记录：一条记录 = 一个起点（💡/📋/💬/🖼️ 四种模式归并，新→旧）。
+   * 点击续聊：带整条记录进伴学面板，四种模式都能接着聊。
    */
   async function openCompanionHistory() {
     if (!window.__TAURI__) return;
     let caseSessions = [];
     let talkSessions = [];
+    let visualizeSessions = [];
     let explanations = [];
     try {
       caseSessions = await window.__TAURI__.core.invoke('case_study_list_sessions', { projectPath: _projectPath }) || [];
@@ -1865,6 +1866,9 @@
     try {
       talkSessions = await window.__TAURI__.core.invoke('own_voice_list_sessions', { projectPath: _projectPath }) || [];
     } catch (e) { console.warn('own_voice_list_sessions failed:', e); }
+    try {
+      visualizeSessions = await window.__TAURI__.core.invoke('visualize_list_sessions', { projectPath: _projectPath }) || [];
+    } catch (e) { console.warn('visualize_list_sessions failed:', e); }
     try {
       explanations = await window.__TAURI__.core.invoke('list_project_explanations', { projectPath: _projectPath }) || [];
     } catch (e) { console.warn('list_project_explanations failed:', e); }
@@ -1882,7 +1886,8 @@
     const items = window.CompanionCore.buildRecords({
       explanations: explanations,
       caseSessions: caseSessions,
-      talkSessions: talkSessions
+      talkSessions: talkSessions,
+      visualizeSessions: visualizeSessions
     });
 
     if (items.length === 0) {

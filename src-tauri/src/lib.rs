@@ -5163,6 +5163,30 @@ async fn own_voice_save_session(
     Ok(path.display().to_string())
 }
 
+/// 「画个图」会话落盘（.learning/visualizations/{name}.json）。
+/// 契约与 case_study_save_session 一致（含 overwrite_file 续聊覆盖）。
+#[tauri::command]
+async fn visualize_save_session(
+    project_path: String,
+    session: serde_json::Value,
+    overwrite_file: Option<String>,
+) -> Result<String, String> {
+    let path = case_study_store::save_session(
+        &project_path,
+        "visualizations",
+        &session,
+        overwrite_file.as_deref(),
+    )?;
+    Ok(path.display().to_string())
+}
+
+/// 列出「画个图」历史会话（新→旧），供伴学记录列表 / 续聊。
+/// 契约与 case_study_list_sessions 一致（含 file 会话身份注入）。
+#[tauri::command]
+async fn visualize_list_sessions(project_path: String) -> Result<Vec<serde_json::Value>, String> {
+    case_study_store::list_sessions(&project_path, "visualizations")
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -5310,10 +5334,13 @@ pub fn run() {
             ai_agent::socratic_chat,
             ai_agent::case_study_chat,
             ai_agent::own_voice_chat,
+            ai_agent::visualize_chat,
             case_study_save_session,
             case_study_list_sessions,
             own_voice_save_session,
             own_voice_list_sessions,
+            visualize_save_session,
+            visualize_list_sessions,
             list_project_explanations,
             read_exploration_session,
             write_exploration_session,

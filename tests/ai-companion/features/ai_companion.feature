@@ -2,10 +2,10 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
   课程模式三个 AI 场景共用单一入口与同一个对话面板；
   每个场景的内容回答方式由对应 skill 控制，前端只负责表现。
 
-  Scenario: 划词气泡是唯一的 AI 入口且三选可达
+  Scenario: 划词气泡是唯一的 AI 入口且四选可达
     Given the app source files are loaded
     Then the selection toolbar should contain a single companion button
-    And the companion menu should offer exactly three modes
+    And the companion menu should offer exactly four modes
     And the old explain and case study bubble buttons should be gone
     And the companion menu should open the unified panel with the picked mode
     And the stylesheet should style the companion entry and mode controls
@@ -33,6 +33,14 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     And Rust should register the own voice commands
     And index.html should load the companion module
     And the companion modal should support resuming a saved talk session
+
+  Scenario: visualize 链路端到端接线（🖼️ 画个图）
+    Given the app source files are loaded
+    Then the bridge should wire the visualize stage with streaming deltas
+    And Rust should register the visualize commands
+    And the visualize skill should exist with its trigger phrase
+    And the visualize skill should prefer real images over hand-drawn svg
+    And the visualize skill should forbid mermaid and require svg fences
 
   Scenario: 面板路由与落盘（真实模块 + mock tauri）
     Given a real companion modal in a temp learning project
@@ -71,6 +79,23 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     When the user ends the session
     Then ending the panel should persist the example session with its start key
 
+  Scenario: 画图模式首轮生成 + 结束落盘
+    Given a real companion modal in a temp learning project
+    When the panel is opened in visualize mode
+    Then the visualize chat should be invoked with the concept and no user answer
+    When the student asks a follow-up in visualize mode
+    Then the visualize chat should be invoked with the answer and the captured session id
+    When the user ends the session
+    Then ending the panel should persist the visualize session with its start key
+
+  Scenario: 画图续聊（伴学记录 🖼️ → 覆盖原会话）
+    Given a real companion modal in a temp learning project
+    And a saved visualize session on disk
+    When the panel is reopened from the saved visualize session
+    Then the replayed visualize thread should not trigger a new LLM call
+    When the student continues the figure and ends the panel
+    Then the visualize session should be overwritten in place
+
   Scenario: 举例续聊（伴学记录 📋 → 覆盖原会话）
     Given a real companion modal in a temp learning project
     And a saved example session on disk
@@ -100,12 +125,24 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     And the record should carry both parts for resuming
     And an unselected free-talk session should stay its own record
 
+  Scenario: 画图部分并入同一起点的记录
+    Given a real companion modal in a temp learning project
+    And an explanation record and a visualize session on the same concept
+    When the learning records are collected
+    Then the concept record should carry the visualize part for resuming
+
   Scenario: AI 回答里的数学公式渲染为 KaTeX（与主预览同方案）
     Given a real companion modal in a temp learning project
     When the tutor bubble renders markdown containing math
     Then display and inline math should render via KaTeX with intact LaTeX
     And math inside code fences should stay as literal code
     And without katex the raw text should survive
+
+  Scenario: AI 回答里的 SVG 围栏渲染为活图且剥除危险内容
+    Given the app source files are loaded
+    When the tutor bubble renders markdown containing an svg fence
+    Then the svg fence should render as live markup instead of a code block
+    And script and event handlers inside the svg should be stripped
 
   Scenario: 气泡内标题压缩到气泡尺度（不被文档级 h1/h2 撑开）
     Given the app source files are loaded

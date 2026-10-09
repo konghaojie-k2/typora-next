@@ -1,11 +1,12 @@
 /**
  * AI Companion Modal - AI 伴学统一面板
  *
- * 课程模式三个 AI 场景共用一个对话现场（入口统一：划词气泡 ✨ 伴学三选 /
+ * 课程模式四个 AI 场景共用一个对话现场（入口统一：划词气泡 ✨ 伴学四选 /
  * 侧栏「💬 我有话说」不划词直达）：
  *   💡 给个解释  → explain_selection（previousQa 多轮，无 session）→ 逐轮落盘 .learning/explanations/
  *   📋 举个例子  → case_study_chat（独立 session，流式）→ 结束落盘 .learning/case-studies/
  *   💬 我有话说  → own_voice_chat（独立 session，流式）→ 结束落盘 .learning/own-voices/
+ *   🖼️ 画个图    → visualize_chat（独立 session，流式，维基真图优先）→ 结束落盘 .learning/visualizations/
  *
  * 一条记录 = 一个起点（见 recordKey）：划词起点按概念跨天追加，全局起点每次一条。
  * 续聊（伴学记录 → 面板）由 opts.record 一次性恢复该起点的全部模式部分，
@@ -73,13 +74,15 @@
   var MODES = {
     explain: { name: '解释', icon: '💡', label: '💡 解释', tag: '💡 解释', placeholder: '问点什么… 比如：为什么是这样？' },
     example: { name: '举例', icon: '📋', label: '📋 举例', tag: '📋 举例', placeholder: '想要什么样的例子？直接说' },
-    talk: { name: '我有话说', icon: '💬', label: '💬 我有话说', tag: '💬 我有话说', placeholder: '说说你的理解，我会给你反馈' }
+    talk: { name: '我有话说', icon: '💬', label: '💬 我有话说', tag: '💬 我有话说', placeholder: '说说你的理解，我会给你反馈' },
+    visualize: { name: '画个图', icon: '🖼️', label: '🖼️ 画个图', tag: '🖼️ 画个图', placeholder: '想怎么改这张图？直接说' }
   };
 
   var FALLBACK_CHIPS = {
     explain: ['这是什么意思？', '举个例子', '有什么应用场景？'],
     example: ['换个场景再讲一次', '让我试着复述这个案例', '这个概念有什么反例？'],
-    talk: ['帮我总结我目前的理解水平', '我再补充一点', '再出一个检验我的问题']
+    talk: ['帮我总结我目前的理解水平', '我再补充一点', '再出一个检验我的问题'],
+    visualize: ['换个角度再画一张', '把关键部位标出来', '画一张对比图']
   };
 
   var CompanionCore = {
@@ -113,7 +116,7 @@
      * - 📋/💬 会话带落盘时打的 start_key；旧会话没有则按 selected_text 回退，
      *   再不济各自成条（start_key 为空且无划词的全局会话 → 'session::{file}'）
      *
-     * @param {{explanations:[], caseSessions:[], talkSessions:[]}} lists
+     * @param {{explanations:[], caseSessions:[], talkSessions:[], visualizeSessions:[]}} lists
      * @returns {Array} 记录项 {sortKey, primary, title, chapter, rounds, modes, global, record}
      *   record 直接喂给 AICompanionModal 的 opts.record 续聊
      */
@@ -123,7 +126,7 @@
       var order = [];
       function groupOf(key, init) {
         if (!Object.prototype.hasOwnProperty.call(groups, key)) {
-          groups[key] = Object.assign({ key: key, explain: null, example: null, talk: null }, init);
+          groups[key] = Object.assign({ key: key, explain: null, example: null, talk: null, visualize: null }, init);
           order.push(key);
         }
         return groups[key];
@@ -135,7 +138,7 @@
           chapterFile: conv.chapter
         }).explain = conv;
       });
-      [['example', lists.caseSessions || []], ['talk', lists.talkSessions || []]].forEach(function(pair) {
+      [['example', lists.caseSessions || []], ['talk', lists.talkSessions || []], ['visualize', lists.visualizeSessions || []]].forEach(function(pair) {
         pair[1].forEach(function(s) {
           var key = s.start_key
             || (s.selected_text ? chapterStem(s.chapter_file || '') + '::' + s.selected_text
@@ -153,14 +156,16 @@
         var g = groups[key];
         var rounds = (g.explain ? g.explain.rounds || 0 : 0)
           + CompanionCore.userTurns(g.example)
-          + CompanionCore.userTurns(g.talk);
+          + CompanionCore.userTurns(g.talk)
+          + CompanionCore.userTurns(g.visualize);
         if (rounds === 0) return;
 
         // 主模式 = 最早起头的那部分；modes 摘要给「这次聊了哪些模式」
         var parts = [
           g.explain ? { mode: 'explain', at: g.explain.created_at, n: g.explain.rounds || 0 } : null,
           g.example ? { mode: 'example', at: g.example.started_at, n: CompanionCore.userTurns(g.example) } : null,
-          g.talk ? { mode: 'talk', at: g.talk.started_at, n: CompanionCore.userTurns(g.talk) } : null
+          g.talk ? { mode: 'talk', at: g.talk.started_at, n: CompanionCore.userTurns(g.talk) } : null,
+          g.visualize ? { mode: 'visualize', at: g.visualize.started_at, n: CompanionCore.userTurns(g.visualize) } : null
         ].filter(Boolean).sort(function(a, b) {
           return String(a.at || '').localeCompare(String(b.at || ''));
         });
@@ -168,7 +173,8 @@
         var stamps = [
           g.explain && (g.explain.last_ts || g.explain.created_at),
           g.example && g.example.ended_at,
-          g.talk && g.talk.ended_at
+          g.talk && g.talk.ended_at,
+          g.visualize && g.visualize.ended_at
         ].filter(Boolean).sort();
 
         items.push({
@@ -188,7 +194,8 @@
             chapter_file: g.chapterFile,
             explain: g.explain,
             example: g.example,
-            talk: g.talk
+            talk: g.talk,
+            visualize: g.visualize
           }
         });
       });
@@ -255,6 +262,7 @@
       this._lastSuggested = null;
       this._case = null;  // {sessionId, turns, startedAt, [overwriteFile, resumedTurnCount]}
       this._talk = null;  // 同上
+      this._visualize = null;  // 同上
       this._mode = this.initialMode;
       this._busy = false;
       this._saved = false;
@@ -291,7 +299,7 @@
         }
         parts.push({ startAt: conv.created_at || '', turns: turns });
       }
-      for (const pair of [['example', '_case'], ['talk', '_talk']]) {
+      for (const pair of [['example', '_case'], ['talk', '_talk'], ['visualize', '_visualize']]) {
         const mode = pair[0];
         const s = record[mode];
         if (!s) continue;
@@ -330,12 +338,12 @@
         subtitle: this._resumed
           ? `已恢复历史会话${this.selectedText ? ' · ' + esc : ''} · 可继续说`
           : this.selectedText
-            ? `概念: ${esc} · 三种模式可随时切换`
-            : '自由发言（未划词）· 三种模式可随时切换',
+            ? `概念: ${esc} · 四种模式可随时切换`
+            : '自由发言（未划词）· 四种模式可随时切换',
         chipsHtml,
         placeholder: this._resumed
           ? (this._mode === 'explain' ? '接着追问…' : '接着说你的理解…')
-          : '选一种模式开始：💡 解释 / 📋 举例 / 💬 我有话说',
+          : '选一种模式开始：💡 解释 / 📋 举例 / 💬 我有话说 / 🖼️ 画个图',
         tutorAvatar: '✨'
       });
       this._shell.render();
@@ -356,11 +364,13 @@
         return;
       }
 
-      // 首轮种子：💡/📋 划词直达时自动开讲；💬 永远等学生先说（打开 ≠ 烧 token）
+      // 首轮种子：💡/📋/🖼️ 划词直达时自动开讲；💬 永远等学生先说（打开 ≠ 烧 token）
       if (this.initialMode === 'explain' && this.selectedText) {
         await this._sendExplainTurn(this.selectedText);
       } else if (this.initialMode === 'example' && this.selectedText) {
         await this._sendExampleTurn(null);
+      } else if (this.initialMode === 'visualize' && this.selectedText) {
+        await this._sendVisualizeTurn(null);
       }
     }
 
@@ -374,7 +384,7 @@
 
       const seg = document.createElement('div');
       seg.className = 'companion-mode-seg';
-      seg.innerHTML = ['explain', 'example', 'talk'].map(function(m) {
+      seg.innerHTML = ['explain', 'example', 'talk', 'visualize'].map(function(m) {
         return `<button data-mode="${m}">${MODES[m].label}</button>`;
       }).join('');
       seg.addEventListener('click', (e) => {
@@ -446,6 +456,7 @@
       if (this._busy || !this.opened) return;
       if (this._mode === 'explain') this._sendExplainTurn(text);
       else if (this._mode === 'example') this._sendExampleTurn(text);
+      else if (this._mode === 'visualize') this._sendVisualizeTurn(text);
       else this._sendTalkTurn(text);
     }
 
@@ -608,6 +619,38 @@
       });
     }
 
+    // ---------- 🖼️ 画个图（visualize_chat，session + 流式） ----------
+
+    async _sendVisualizeTurn(userText) {
+      this._busy = true;
+      const concept = this.selectedText || userText;
+      const isFirst = !(this._visualize && this._visualize.sessionId);
+      if (isFirst) {
+        this._visualize = { sessionId: null, turns: [], startedAt: new Date().toISOString() };
+      }
+
+      // 用户可见轮：直达时显示划词概念，追问时显示输入原文
+      const bubbleText = userText || concept;
+      this._appendUserTurn(bubbleText, 'visualize');
+      this._pushTurn('user', 'visualize', bubbleText);
+      this._visualize.turns.push({ role: 'user', content: bubbleText });
+
+      await this._streamingTurn({
+        eventName: 'visualize-event',
+        deltaType: 'visualize_delta',
+        session: this._visualize,
+        // 命令名字面量传入（保持可 grep + 合同测试可扫描）
+        invoke: (args) => window.__TAURI__.core.invoke('visualize_chat', args),
+        invokeArgs: () => ({
+          projectPath: this.projectPath,
+          selectedText: concept,
+          context: JSON.stringify(this._buildContext()),
+          userAnswer: userText || null,
+          sessionId: this._visualize.sessionId
+        })
+      });
+    }
+
     /**
      * 案例/我有话说共用的流式轮：监听 Rust 转发的 delta 事件，首个 delta
      * 到达撤 loading 改流式气泡；最终以权威结果覆盖 delta 累积。
@@ -667,7 +710,7 @@
         this._close();
         return;
       }
-      if (window.confirm('确定结束本次 AI 伴学？举例与我有话说的对话会保存')) {
+      if (window.confirm('确定结束本次 AI 伴学？举例、画图与我有话说的对话会保存')) {
         this._confirmEnd();
       }
     }
@@ -678,6 +721,7 @@
       // 续聊但没有任何新增轮次 → 不动盘（重写只会污染 ended_at 并让历史条目置顶）
       const caseDirty = this._case && this._case.turns.length > (this._case.resumedTurnCount || 0);
       const talkDirty = this._talk && this._talk.turns.length > (this._talk.resumedTurnCount || 0);
+      const visualizeDirty = this._visualize && this._visualize.turns.length > (this._visualize.resumedTurnCount || 0);
 
       if (caseDirty) {
         const ok = await this._persistSession(
@@ -712,6 +756,23 @@
           },
           this._talk.overwriteFile || null);
         if (!ok) failures.push('我有话说对话');
+      }
+      if (visualizeDirty) {
+        const ok = await this._persistSession(
+          (args) => window.__TAURI__.core.invoke('visualize_save_session', args),
+          {
+            version: '1.0',
+            start_key: this.startKey,
+            selected_text: this.selectedText || (this._visualize.turns[0] && this._visualize.turns[0].content) || '',
+            chapter_file: this.chapterFile,
+            session_id: this._visualize.sessionId,
+            turns: this._visualize.turns,
+            started_at: this._visualize.startedAt,
+            ended_at: new Date().toISOString(),
+            end_reason: 'user_ended'
+          },
+          this._visualize.overwriteFile || null);
+        if (!ok) failures.push('画图对话');
       }
 
       if (failures.length > 0) {

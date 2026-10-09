@@ -11,6 +11,12 @@
  * restored as KaTeX HTML. Without katex (Node tests) or on render error,
  * the raw text is kept as-is.
  *
+ * SVG handling (AI 伴学「画个图」): ```svg fences are extracted BEFORE the
+ * generic code-fence rule and restored as LIVE markup — the escape-everything
+ * baseline stays, but the fenced SVG is sanitized on restore: <script>,
+ * on* event-handler attributes (SVG onload is a classic XSS vector), and
+ * <foreignObject> (embeds arbitrary HTML, bypassing the escape) are stripped.
+ *
  * Usage:
  *   markdownToHtml('**bold** and `code`')
  *   // → '<strong>bold</strong> and <code>code</code>'
@@ -60,6 +66,23 @@
   }
 
   /**
+   * Strip active content from an SVG block before it is injected as live
+   * markup: <script> elements, on* event-handler attributes, and
+   * <foreignObject> (which can embed arbitrary HTML and bypass escapeHtml).
+   * @param {string} svg
+   * @returns {string}
+   */
+  function sanitizeSvg(svg) {
+    return String(svg)
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<script[^>]*\/?>/gi, '')
+      .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
+      .replace(/\son\w+\s*=\s*"[^"]*"/gi, '')
+      .replace(/\son\w+\s*=\s*'[^']*'/gi, '')
+      .replace(/\son\w+\s*=\s*[^\s>]+/gi, '');
+  }
+
+  /**
    * Convert lightweight markdown to HTML.
    * Block-level elements are processed first, then inline formatting.
    *
@@ -69,11 +92,17 @@
   function markdownToHtml(content) {
     if (!content) return '';
 
-    // Step 0: pull fenced code blocks out of the raw text (their $ must not
-    // become math), then extract math into placeholders so the markdown
-    // transforms below cannot touch the LaTeX source.
+    // Step 0: pull ```svg fences out first (they must NOT become code blocks),
+    // then other fenced code blocks (their $ must not become math), then math
+    // into placeholders so the markdown transforms cannot touch the sources.
+    const svgBlocks = [];
+    let text = String(content).replace(/```svg\b[ \t]*\n?([\s\S]*?)```/gi, function (_, svg) {
+      svgBlocks.push(svg.trim());
+      return '\n%%CHATSVG_' + (svgBlocks.length - 1) + '%%\n';
+    });
+
     const codeBlocks = [];
-    let text = String(content).replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
+    text = text.replace(/```(\w*)\n?([\s\S]*?)```/g, function (_, lang, code) {
       codeBlocks.push(code);
       return '\n%%CHATCODE_' + (codeBlocks.length - 1) + '%%\n';
     });
@@ -185,6 +214,9 @@
     });
     html = html.replace(/%%CHATCODE_(\d+)%%/g, function (_, i) {
       return '<pre><code>' + escapeHtml(String(codeBlocks[+i] || '').trim()) + '</code></pre>';
+    });
+    html = html.replace(/%%CHATSVG_(\d+)%%/g, function (_, i) {
+      return sanitizeSvg(svgBlocks[+i] || '');
     });
     html = html.replace(/%%CHATMATH_(\d+)%%/g, function (_, i) {
       return renderMathBlock(mathBlocks[+i]);

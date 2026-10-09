@@ -3431,6 +3431,145 @@ pub async fn own_voice_chat(
     Ok(result)
 }
 
+/// Visualize「画个图」via Agent SDK (agent-bridge "visualize" stage)。
+/// 与 case_study_chat 同构：spawn bridge → 逐行转发 delta → 解析结果行
+/// （SocraticChatResponse 契约复用；done 恒为 false，用户手动关闭面板）。
+/// 差异：bridge 侧挂 wikimedia 受限 bash，agent 先检索真图未命中再手绘 SVG。
+#[tauri::command]
+pub async fn visualize_chat(
+    project_path: String,
+    selected_text: String,
+    context: Option<String>,
+    user_answer: Option<String>,
+    app_handle: tauri::AppHandle,
+    session_id: Option<String>,
+) -> Result<crate::SocraticChatResponse, String> {
+    log::info!(
+        "visualize_chat START: project={}, selected={:?}, first_turn={}, session_id={}",
+        project_path,
+        selected_text,
+        user_answer.is_none(),
+        session_id.as_deref().unwrap_or("(none)")
+    );
+
+    let config = crate::get_config(app_handle.clone()).map_err(|e| e.to_string())?;
+
+    // Ensure the bundled typora-course-visualize skill is available in the
+    // project (idempotent; also refreshes stale copies in existing projects).
+    let _ = copy_bundled_skills_to_project(&project_path);
+
+    let bridge_path = get_agent_bridge_path()?;
+
+    let payload = serde_json::json!({
+        "config": {
+            "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+            "ai_base_url": config.ai_base_url,
+            "api_key": config.api_key,
+            "model": config.model,
+        },
+        "args": {
+            "project_path": project_path,
+            "selected_text": selected_text,
+            "context": context,
+            "user_answer": user_answer,
+            "session_id": session_id,
+        }
+    });
+
+    let mut cmd = std::process::Command::new("node");
+    cmd.arg(&bridge_path)
+        .arg("visualize")
+        .arg(payload.to_string())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    apply_agent_sdk_entry(&mut cmd, &bridge_path);
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    // 流式输出：与 case_study_chat 相同的 spawn + 逐行读 stdout 套路，
+    // delta 事件名 visualize_delta → 转发为 Tauri 事件 visualize-event。
+    let mut child = cmd.spawn().map_err(|e| {
+        log::error!("visualize_chat: spawn failed: {}", e);
+        format!("Failed to spawn agent-bridge: {}", e)
+    })?;
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "Failed to capture bridge stdout".to_string())?;
+
+    use std::io::{BufRead, BufReader};
+    let reader = BufReader::new(stdout);
+    let mut result_line: Option<String> = None;
+    for line in reader.lines() {
+        let Ok(line) = line else { break };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        match serde_json::from_str::<serde_json::Value>(trimmed) {
+            Ok(event) if event.get("type").and_then(|v| v.as_str()) == Some("visualize_delta") => {
+                if let Err(e) = app_handle.emit("visualize-event", &event) {
+                    log::warn!("visualize-event emit failed: {}", e);
+                }
+            }
+            _ => {
+                // 非 delta 行：候选结果行（progress_log 事件行缺 content 字段，
+                // 最终反序列化时会跳过）
+                result_line = Some(trimmed.to_string());
+            }
+        }
+    }
+
+    let status = child.wait().map_err(|e| e.to_string())?;
+    if !status.success() {
+        let stderr = child
+            .stderr
+            .take()
+            .map(|mut s| {
+                let mut buf = String::new();
+                use std::io::Read;
+                let _ = s.read_to_string(&mut buf);
+                buf
+            })
+            .unwrap_or_default();
+        log::error!(
+            "visualize_chat: agent failed: stderr={}",
+            stderr
+        );
+        return Err(format!("Agent visualize failed: {}", stderr));
+    }
+
+    let raw = result_line.ok_or_else(|| {
+        log::error!("visualize_chat: no result line from bridge");
+        "No result from visualize agent".to_string()
+    })?;
+
+    let result: crate::SocraticChatResponse = serde_json::from_str(&raw).map_err(|e| {
+        log::error!(
+            "visualize_chat: parse failed: {} — raw: {}",
+            e,
+            raw
+        );
+        format!(
+            "Failed to parse visualize response. Raw: {}",
+            &raw[..std::cmp::min(200, raw.len())]
+        )
+    })?;
+
+    log::info!(
+        "visualize_chat SUCCESS: content_len={}",
+        result.content.len()
+    );
+    Ok(result)
+}
+
 /// PB1 Round 2: Generate review cards via agent-bridge "review-gen" stage.
 /// Agent reads the chapter .md and generates per-concept quiz questions + key points.
 /// Rust parses the JSON response and returns it for writing to review-cards.json.
