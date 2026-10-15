@@ -137,6 +137,24 @@ export const AuthStorage = {
   create(_p) { return { _mock: true }; }
 };
 
+// Mirrors the real SDK surface the bridge uses: inMemory returns a settings
+// object without touching disk; getHttpIdleTimeoutMs mirrors the real default.
+export const SettingsManager = {
+  inMemory(settings = {}) {
+    return {
+      _kind: 'inMemory',
+      _settings: settings,
+      getHttpIdleTimeoutMs() { return settings.httpIdleTimeoutMs ?? 300000; }
+    };
+  },
+  create(_cwd, _agentDir) {
+    return {
+      _kind: 'file',
+      getHttpIdleTimeoutMs() { return 300000; }
+    };
+  }
+};
+
 export const ModelRegistry = {
   create(_auth, _modelsPath) {
     return {
@@ -166,7 +184,12 @@ export const SessionManager = {
   }
 };
 
+/** Recorded createAgentSession options (per call) for test assertions. */
+const _sessionOpts = [];
+export function __getSessionOpts() { return _sessionOpts; }
+
 export async function createAgentSession(opts) {
+  _sessionOpts.push(opts);
   const sessionManager = opts.sessionManager || SessionManager.create(opts.cwd);
   const subscribers = [];
   const messages = [];
@@ -185,6 +208,12 @@ export async function createAgentSession(opts) {
       const behavior = _behavior || defaultBehavior;
       const result = await behavior({ prompt: text, cwd: opts.cwd, tools: opts.tools, session });
 
+      // bespoke event injection (e.g. auto_retry_start for resilience tests)
+      for (const ev of result.events || []) {
+        for (const fn of subscribers) {
+          fn(ev);
+        }
+      }
       for (const tc of result.toolCalls || []) {
         for (const fn of subscribers) {
           fn({ type: 'tool_execution_start', toolName: tc.toolName, args: tc.args });

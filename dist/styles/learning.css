@@ -3917,3 +3917,29 @@ body.learning-mode .toolbar {
   background: var(--color-accent-light);
   color: var(--color-text-secondary);
 }
+
+/* 故障气泡（断流容灾 2026-10-14）：分级文案 + 动作按钮 */
+.companion-error-bubble {
+  border-left: 3px solid var(--color-warning, #d97706);
+}
+.companion-error-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+}
+.companion-error-btn {
+  padding: 3px 12px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border, #d0d0d0);
+  background: var(--color-bg-secondary, transparent);
+  color: var(--color-text-primary, inherit);
+  font-size: 12px;
+  cursor: pointer;
+}
+.companion-error-btn:hover {
+  background: var(--color-accent-light, rgba(0,0,0,0.05));
+}
+.companion-error-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}

@@ -10,6 +10,65 @@
 mod llm_body;
 
 use llm_body::openai_chat_body;
+use llm_body::versioned_url;
+
+// ============================================
+// versioned_url：base_url 版本段归一化（2026-10-15 MiniMax /v1/v1 404 事故）
+// 与 agent-bridge.mjs pingProvider / _writeTempModelsJson 同语义：
+// base 已带 /v\d+ 版本段 → 直接拼 path；否则补 /v1。
+// ============================================
+
+#[test]
+fn base_with_v1_suffix_not_duplicated() {
+    // 事故现场：MiniMax 官方 base_url 自带 /v1，旧代码再拼一次 → /v1/v1 → 404
+    assert_eq!(
+        versioned_url("https://api.minimaxi.com/v1", "chat/completions"),
+        "https://api.minimaxi.com/v1/chat/completions"
+    );
+}
+
+#[test]
+fn base_without_version_segment_gets_v1() {
+    assert_eq!(
+        versioned_url("https://api.deepseek.com", "chat/completions"),
+        "https://api.deepseek.com/v1/chat/completions"
+    );
+    assert_eq!(
+        versioned_url("https://api.anthropic.com", "messages"),
+        "https://api.anthropic.com/v1/messages"
+    );
+}
+
+#[test]
+fn trailing_slashes_trimmed() {
+    assert_eq!(
+        versioned_url("https://api.minimaxi.com/v1/", "chat/completions"),
+        "https://api.minimaxi.com/v1/chat/completions"
+    );
+    assert_eq!(
+        versioned_url("https://api.deepseek.com/", "chat/completions"),
+        "https://api.deepseek.com/v1/chat/completions"
+    );
+}
+
+#[test]
+fn other_version_segments_preserved() {
+    // /v2 等版本段同样视为已带版本，不被改写为 /v1
+    assert_eq!(
+        versioned_url("https://proxy.example.com/v2", "messages"),
+        "https://proxy.example.com/v2/messages"
+    );
+}
+
+#[test]
+fn version_segment_must_be_at_tail() {
+    // /v1 出现在中间（非尾部）不算已带版本段，照常补 /v1
+    assert_eq!(
+        versioned_url("https://proxy.example.com/v1/beta", "messages"),
+        "https://proxy.example.com/v1/beta/v1/messages"
+    );
+}
+
 
 #[test]
 fn deepseek_endpoint_disables_thinking() {

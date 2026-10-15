@@ -85,6 +85,29 @@
     visualize: ['换个角度再画一张', '把关键部位标出来', '画一张对比图']
   };
 
+  // 错误分级（断流容灾 2026-10-14，与 agent-bridge.mjs classifyError 同规则）：
+  // STALL=断流/超时（可重试）；NETWORK=连接类（可重试）；AUTH_FAILED=key 问题
+  // （重试无意义，只引导去设置）；UNKNOWN=兜底原文。
+  var CompanionErrors = {
+    classify: function(msg) {
+      var m = String(msg || '');
+      if (/无数据|断流|响应中断|stream.*(stall|idle)/i.test(m)) return 'STALL';
+      if (/\b(401|403)\b|unauthorized|forbidden|invalid api key|incorrect api key/i.test(m)) return 'AUTH_FAILED';
+      if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed|getaddrinfo|timed? ?out/i.test(m)) return 'NETWORK';
+      return 'UNKNOWN';
+    },
+    /** 分级文案；UNKNOWN 返回 null（走调用方默认文案） */
+    gradedText: function(code) {
+      switch (code) {
+        case 'STALL': return '模型无响应（连接中断，自动重试未能恢复）。可能是当前模型服务不稳定——可以重试，或去设置里切换到其他模型配置。';
+        case 'NETWORK': return '无法连接模型服务器。请检查网络连接，或设置里的 base_url 是否正确。';
+        case 'AUTH_FAILED': return 'API Key 无效或已过期。请打开设置检查当前模型配置。';
+        default: return null;
+      }
+    },
+    retryable: function(code) { return code === 'STALL' || code === 'NETWORK'; }
+  };
+
   var CompanionCore = {
     MODES: MODES,
     FALLBACK_CHIPS: FALLBACK_CHIPS,
@@ -482,9 +505,21 @@
       return ctx;
     }
 
-    _showError(prefix, err) {
-      const msg = prefix + ((err && err.message) || (typeof err === 'string' ? err : '') || '未知错误') + '。请稍后重试。';
-      this._shell.appendTutorBubble(msg);
+    _showError(prefix, err, opts) {
+      const raw = (err && err.message) || (typeof err === 'string' ? err : '') || '未知错误';
+      const code = CompanionErrors.classify(raw);
+      const graded = CompanionErrors.gradedText(code);
+      if (!graded || !this._shell.appendErrorBubble) {
+        this._shell.appendTutorBubble(prefix + raw + '。请稍后重试。');
+        return;
+      }
+      const actions = {
+        onOpenSettings: () => {
+          if (window.TyporaNext && window.TyporaNext.openSettings) window.TyporaNext.openSettings();
+        }
+      };
+      if (CompanionErrors.retryable(code) && opts && opts.onRetry) actions.onRetry = opts.onRetry;
+      this._shell.appendErrorBubble(graded, actions);
     }
 
     // ---------- 💡 解释（explain_selection + cue 同步） ----------
@@ -665,7 +700,16 @@
           try {
             unlisten = await window.__TAURI__.event.listen(spec.eventName, (ev) => {
               const payload = ev && ev.payload;
-              if (!payload || payload.type !== spec.deltaType) return;
+              if (!payload) return;
+              // 状态透出（断流容灾 2026-10-14）：连接中/自动重试等状态更新到
+              // loading 气泡，用户不再对着「思考中...」干等
+              if (payload.type === 'status') {
+                const msg = payload.data && payload.data.message;
+                const label = msg && loadingEl.querySelector && loadingEl.querySelector('.socratic-bubble-loading');
+                if (label && loadingEl.isConnected !== false) label.textContent = msg;
+                return;
+              }
+              if (payload.type !== spec.deltaType) return;
               const delta = payload.data && payload.data.delta;
               if (!delta) return;
               if (!stream) {
@@ -696,7 +740,14 @@
         if (unlisten) unlisten();
         if (stream) stream.remove();
         else loadingEl.remove();
-        this._showError('暂时无法回复：', e);
+        // 重试不重发用户气泡：invokeArgs 闭包会带上最新 sessionId 直接重跑这一轮
+        this._showError('暂时无法回复：', e, {
+          onRetry: () => {
+            this._busy = true;
+            this._updateInputUi();
+            this._streamingTurn(spec);
+          }
+        });
       } finally {
         this._busy = false;
         this._updateInputUi();
@@ -808,6 +859,6 @@
   window.AICompanionModal = AICompanionModal;
   window.CompanionCore = CompanionCore;
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { AICompanionModal, CompanionCore };
+    module.exports = { AICompanionModal, CompanionCore, CompanionErrors };
   }
 })();

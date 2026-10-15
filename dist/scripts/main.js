@@ -119,7 +119,6 @@ window.agentBridge = {
     settingsCancel: document.getElementById('settingsCancel'),
     settingsSave: document.getElementById('settingsSave'),
     settingsTest: document.getElementById('settingsTest'),
-    testResult: document.getElementById('testResult'),
     restartOnboardingBtn: document.getElementById('restartOnboardingBtn'),
     recentFilesSection: document.getElementById('recentFilesSection'),
     recentFilesList: document.getElementById('recentFilesList'),
@@ -1413,6 +1412,19 @@ window.agentBridge = {
   // ============================================
   // TOC (Table of Contents)
   // ============================================
+  /**
+   * Visible text of a heading for TOC/minimap. A heading may contain rendered
+   * KaTeX, whose output carries three text layers (MathML + raw TeX
+   * annotation + HTML fallback); a plain textContent read concatenates all
+   * three into the TOC entry. Clone and drop the hidden MathML layer so only
+   * the rendered glyphs remain. Read-only: the heading itself is untouched.
+   */
+  function getHeadingVisibleText(heading) {
+    const clone = heading.cloneNode(true);
+    clone.querySelectorAll('.katex-mathml').forEach(m => m.remove());
+    return clone.textContent.trim();
+  }
+
   function buildTOC() {
     const headings = elements.markdownBody.querySelectorAll('h1, h2, h3, h4, h5, h6');
     state.headings = [];
@@ -1425,7 +1437,7 @@ window.agentBridge = {
     let tocHTML = '';
     headings.forEach((heading, index) => {
       const level = parseInt(heading.tagName.charAt(1));
-      const text = heading.textContent.trim();
+      const text = getHeadingVisibleText(heading);
       const id = `heading-${index}`;
 
       // Add ID to heading for anchor linking
@@ -3103,6 +3115,46 @@ window.agentBridge = {
   // ============================================
   // GFM Alerts Styling
   // ============================================
+  /**
+   * Strip a callout/alert marker (e.g. `[!question]-`) from the first text
+   * node under `el`, leaving already-rendered inline elements (KaTeX spans,
+   * marks) untouched. A `textContent = ...` rewrite on the paragraph would
+   * flatten KaTeX output into its three internal text layers (MathML + raw
+   * TeX annotation + HTML fallback), showing the raw source mid-text.
+   */
+  function stripMarkerFromFirstTextNode(el, marker) {
+    for (const child of el.childNodes) {
+      if (child.nodeType === 3) {
+        const idx = child.textContent.indexOf(marker);
+        if (idx === -1) continue;
+        const before = child.textContent.slice(0, idx);
+        const after = child.textContent.slice(idx + marker.length);
+        child.textContent = /^\s*$/.test(before) ? after.replace(/^\s+/, '') : before + after;
+        return true;
+      }
+      if (child.childNodes && stripMarkerFromFirstTextNode(child, marker)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Strip literal `**x**` / `*x*` emphasis markers from text nodes under `el`
+   * (callout-format-spec: titles use plain text). Skips .katex subtrees —
+   * `*` is legitimate content inside rendered math.
+   */
+  function stripLiteralEmphasisMarkers(el) {
+    for (const node of el.childNodes) {
+      if (node.nodeType === 3) {
+        const stripped = node.textContent
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/\*(.+?)\*/g, '$1');
+        if (stripped !== node.textContent) node.textContent = stripped;
+      } else if (node.nodeType === 1 && !(node.classList && node.classList.contains('katex'))) {
+        stripLiteralEmphasisMarkers(node);
+      }
+    }
+  }
+
   function initGFMAlerts(container = elements.markdownBody) {
     const blockquotes = container.querySelectorAll('blockquote');
 
@@ -3120,8 +3172,10 @@ window.agentBridge = {
         // Add class to blockquote
         bq.classList.add('gfm-alert', `gfm-alert-${alertType.toLowerCase()}`);
 
-        // Remove the [!TYPE] marker from the paragraph
-        firstP.textContent = firstP.textContent.replace(alertMatch[0], '').trim();
+        // Remove the [!TYPE] marker from the first text node only — the
+        // paragraph may already contain rendered KaTeX (math renders before
+        // alerts); a textContent rewrite would flatten it into raw TeX.
+        stripMarkerFromFirstTextNode(firstP, alertMatch[0]);
 
         // Add icon prefix
         const iconSpan = document.createElement('span');
@@ -3258,19 +3312,34 @@ window.agentBridge = {
         stripMarks(bq);
       }
 
-      // Remove the [!TYPE] marker
-      firstP.textContent = firstP.textContent.replace(calloutMatch[0], '').trim();
+      // Remove the [!TYPE] marker from the first text node only — the
+      // paragraph may already contain rendered KaTeX (math renders before
+      // callouts); a textContent rewrite would flatten it into raw TeX
+      // (MathML + annotation + HTML fallback all become visible text).
+      stripMarkerFromFirstTextNode(firstP, calloutMatch[0]);
 
       // Add icon and title
       const calloutMeta = getCalloutMeta(calloutType);
-      let titleText = firstP.textContent.trim() || calloutMeta.title;
-      // Strip inline markdown (e.g. **text**) from callout titles
-      titleText = titleText.replace(/\*\*(.+?)\*\*/g, '$1').replace(/\*(.+?)\*/g, '$1');
 
       // Rebuild the callout header
       const header = document.createElement('div');
       header.className = 'obsidian-callout-title';
-      header.innerHTML = `<span class="obsidian-callout-icon">${calloutMeta.icon}</span><span class="obsidian-callout-title-text">${escapeHtml(titleText)}</span>`;
+      const iconSpan = document.createElement('span');
+      iconSpan.className = 'obsidian-callout-icon';
+      iconSpan.textContent = calloutMeta.icon;
+      const titleSpan = document.createElement('span');
+      titleSpan.className = 'obsidian-callout-title-text';
+      header.appendChild(iconSpan);
+      header.appendChild(titleSpan);
+
+      if (firstP.textContent.trim()) {
+        // Preserve inline elements (KaTeX, marks, links) by MOVING the
+        // remaining nodes into the title instead of flattening to text.
+        while (firstP.firstChild) titleSpan.appendChild(firstP.firstChild);
+        stripLiteralEmphasisMarkers(titleSpan);
+      } else {
+        titleSpan.textContent = calloutMeta.title;
+      }
 
       // If firstP had content beyond the title, preserve it as body
       firstP.remove();
@@ -3813,7 +3882,8 @@ window.agentBridge = {
     idle: 'Agent 未检测',
     checking: '检测中…',
     ready: 'Agent 就绪',
-    missing: 'Agent 未安装'
+    missing: 'Agent 未安装',
+    unreachable: '服务不可达'
   };
 
   // "不再提示"的持久化标记（localStorage），SDK 检测成功后清除
@@ -3827,13 +3897,15 @@ window.agentBridge = {
     const text = elements.agentStatusText;
     if (!chip || !text) return;
 
-    chip.classList.remove('status-checking', 'status-ready', 'status-missing');
+    chip.classList.remove('status-checking', 'status-ready', 'status-missing', 'status-unreachable');
     chip.classList.add(`status-${status}`);
     text.textContent = AGENT_STATUS_LABELS[status] || status;
 
     const clickHint = '（点击重新检测）';
     if (status === 'missing') {
       chip.title = errorMessage ? `${errorMessage} ${clickHint}` : `未检测到 Pi coding agent ${clickHint}`;
+    } else if (status === 'unreachable') {
+      chip.title = `模型服务不可达：${errorMessage || '连接失败'} ${clickHint}`;
     } else if (status === 'ready') {
       chip.title = `Pi coding agent 已就绪 ${clickHint}`;
     } else if (status === 'idle') {
@@ -3996,6 +4068,12 @@ window.agentBridge = {
       console.log('[AgentStatus] check result:', result);
 
       if (result && result.available) {
+        // 检测诚实化（断流容灾 2026-10-14）：SDK 在 ≠ 服务可用。
+        // ping 失败 → 「服务不可达」红灯 + 具体原因，不弹「未安装」引导
+        if (result.ping && !result.ping.ok) {
+          updateAgentStatusChip('unreachable', result.ping.message || '连接失败');
+          return;
+        }
         updateAgentStatusChip('ready');
         hideAgentMissingToast();
         // SDK 已就绪：清除"不再提示"标记，将来真正缺失时能再次引导
@@ -6861,7 +6939,13 @@ window.agentBridge = {
       applyCustomCursor(config.custom_cursor || '');
       showToast('设置已保存');
       closeSettings();
+      // 保存后重检状态灯：新激活配置的连通性应立即反映到芯片上，
+      // 否则用户切了卡，灯还是旧卡的检测结果（2026-10-15「到底谁在用」事故）。
+      // check_agent_sdk 为 check-only（不触发 npm 自动安装），此处调用安全。
+      checkAgentSdk();
     },
+    // 设置面板「激活」落盘后调用：让状态灯立刻反映新激活卡
+    recheckAgentStatus: checkAgentSdk,
     restartOnboarding() {
       if (onboardingManager) {
         onboardingManager.restart();

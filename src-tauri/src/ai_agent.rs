@@ -609,7 +609,7 @@ pub async fn plan_course_llm(
     // incident, 2026-08-04 acceptance)
     let (response, is_anthropic) = match provider {
         crate::AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": 8192,
@@ -624,7 +624,7 @@ pub async fn plan_course_llm(
             (resp, true)
         }
         crate::AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "chat/completions");
             let req = crate::llm_body::openai_chat_body(&model, 8192, &prompt, &base_url);
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")
@@ -701,7 +701,7 @@ fn llm_complete_text(
 
     let (response, is_anthropic) = match provider {
         crate::AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": max_tokens,
@@ -716,7 +716,7 @@ fn llm_complete_text(
             (resp, true)
         }
         crate::AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "chat/completions");
             let req = crate::llm_body::openai_chat_body(&model, max_tokens, prompt, &base_url);
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")
@@ -988,7 +988,7 @@ pub async fn generate_roadmap(
     // ureq 单次调用（mirrors plan_course_llm；2048 足够 3 张卡片）
     let (response, is_anthropic) = match provider {
         crate::AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": 2048,
@@ -1003,7 +1003,7 @@ pub async fn generate_roadmap(
             (resp, true)
         }
         crate::AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "chat/completions");
             let req = crate::llm_body::openai_chat_body(&model, 2048, &prompt, &base_url);
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")
@@ -1481,8 +1481,21 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         }
     };
 
+    // 检测诚实化（断流容灾 2026-10-14）：带上真实配置，bridge 会用它发一个
+    // 真实最小请求验证连通性；读不到配置则退化为仅 SDK 存在性检查。
+    let config_payload = crate::get_config(app_handle.clone())
+        .map(|c| {
+            serde_json::json!({
+                "ai_provider": c.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
+                "ai_base_url": c.ai_base_url,
+                "api_key": c.api_key,
+                "model": c.model,
+            })
+        })
+        .unwrap_or_else(|_| serde_json::json!({}));
+
     let payload = serde_json::json!({
-        "config": {},
+        "config": config_payload,
         "args": {}
     });
 
@@ -2514,7 +2527,7 @@ pub async fn explain_selection(
     // Call LLM via ureq (mirrors fix_mermaid pattern)
     let (response, is_anthropic) = match provider {
         crate::AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": 2048,
@@ -2529,7 +2542,7 @@ pub async fn explain_selection(
             (resp, true)
         }
         crate::AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = crate::llm_body::versioned_url(&base_url, "chat/completions");
             let req = crate::llm_body::openai_chat_body(&model, 2048, &prompt, &base_url);
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")
@@ -3222,6 +3235,22 @@ pub async fn case_study_chat(
         .take()
         .ok_or_else(|| "Failed to capture bridge stdout".to_string())?;
 
+    // stderr 并发排空（2026-10-15 管道死锁事故）：只排 stdout 会让 bridge 的
+    // stderr 日志洪峰填满管道缓冲（~64KB）——Node 在 Windows 上对管道同步写阻塞，
+    // 整个事件循环冻结（看门狗随之饿死），双方互锁永不退出。stderr 读挪到后台线程。
+    let stderr_tail = {
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture bridge stderr".to_string())?;
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut buf);
+            buf
+        })
+    };
+
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(stdout);
     let mut result_line: Option<String> = None;
@@ -3232,7 +3261,11 @@ pub async fn case_study_chat(
             continue;
         }
         match serde_json::from_str::<serde_json::Value>(trimmed) {
-            Ok(event) if event.get("type").and_then(|v| v.as_str()) == Some("case_study_delta") => {
+            // status 行（连接中/自动重试等状态透出）与 delta 一样实时转发
+            Ok(event) if matches!(
+                event.get("type").and_then(|v| v.as_str()),
+                Some("case_study_delta") | Some("status")
+            ) => {
                 if let Err(e) = app_handle.emit("case-study-event", &event) {
                     log::warn!("case-study-event emit failed: {}", e);
                 }
@@ -3246,17 +3279,8 @@ pub async fn case_study_chat(
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = stderr_tail.join().unwrap_or_default();
     if !status.success() {
-        let stderr = child
-            .stderr
-            .take()
-            .map(|mut s| {
-                let mut buf = String::new();
-                use std::io::Read;
-                let _ = s.read_to_string(&mut buf);
-                buf
-            })
-            .unwrap_or_default();
         log::error!(
             "case_study_chat: agent failed: stderr={}",
             stderr
@@ -3365,6 +3389,20 @@ pub async fn own_voice_chat(
         .take()
         .ok_or_else(|| "Failed to capture bridge stdout".to_string())?;
 
+    // stderr 并发排空（2026-10-15 管道死锁事故，详见 case_study_chat 注释）
+    let stderr_tail = {
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture bridge stderr".to_string())?;
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut buf);
+            buf
+        })
+    };
+
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(stdout);
     let mut result_line: Option<String> = None;
@@ -3375,7 +3413,11 @@ pub async fn own_voice_chat(
             continue;
         }
         match serde_json::from_str::<serde_json::Value>(trimmed) {
-            Ok(event) if event.get("type").and_then(|v| v.as_str()) == Some("own_voice_delta") => {
+            // status 行（连接中/自动重试等状态透出）与 delta 一样实时转发
+            Ok(event) if matches!(
+                event.get("type").and_then(|v| v.as_str()),
+                Some("own_voice_delta") | Some("status")
+            ) => {
                 if let Err(e) = app_handle.emit("own-voice-event", &event) {
                     log::warn!("own-voice-event emit failed: {}", e);
                 }
@@ -3389,17 +3431,8 @@ pub async fn own_voice_chat(
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = stderr_tail.join().unwrap_or_default();
     if !status.success() {
-        let stderr = child
-            .stderr
-            .take()
-            .map(|mut s| {
-                let mut buf = String::new();
-                use std::io::Read;
-                let _ = s.read_to_string(&mut buf);
-                buf
-            })
-            .unwrap_or_default();
         log::error!(
             "own_voice_chat: agent failed: stderr={}",
             stderr
@@ -3504,6 +3537,20 @@ pub async fn visualize_chat(
         .take()
         .ok_or_else(|| "Failed to capture bridge stdout".to_string())?;
 
+    // stderr 并发排空（2026-10-15 管道死锁事故，详见 case_study_chat 注释）
+    let stderr_tail = {
+        let mut stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "Failed to capture bridge stderr".to_string())?;
+        std::thread::spawn(move || {
+            let mut buf = String::new();
+            use std::io::Read;
+            let _ = stderr.read_to_string(&mut buf);
+            buf
+        })
+    };
+
     use std::io::{BufRead, BufReader};
     let reader = BufReader::new(stdout);
     let mut result_line: Option<String> = None;
@@ -3514,7 +3561,11 @@ pub async fn visualize_chat(
             continue;
         }
         match serde_json::from_str::<serde_json::Value>(trimmed) {
-            Ok(event) if event.get("type").and_then(|v| v.as_str()) == Some("visualize_delta") => {
+            // status 行（连接中/自动重试等状态透出）与 delta 一样实时转发
+            Ok(event) if matches!(
+                event.get("type").and_then(|v| v.as_str()),
+                Some("visualize_delta") | Some("status")
+            ) => {
                 if let Err(e) = app_handle.emit("visualize-event", &event) {
                     log::warn!("visualize-event emit failed: {}", e);
                 }
@@ -3528,17 +3579,8 @@ pub async fn visualize_chat(
     }
 
     let status = child.wait().map_err(|e| e.to_string())?;
+    let stderr = stderr_tail.join().unwrap_or_default();
     if !status.success() {
-        let stderr = child
-            .stderr
-            .take()
-            .map(|mut s| {
-                let mut buf = String::new();
-                use std::io::Read;
-                let _ = s.read_to_string(&mut buf);
-                buf
-            })
-            .unwrap_or_default();
         log::error!(
             "visualize_chat: agent failed: stderr={}",
             stderr

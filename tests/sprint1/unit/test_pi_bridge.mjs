@@ -9,8 +9,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import T from '../../shared/test-runner.js';
 import * as bridge from '../../../agent-bridge.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const MOCK_PI_SDK = path.resolve(__dirname, '../../mock-pi-sdk/index.mjs');
 
 // ============================================
 // Helpers
@@ -375,6 +379,134 @@ T.test('chatWithAgent: returns trimmed output; empty throws', async () => {
   try { await bridge.chatWithAgent(null, {}, { article: '', history: [], message: 'q' }); } catch (e) { threw = true; }
   T.assert(threw);
   bridge.__setRunnerForTests(null);
+});
+
+// ============================================
+// Stall watchdog（LLM 流静默断流兜底，2026-10-14 实测 DeepSeek ~60s 断流）
+// ============================================
+
+T.test('createStallWatchdog: fires once after stallMs without activity', async () => {
+  let fired = 0;
+  const w = bridge.createStallWatchdog({ stallMs: 120, checkMs: 20, onStall: () => fired++ });
+  await new Promise(r => setTimeout(r, 300));
+  w.stop();
+  T.assertEquals(fired, 1, 'fires exactly once');
+});
+
+T.test('createStallWatchdog: touch resets the clock', async () => {
+  let fired = 0;
+  const w = bridge.createStallWatchdog({ stallMs: 150, checkMs: 20, onStall: () => fired++ });
+  for (let i = 0; i < 4; i++) {
+    await new Promise(r => setTimeout(r, 100));
+    w.touch();
+  }
+  w.stop();
+  T.assertEquals(fired, 0, 'no fire while activity continues');
+});
+
+T.test('createStallWatchdog: stop prevents firing', async () => {
+  let fired = 0;
+  const w = bridge.createStallWatchdog({ stallMs: 80, checkMs: 10, onStall: () => fired++ });
+  w.stop();
+  await new Promise(r => setTimeout(r, 200));
+  T.assertEquals(fired, 0, 'stopped watchdog never fires');
+});
+
+// ============================================
+// runPiTurn 真实路径（mock SDK 经 TYPORA_PI_SDK_ENTRY 注入）
+// ============================================
+
+T.test('runPiTurn: in-memory settings tighten httpIdleTimeoutMs（断流快速判死）', async () => {
+  process.env.TYPORA_PI_SDK_ENTRY = MOCK_PI_SDK;
+  try {
+    const mock = await import(pathToFileURL(MOCK_PI_SDK).href);
+    const proj = tmpdir('stall-');
+    const r = await bridge.runPiTurn({
+      prompt: '你好',
+      config: { ai_provider: 'openai', ai_base_url: 'https://x.cn', api_key: 'k', model: 'm' },
+      cwd: proj
+    });
+    T.assertExists(r.output, 'turn completes via mock');
+    const opts = mock.__getSessionOpts().at(-1);
+    T.assertExists(opts.settingsManager, 'settingsManager injected');
+    T.assertEquals(opts.settingsManager._kind, 'inMemory', 'in-memory (不落盘污染用户全局设置)');
+    T.assertEquals(opts.settingsManager.getHttpIdleTimeoutMs(), 60000, '默认 60s（SDK 默认 300s 太肉）');
+  } finally {
+    delete process.env.TYPORA_PI_SDK_ENTRY;
+  }
+});
+
+// ============================================
+// 状态透出 + 错误分级（断流容灾，设计文档 2026-10-14）
+// ============================================
+
+T.test('classifyError: STALL / AUTH_FAILED / NETWORK / UNKNOWN', () => {
+  T.assertEquals(bridge.classifyError(new Error('模型响应中断（90 秒无数据，疑似网络或服务端断流），请重试')), 'STALL');
+  T.assertEquals(bridge.classifyError(new Error('HTTP 401 Unauthorized')), 'AUTH_FAILED');
+  T.assertEquals(bridge.classifyError(new Error('403 Forbidden')), 'AUTH_FAILED');
+  T.assertEquals(bridge.classifyError(new Error('invalid api key')), 'AUTH_FAILED');
+  T.assertEquals(bridge.classifyError(new Error('fetch failed: getaddrinfo ENOTFOUND x')), 'NETWORK');
+  T.assertEquals(bridge.classifyError(new Error('connect ECONNREFUSED 127.0.0.1')), 'NETWORK');
+  T.assertEquals(bridge.classifyError(new Error('model not resolvable')), 'UNKNOWN');
+});
+
+T.test('runPiTurn: auto_retry_start 翻译成 status 事件透出', async () => {
+  process.env.TYPORA_PI_SDK_ENTRY = MOCK_PI_SDK;
+  try {
+    const mock = await import(pathToFileURL(MOCK_PI_SDK).href);
+    mock.__setBehavior(async () => ({
+      events: [{ type: 'auto_retry_start', attempt: 2, maxAttempts: 3, errorMessage: 'stream idle timeout' }],
+      text: 'ok'
+    }));
+    const events = await captureEvents(() => bridge.runPiTurn({
+      prompt: '你好',
+      config: { ai_provider: 'openai', ai_base_url: 'https://x.cn', api_key: 'k', model: 'm' },
+      cwd: tmpdir('retry-status-')
+    }));
+    const status = events.find(e => e.type === 'status' && e.data.message && e.data.message.includes('自动重试'));
+    T.assertExists(status, 'auto_retry_start 应翻译为 status 事件');
+    T.assert(status.data.message.includes('2/3'), '带重试进度: ' + status.data.message);
+    mock.__resetBehavior();
+  } finally {
+    delete process.env.TYPORA_PI_SDK_ENTRY;
+  }
+});
+
+// ============================================
+// pingProvider 真实连通性检测（agent 检测诚实化）
+// ============================================
+
+T.test('pingProvider: ok / AUTH_FAILED / NETWORK / 超时分级', async () => {
+  const cfg = { ai_provider: 'openai', ai_base_url: 'https://api.example.com', api_key: 'k', model: 'm' };
+
+  const ok = await bridge.pingProvider(cfg, async () => ({ ok: true, status: 200, text: async () => '{}' }));
+  T.assertEquals(ok.ok, true, '200 → ok');
+
+  const auth = await bridge.pingProvider(cfg, async () => ({ ok: false, status: 401, text: async () => 'invalid api key' }));
+  T.assertEquals(auth.ok, false); T.assertEquals(auth.code, 'AUTH_FAILED', '401 → AUTH_FAILED');
+
+  const net = await bridge.pingProvider(cfg, async () => { throw new Error('fetch failed: ENOTFOUND'); });
+  T.assertEquals(net.ok, false); T.assertEquals(net.code, 'NETWORK', 'DNS → NETWORK');
+
+  const timeout = await bridge.pingProvider(cfg, async () => { const e = new Error('aborted'); e.name = 'AbortError'; throw e; });
+  T.assertEquals(timeout.ok, false); T.assertEquals(timeout.code, 'NETWORK', '超时 → NETWORK');
+});
+
+T.test('pingProvider: openai 无 /v1 段时补全，anthropic 走 /v1/messages', async () => {
+  let seenUrl = null; let seenHeaders = null;
+  await bridge.pingProvider(
+    { ai_provider: 'openai', ai_base_url: 'https://api.deepseek.com', api_key: 'k', model: 'm' },
+    async (url, opts) => { seenUrl = url; seenHeaders = opts.headers; return { ok: true, status: 200, text: async () => '{}' }; }
+  );
+  T.assertEquals(seenUrl, 'https://api.deepseek.com/v1/chat/completions', 'openai 补 /v1');
+  T.assert(seenHeaders.Authorization === 'Bearer k', 'Bearer 头');
+
+  await bridge.pingProvider(
+    { ai_provider: 'anthropic', ai_base_url: 'https://api.anthropic.com', api_key: 'sk-ant', model: 'claude-x' },
+    async (url, opts) => { seenUrl = url; seenHeaders = opts.headers; return { ok: true, status: 200, text: async () => '{}' }; }
+  );
+  T.assertEquals(seenUrl, 'https://api.anthropic.com/v1/messages', 'anthropic 路径');
+  T.assert(seenHeaders['x-api-key'] === 'sk-ant', 'x-api-key 头');
 });
 
 T.run().then(({ failed }) => { if (failed > 0) process.exit(1); });

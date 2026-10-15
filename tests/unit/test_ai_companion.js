@@ -10,7 +10,7 @@
  */
 
 const TestRunner = require('../shared/test-runner');
-const { CompanionCore } = require('../../dist/scripts/learning/ai-companion-modal');
+const { CompanionCore, CompanionErrors } = require('../../dist/scripts/learning/ai-companion-modal');
 
 // ============================================
 // 模式元数据
@@ -84,6 +84,28 @@ TestRunner.test('buildPriorDiscussion caps total size at 1600 chars', () => {
   }
   const out = CompanionCore.buildPriorDiscussion(turns);
   TestRunner.assert(out.length <= 1610, `total should cap near 1600, got ${out.length}`);
+});
+
+// ============================================
+// CompanionErrors 错误分级（断流容灾 2026-10-14）
+// ============================================
+
+TestRunner.test('classify: STALL / AUTH_FAILED / NETWORK / UNKNOWN', () => {
+  TestRunner.assertEquals(CompanionErrors.classify('模型响应中断（90 秒无数据，疑似网络或服务端断流），请重试'), 'STALL');
+  TestRunner.assertEquals(CompanionErrors.classify('Agent visualize failed: HTTP 401 Unauthorized'), 'AUTH_FAILED');
+  TestRunner.assertEquals(CompanionErrors.classify('403 Forbidden'), 'AUTH_FAILED');
+  TestRunner.assertEquals(CompanionErrors.classify('fetch failed: getaddrinfo ENOTFOUND api.deepseek.com'), 'NETWORK');
+  TestRunner.assertEquals(CompanionErrors.classify('connect ECONNREFUSED 127.0.0.1:443'), 'NETWORK');
+  TestRunner.assertEquals(CompanionErrors.classify('model not resolvable: x/y'), 'UNKNOWN');
+});
+
+TestRunner.test('gradedText: STALL/NETWORK 可重试，AUTH_FAILED 不可重试，UNKNOWN 兜底', () => {
+  TestRunner.assert(CompanionErrors.gradedText('STALL').includes('重试'), 'STALL 文案引导重试');
+  TestRunner.assert(CompanionErrors.gradedText('AUTH_FAILED').includes('设置'), 'AUTH 文案引导设置');
+  TestRunner.assertEquals(CompanionErrors.gradedText('UNKNOWN'), null, 'UNKNOWN 走默认文案');
+  TestRunner.assert(CompanionErrors.retryable('STALL'), 'STALL retryable');
+  TestRunner.assert(CompanionErrors.retryable('NETWORK'), 'NETWORK retryable');
+  TestRunner.assert(!CompanionErrors.retryable('AUTH_FAILED'), 'AUTH 重试无意义');
 });
 
 TestRunner.run().then(({ passed, failed }) => {

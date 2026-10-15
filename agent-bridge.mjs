@@ -55,7 +55,11 @@ function log(level, message, data = null) {
     }
   }
 
-  console.error(`[${level}] ${message}`);
+  // stderr 管道死锁（2026-10-15 实测）：Windows 上 Node 对管道的写入是同步的，
+  // 调用方（Rust 流式命令）只排空 stdout；debug 洪峰（思考型模型一轮数千条
+  // thinking_delta ≈ 64KB）写满管道缓冲后 console.error 阻塞整个事件循环，
+  // 看门狗随事件循环一起饿死、双方互锁永不退出。debug 只落文件。
+  if (level !== 'debug') console.error(`[${level}] ${message}`);
 }
 
 // ============================================
@@ -370,6 +374,13 @@ async function _runPiTurnReal(opts) {
       // （2026-09-03 章节生成全停 stopReason=length、不写文件的根因）。0.74 无 thinking
       // 语义，显式 off 恢复旧行为。
       thinkingLevel: 'off',
+      // LLM 流静默断流兜底（2026-10-14 两次实测 DeepSeek ~60s 处断流）：SDK 默认
+      // httpIdleTimeoutMs=300s 才发现流死，叠加 3 次 turn 级自动重试最坏挂 15+ 分钟。
+      // 收紧到 60s——正常流式 delta 间隔 <1s，60s 无数据即判死，交 SDK 自动重试
+      // 快速恢复。inMemory：setter 会落盘，不能污染用户全局 settings.json。
+      settingsManager: pi.SettingsManager.inMemory({
+        httpIdleTimeoutMs: Number(process.env.TYPORA_AGENT_HTTP_IDLE_MS) || 60000,
+      }),
       // 0.84+ 用 modelRuntime；旧版用 authStorage/modelRegistry（undefined 字段被忽略）
       ...(modelRuntime ? { modelRuntime } : { authStorage, modelRegistry }),
       resourceLoader: loader,
@@ -380,7 +391,35 @@ async function _runPiTurnReal(opts) {
 
     // Collect streaming text deltas + tool activity for progress_log
     const chunks = [];
+    // 断流看门狗：活性信号 = 任何 session 事件（delta / tool 执行起止）。
+    // 90s 余量覆盖慢 TTFT 与 wikimedia 检索；可用 TYPORA_AGENT_STALL_MS 覆盖。
+    const stallMs = Number(process.env.TYPORA_AGENT_STALL_MS) || 90000;
+    let rejectStall;
+    const stallPromise = new Promise((_, rej) => { rejectStall = rej; });
+    const watchdog = createStallWatchdog({
+      stallMs,
+      onStall: () => {
+        log('error', 'Agent stream stalled, aborting turn', { stall_ms: stallMs });
+        try { session.abort?.()?.catch?.(() => {}); } catch (_) { /* best effort */ }
+        rejectStall(new Error(`模型响应中断（${Math.round(stallMs / 1000)} 秒无数据，疑似网络或服务端断流），请重试`));
+      }
+    });
     session.subscribe((ev) => {
+      watchdog.touch();
+      // 非流式事件留痕（auto_retry_start 带 errorMessage，断流排查的第一手证据）。
+      // 逐 delta（text/thinking/toolcall）不记：思考型模型一轮数千条，既是日志洪水
+      // 也是 stderr 管道死锁的直接推手（见 log() 内注释）；start/end 边界足够定位。
+      const subType = ev.assistantMessageEvent?.type;
+      const deltaNoise = subType === 'text_delta' || subType === 'thinking_delta' || subType === 'toolcall_delta';
+      if (!deltaNoise && (ev.type !== 'message_update' || subType)) {
+        log('debug', 'session event', { type: ev.type, sub: subType, error: ev.errorMessage });
+      }
+      // 断流容灾（2026-10-14 设计）：SDK 内部自动重试对用户不可见是假安全感，
+      // 翻译成 status 事件透出给前端状态条
+      if (ev.type === 'auto_retry_start') {
+        const hint = ev.errorMessage ? `：${ev.errorMessage}` : '';
+        emit('status', { stage: 'retry', message: `⚠️ 连接中断，正在自动重试（第 ${ev.attempt}/${ev.maxAttempts} 次）${hint}` });
+      }
       if (ev.type === 'message_update' && ev.assistantMessageEvent?.type === 'text_delta') {
         chunks.push(ev.assistantMessageEvent.delta);
         // Sprint 17: 流式输出（案例研习等场景实时渲染）
@@ -392,7 +431,13 @@ async function _runPiTurnReal(opts) {
       }
     });
 
-    await session.prompt(prompt);
+    try {
+      // 状态透出：让用户知道请求已发出、还在等首字节（而不是对着死气泡干等）
+      emit('status', { stage: 'connecting', message: '正在连接模型…' });
+      await Promise.race([session.prompt(prompt), stallPromise]);
+    } finally {
+      watchdog.stop();
+    }
 
     // Authoritative output: last assistant message's text blocks
     const lastAssistant = [...session.messages].reverse().find(m => m.role === 'assistant');
@@ -412,6 +457,84 @@ async function _runPiTurnReal(opts) {
     if (tmp.providerId && process.env[`TYPORA_PI_KEY_${process.pid}`]) {
       delete process.env[`TYPORA_PI_KEY_${process.pid}`];
     }
+  }
+}
+
+/**
+ * Stall watchdog: fires onStall once if no touch() arrives within stallMs.
+ *
+ * 背景（2026-10-14 两次实测）：DeepSeek SSE 流式响应会在 ~60s 处被静默掐断
+ * ——TCP 连接死亡但 SDK 收不到任何错误事件，`session.prompt()` 的 Promise
+ * 永不 settle，node 进程空转、前端永远卡在 loading。看门狗以「任何 session
+ * 事件」为活性信号挂在 subscribe 里，超窗即 abort + 让错误透出给前端。
+ */
+export function createStallWatchdog({ stallMs, checkMs, onStall }) {
+  let lastActivity = Date.now();
+  const timer = setInterval(() => {
+    if (Date.now() - lastActivity >= stallMs) {
+      clearInterval(timer);
+      onStall();
+    }
+  }, checkMs || Math.min(5000, stallMs));
+  return {
+    touch() { lastActivity = Date.now(); },
+    stop() { clearInterval(timer); }
+  };
+}
+
+/**
+ * 错误分级（断流容灾设计 2026-10-14）：前端按码显示分级文案与动作按钮。
+ * STALL=断流/超时类（值得重试）；AUTH_FAILED=key 问题（重试无意义，引导改配置）；
+ * NETWORK=连接类（检查网络/base_url）；UNKNOWN=其余。
+ */
+export function classifyError(err) {
+  const msg = String((err && err.message) || err || '');
+  if (/无数据|断流|响应中断|stream.*(stall|idle)/i.test(msg)) return 'STALL';
+  if (/\b(401|403)\b|unauthorized|forbidden|invalid api key|incorrect api key/i.test(msg)) return 'AUTH_FAILED';
+  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|fetch failed|getaddrinfo|timed? ?out|超时/i.test(msg)) return 'NETWORK';
+  return 'UNKNOWN';
+}
+
+/**
+ * 真实连通性 ping（agent 检测诚实化）：用激活配置发 max_tokens=1 的最小请求。
+ * fetchImpl 可注入（测试用）；默认全局 fetch + 15s 超时。
+ * @returns {Promise<{ok: true} | {ok: false, code: string, message: string}>}
+ */
+export async function pingProvider(config, fetchImpl) {
+  const provider = (config?.ai_provider || 'anthropic').toLowerCase();
+  const isAnthropic = provider !== 'openai';
+  let baseUrl = (config?.ai_base_url || '').trim()
+    || (isAnthropic ? 'https://api.anthropic.com' : 'https://api.openai.com');
+  let url, headers;
+  const body = { model: (config?.model || '').trim(), max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] };
+  if (isAnthropic) {
+    url = baseUrl.replace(/\/+$/, '') + '/v1/messages';
+    headers = { 'content-type': 'application/json', 'x-api-key': config?.api_key || '', 'anthropic-version': '2023-06-01' };
+  } else {
+    // 与 _writeTempModelsJson 同一归一化语义：openai 系补 /v1 版本段
+    if (!/\/v\d+\/?$/.test(baseUrl)) baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
+    url = baseUrl.replace(/\/+$/, '') + '/chat/completions';
+    headers = { 'content-type': 'application/json', 'Authorization': `Bearer ${config?.api_key || ''}` };
+  }
+
+  const timeoutMs = Number(process.env.TYPORA_AGENT_PING_TIMEOUT_MS) || 15000;
+  const doFetch = fetchImpl || globalThis.fetch;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const resp = await doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
+    if (resp.ok) return { ok: true };
+    let detail = '';
+    try { detail = String(await resp.text()).slice(0, 200); } catch (_) { /* ignore */ }
+    const message = `HTTP ${resp.status}: ${detail}`;
+    return { ok: false, code: classifyError(message), message };
+  } catch (e) {
+    const message = e && e.name === 'AbortError'
+      ? `连接超时（timeout after ${timeoutMs}ms）`
+      : String((e && e.message) || e);
+    return { ok: false, code: classifyError(message), message };
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -1452,9 +1575,18 @@ async function main() {
       case 'check': {
         log('info', 'Starting check stage');
         const result = checkAgentSDK();
+        // 检测诚实化（断流容灾 2026-10-14）：SDK 文件存在 ≠ 服务可用。
+        // 有激活配置就再发一个真实最小请求（max_tokens=1），不通则带分级
+        // 错误码返回，前端状态灯据此显示「服务不可达 + 原因」而非假绿。
+        let ping = null;
+        if (result.available && config && config.api_key) {
+          ping = await pingProvider(config);
+          log('info', 'Provider ping', { ok: ping.ok, code: ping.code || null, message: ping.message || null });
+        }
         console.log(JSON.stringify({
           available: result.available,
-          error: result.error || null
+          error: result.error || null,
+          ping
         }));
         log('info', 'Check stage completed', { available: result.available });
         process.exit(0);

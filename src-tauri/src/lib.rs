@@ -11,6 +11,7 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub mod agent_sdk_probe;
 pub mod ai_agent;
+pub mod ai_profiles;
 pub mod case_study_store;
 pub mod course_completion;
 mod docx_template;
@@ -65,6 +66,13 @@ pub struct AppConfig {
     pub ai_base_url: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    // 断流容灾（2026-10-14 设计第 2 段）：多 profile + 激活项。
+    // 旧四字段保留为「激活 profile 的派生视图」——normalize_profiles 在
+    // 读/写时维护一致性，下游所有调用方（bridge payload、test_llm_config）零改动。
+    #[serde(default)]
+    pub ai_profiles: Option<Vec<ai_profiles::AiProfile>>,
+    #[serde(default)]
+    pub active_profile_id: Option<String>,
     #[serde(default)]
     pub theme: Option<String>, // "light", "dark", or None for system
     #[serde(default)]
@@ -722,6 +730,41 @@ fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(config_dir.join("config.json"))
 }
 
+/// profile 归一化（断流容灾 2026-10-14）：
+/// 1. 旧配置迁移——无 profile 但旧四字段有内容 → 造首张卡并激活
+/// 2. 激活派生——旧字段始终跟随激活 profile，下游调用方读旧字段即跟随切换
+/// 读（get_config）与写（set_config）共用，保证磁盘与内存视图一致。
+fn normalize_profiles(config: &mut AppConfig) {
+    if config.ai_profiles.as_deref().map_or(true, |p| p.is_empty()) {
+        let provider_str = config
+            .ai_provider
+            .as_ref()
+            .map(|p| format!("{:?}", p).to_lowercase());
+        if let Some((profiles, active)) = ai_profiles::migrate_legacy(
+            &config.api_key,
+            &provider_str,
+            &config.ai_base_url,
+            &config.model,
+        ) {
+            config.ai_profiles = Some(profiles);
+            config.active_profile_id = Some(active);
+        }
+    }
+    if let Some((key, provider, base_url, model)) = ai_profiles::derive_legacy(
+        config.ai_profiles.as_deref().unwrap_or(&[]),
+        &config.active_profile_id,
+    ) {
+        config.api_key = key;
+        config.ai_base_url = base_url;
+        config.model = model;
+        config.ai_provider = provider.and_then(|p| match p.as_str() {
+            "openai" => Some(AiProvider::Openai),
+            "anthropic" => Some(AiProvider::Anthropic),
+            _ => None,
+        });
+    }
+}
+
 /// Load application configuration
 #[tauri::command]
 fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
@@ -730,14 +773,17 @@ fn get_config(app: tauri::AppHandle) -> Result<AppConfig, String> {
         return Ok(AppConfig::default());
     }
     let content = fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {}", e))?;
-    let config: AppConfig =
+    let mut config: AppConfig =
         serde_json::from_str(&content).map_err(|e| format!("Failed to parse config: {}", e))?;
+    normalize_profiles(&mut config);
     Ok(config)
 }
 
 /// Save application configuration
 #[tauri::command]
 fn set_config(config: AppConfig, app: tauri::AppHandle) -> Result<(), String> {
+    let mut config = config;
+    normalize_profiles(&mut config);
     let path = config_path(&app)?;
     let content = serde_json::to_string_pretty(&config)
         .map_err(|e| format!("Failed to serialize config: {}", e))?;
@@ -774,13 +820,14 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
 
     match provider {
         AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": 1,
                 "messages": [{"role": "user", "content": test_message}]
             });
             let resp = ureq::post(&url)
+                .timeout(std::time::Duration::from_secs(15))
                 .set("Content-Type", "application/json")
                 .set("x-api-key", &api_key)
                 .set("anthropic-version", "2023-06-01")
@@ -792,9 +839,10 @@ async fn test_llm_config(config: AppConfig) -> Result<(), String> {
                 .map_err(|e| format!("解析响应失败: {}", e))?;
         }
         AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = llm_body::versioned_url(&base_url, "chat/completions");
             let req = llm_body::openai_chat_body(&model, 1, test_message, &base_url);
             let resp = ureq::post(&url)
+                .timeout(std::time::Duration::from_secs(15))
                 .set("Content-Type", "application/json")
                 .set("Authorization", &format!("Bearer {}", api_key))
                 .send_json(req)
@@ -2331,7 +2379,7 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
     let result = (|| -> Result<String, String> {
         let (response, is_anthropic) = match provider {
             AiProvider::Anthropic => {
-                let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+                let url = llm_body::versioned_url(&base_url, "messages");
                 let req = serde_json::json!({
                     "model": model,
                     "max_tokens": 4096,
@@ -2347,7 +2395,7 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
                 (resp, true)
             }
             AiProvider::Openai => {
-                let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+                let url = llm_body::versioned_url(&base_url, "chat/completions");
                 // DeepSeek 思考型模型注入 thinking=disabled 的逻辑收敛在
                 // llm_body::openai_chat_body（2026-09-03 空结果事故后统一）
                 let req = llm_body::openai_chat_body(&model, 4096, &prompt, &base_url);
@@ -2569,7 +2617,7 @@ async fn translate_text(
 
     let (response, is_anthropic) = match provider {
         AiProvider::Anthropic => {
-            let url = format!("{}/v1/messages", base_url.trim_end_matches('/'));
+            let url = llm_body::versioned_url(&base_url, "messages");
             let req = serde_json::json!({
                 "model": model,
                 "max_tokens": 4096,
@@ -2584,7 +2632,7 @@ async fn translate_text(
             (resp, true)
         }
         AiProvider::Openai => {
-            let url = format!("{}/v1/chat/completions", base_url.trim_end_matches('/'));
+            let url = llm_body::versioned_url(&base_url, "chat/completions");
             let req = llm_body::openai_chat_body(&model, 4096, &prompt, &base_url);
             let resp = ureq::post(&url)
                 .set("Content-Type", "application/json")

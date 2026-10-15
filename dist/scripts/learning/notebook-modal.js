@@ -178,6 +178,47 @@
     }
 
     /**
+     * 故障气泡（断流容灾 2026-10-14）：分级文案 + 动作按钮。
+     * @param {string} text 分级后的可读文案
+     * @param {object} [actions]
+     * @param {Function} [actions.onRetry] 提供则显示「重试」按钮
+     * @param {Function} [actions.onOpenSettings] 提供则显示「打开设置」按钮
+     */
+    appendErrorBubble(text, actions = {}) {
+      const row = document.createElement('div');
+      row.className = 'socratic-bubble-row';
+      const avatar = document.createElement('div');
+      avatar.className = 'socratic-avatar-tutor';
+      avatar.textContent = this.tutorAvatar;
+      const bubble = document.createElement('div');
+      bubble.className = 'socratic-bubble-tutor companion-error-bubble';
+      const msgEl = document.createElement('div');
+      msgEl.textContent = text;
+      bubble.appendChild(msgEl);
+      const bar = document.createElement('div');
+      bar.className = 'companion-error-actions';
+      if (actions.onRetry) {
+        const btn = document.createElement('button');
+        btn.className = 'companion-error-btn';
+        btn.textContent = '重试';
+        btn.addEventListener('click', () => { btn.disabled = true; actions.onRetry(); });
+        bar.appendChild(btn);
+      }
+      if (actions.onOpenSettings) {
+        const btn = document.createElement('button');
+        btn.className = 'companion-error-btn';
+        btn.textContent = '打开设置';
+        btn.addEventListener('click', () => actions.onOpenSettings());
+        bar.appendChild(btn);
+      }
+      if (bar.children.length || bar.childNodes.length) bubble.appendChild(bar);
+      row.appendChild(avatar);
+      row.appendChild(bubble);
+      this._chatEl.appendChild(row);
+      this._chatEl.scrollTop = this._chatEl.scrollHeight;
+    }
+
+    /**
      * 流式气泡：先建空气泡，随 delta 累积重渲染。
      * @returns {{el: Element, update: (text: string) => void, finalize: (text: string) => void, remove: () => void}}
      */

@@ -29,7 +29,7 @@
     { target: '#exportMenuBtn', title: '导出 / 分享', description: '点击展开菜单：导出 Word、导出 PDF（Ctrl+P）、分享打包为 ZIP', openMenu: '#exportMenu' },
     { target: '#settingsBtn', title: '设置', description: '配置 API Key、主题、光标样式等' },
     { target: '#themeToggle', title: '切换主题', description: '在浅色 / 深色主题间切换（Ctrl+Shift+L）' },
-    { target: '#agentStatusChip', title: 'Agent 状态', description: '显示 Claude Code Agent 连接状态' }
+    { target: '#agentStatusChip', title: 'Agent 状态', description: '显示 Pi coding agent 连接状态' }
   ];
 
   // ============================================

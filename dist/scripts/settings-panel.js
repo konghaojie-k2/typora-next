@@ -12,7 +12,12 @@
 (function (global) {
   'use strict';
 
+  // bdd-acceptance 多套件会整替换 global.window，本模块捕获的 global 不可控；
+  // 注入点绕过全局探测，让测试确定性地接管 invoke 通道。
+  let _invokeOverride = null;
+
   function invoke(cmd, args) {
+    if (_invokeOverride) return _invokeOverride(cmd, args); // 测试注入（同 agent-bridge __setRunnerForTests 模式）
     if (global.TyporaNext && typeof global.TyporaNext.invoke === 'function') {
       return global.TyporaNext.invoke(cmd, args);
     }
@@ -57,10 +62,75 @@
     return input;
   }
 
+  /**
+   * AI 模型配置 profile——纯函数状态操作（无 DOM，可 Node 直测）。
+   * 平级卡片 + 一个激活项，无主备语义；与 Rust ai_profiles.rs 规则一致。
+   * state 形状：{ profiles: AiProfile[], active_id: string|null }
+   */
+  const ProfileOps = {
+    _nextId(profiles) {
+      const ids = new Set(profiles.map((p) => p.id));
+      let n = profiles.length + 1;
+      while (ids.has(`profile-${n}`)) n++;
+      return `profile-${n}`;
+    },
+
+    /** 无 id 或 id 不在列表 → 追加（首张自动激活）；id 命中 → 原位更新。 */
+    upsert(state, card) {
+      const profiles = (state.profiles || []).slice();
+      let activeId = state.active_id || null;
+      const idx = card.id ? profiles.findIndex((p) => p.id === card.id) : -1;
+      if (idx >= 0) {
+        profiles[idx] = Object.assign({}, card);
+      } else {
+        const id = card.id || this._nextId(profiles);
+        profiles.push(Object.assign({}, card, { id }));
+        if (!activeId) activeId = id;
+      }
+      return { profiles, active_id: activeId };
+    },
+
+    activate(state, id) {
+      const profiles = (state.profiles || []).slice();
+      if (!profiles.some((p) => p.id === id)) {
+        return { profiles, active_id: state.active_id || null };
+      }
+      return { profiles, active_id: id };
+    },
+
+    /** 删除激活卡 → 回退第一张；删空 → active_id null。 */
+    remove(state, id) {
+      const profiles = (state.profiles || []).filter((p) => p.id !== id);
+      let activeId = state.active_id || null;
+      if (activeId === id) activeId = profiles.length ? profiles[0].id : null;
+      return { profiles, active_id: activeId };
+    },
+
+    /** 旧四字段视图 = 激活卡内容；激活 id 悬空回退第一张；空列表全 null。 */
+    deriveLegacy(state) {
+      const profiles = state.profiles || [];
+      if (!profiles.length) {
+        return { api_key: null, ai_provider: null, ai_base_url: null, model: null };
+      }
+      const active = profiles.find((p) => p.id === state.active_id) || profiles[0];
+      return {
+        api_key: active.api_key || null,
+        ai_provider: active.provider || null,
+        ai_base_url: active.base_url || null,
+        model: active.model || null
+      };
+    }
+  };
+
   const SettingsPanel = {
     _root: null,
     _mounted: false,
     _resolvedPapersDir: null,
+    _profileState: { profiles: [], active_id: null },
+    _selectedProfileId: null,
+
+    /** 测试注入：替换 invoke 通道；传 null 还原。 */
+    __setInvokeForTests(fn) { _invokeOverride = fn; },
 
     mount(root) {
       if (this._mounted && this._root === root) return;
@@ -114,6 +184,22 @@
     _buildAiGroup() {
       const group = this._buildGroup('ai', 'AI');
 
+      // profile 卡片列表：平级配置 + 一个激活项（无主备语义，谁激活谁在用）
+      const listSection = el('div', 'ai-profile-section');
+      listSection.appendChild(el('div', 'setting-hint', '模型配置卡片：一张卡 = 连接 + 模型；点「激活」切换生效配置'));
+      const list = el('div', 'ai-profile-list');
+      list.id = 'aiProfileList';
+      listSection.appendChild(list);
+      const addBtn = el('button', 'settings-test-btn', '+ 新增配置');
+      addBtn.id = 'aiProfileAddBtn';
+      addBtn.addEventListener('click', () => this._addProfileCard());
+      listSection.appendChild(addBtn);
+      group.appendChild(listSection);
+
+      const editorTitle = el('div', 'setting-hint');
+      editorTitle.id = 'aiProfileEditorHint';
+      group.appendChild(editorTitle);
+
       const provider = el('select', 'setting-select');
       provider.id = 'settingApiProvider';
       [['anthropic', 'Anthropic'], ['openai', 'OpenAI']].forEach(([value, text]) => {
@@ -132,17 +218,187 @@
       const hint = group.querySelector('#settingApiKeyHint');
       hint.textContent = '用于 AI 功能（Mermaid 修复、论文导读、章节生成等）';
 
-      const testRow = el('div', 'setting-item');
-      const testBtn = el('button', 'settings-test-btn', '测试连接');
-      testBtn.id = 'settingsTestBtn';
-      testBtn.addEventListener('click', () => this.testConnection());
-      testRow.appendChild(testBtn);
-      const testResult = el('span', 'settings-test-result', '');
-      testResult.id = 'testResult';
-      testRow.appendChild(testResult);
-      group.appendChild(testRow);
+      // 注：底部旧的整组连通性测试按钮已移除（2026-10-15）——每张卡有自己的「检测」，
+      // 旧按钮测的是激活卡而非编辑中的卡，语义混乱。
 
       return group;
+    },
+
+    /** 卡片显示名：name || model || provider，复制时追加「副本」。 */
+    _profileLabel(card) {
+      return card.name || card.model || card.provider || '新配置';
+    },
+
+    _renderProfileCards() {
+      const list = this._root && this._root.querySelector('#aiProfileList');
+      if (!list) return;
+      list.innerHTML = '';
+      const { profiles, active_id } = this._profileState;
+      profiles.forEach((card) => {
+        const row = el('div', 'ai-profile-card');
+        row.setAttribute('data-profile-id', card.id);
+        if (card.id === active_id) row.classList.add('active');
+        if (card.id === this._selectedProfileId) row.classList.add('selected');
+
+        const main = el('div', 'ai-profile-card-main');
+        const nameLine = el('div', 'ai-profile-card-name', this._profileLabel(card));
+        if (card.id === active_id) nameLine.appendChild(el('span', 'ai-profile-active-badge', '使用中'));
+        main.appendChild(nameLine);
+        const sub = [card.provider, card.model].filter(Boolean).join(' · ');
+        if (sub) main.appendChild(el('div', 'ai-profile-card-sub', sub));
+        const check = el('div', 'ai-profile-card-check');
+        main.appendChild(check);
+        main.addEventListener('click', () => this._selectProfile(card.id));
+        row.appendChild(main);
+
+        const actions = el('div', 'ai-profile-card-actions');
+        if (card.id !== active_id) {
+          const activateBtn = el('button', 'ai-profile-btn', '激活');
+          activateBtn.addEventListener('click', () => {
+            this._flushFormToSelected();
+            this._profileState = ProfileOps.activate(this._profileState, card.id);
+            this._renderProfileCards();
+            // 激活即落盘（2026-10-15 事故：只改内存态 → 磁盘仍是旧卡，
+            // 状态灯/agent 检的是磁盘配置 → 用户分不清「到底谁在用」）
+            this._persistProfiles();
+          });
+          actions.appendChild(activateBtn);
+        }
+        const editBtn = el('button', 'ai-profile-btn', '编辑');
+        editBtn.addEventListener('click', () => this._selectProfile(card.id));
+        actions.appendChild(editBtn);
+        const copyBtn = el('button', 'ai-profile-btn', '复制');
+        copyBtn.addEventListener('click', () => {
+          this._flushFormToSelected();
+          this._profileState = ProfileOps.upsert(this._profileState, Object.assign({}, card, {
+            id: '', name: `${this._profileLabel(card)} 副本`
+          }));
+          this._renderProfileCards();
+        });
+        actions.appendChild(copyBtn);
+        const checkBtn = el('button', 'ai-profile-btn', '检测');
+        checkBtn.addEventListener('click', () => this._checkProfileCard(card, check));
+        actions.appendChild(checkBtn);
+        const removeBtn = el('button', 'ai-profile-btn', '删除');
+        removeBtn.addEventListener('click', () => {
+          const wasSelected = this._selectedProfileId === card.id;
+          this._profileState = ProfileOps.remove(this._profileState, card.id);
+          if (wasSelected) {
+            this._selectedProfileId = null;
+            const fallback = this._profileState.profiles.find((p) => p.id === this._profileState.active_id);
+            if (fallback) this._selectProfile(fallback.id);
+          }
+          this._renderProfileCards();
+        });
+        actions.appendChild(removeBtn);
+        row.appendChild(actions);
+
+        list.appendChild(row);
+      });
+      this._updateEditorHint();
+    },
+
+    _updateEditorHint() {
+      const hint = this._root && this._root.querySelector('#aiProfileEditorHint');
+      if (!hint) return;
+      const selected = this._profileState.profiles.find((p) => p.id === this._selectedProfileId);
+      hint.textContent = selected ? `正在编辑：${this._profileLabel(selected)}` : '';
+    },
+
+    _addProfileCard() {
+      this._flushFormToSelected();
+      this._profileState = ProfileOps.upsert(this._profileState, {
+        id: '', name: '', provider: 'openai', base_url: '', api_key: '', model: ''
+      });
+      const added = this._profileState.profiles[this._profileState.profiles.length - 1];
+      this._selectProfile(added.id);
+    },
+
+    _selectProfile(id) {
+      if (this._selectedProfileId && this._selectedProfileId !== id) this._flushFormToSelected();
+      this._selectedProfileId = id;
+      const card = this._profileState.profiles.find((p) => p.id === id);
+      if (card) this._fillFormFromCard(card);
+      this._renderProfileCards();
+    },
+
+    /** 表单四个字段 → 当前选中卡（内存态；落盘走 collect/save）。 */
+    _flushFormToSelected() {
+      const card = this._profileState.profiles.find((p) => p.id === this._selectedProfileId);
+      if (!card || !this._root) return;
+      const val = (id) => {
+        const input = this._root.querySelector(`#${id}`);
+        return input ? input.value.trim() : '';
+      };
+      card.provider = val('settingApiProvider') || 'anthropic';
+      card.base_url = val('settingAiBaseUrl');
+      card.model = val('settingModel');
+      card.api_key = val('settingApiKey');
+    },
+
+    _fillFormFromCard(card) {
+      const set = (id, value) => {
+        const input = this._root && this._root.querySelector(`#${id}`);
+        if (input) input.value = value || '';
+      };
+      set('settingApiProvider', card.provider || 'anthropic');
+      set('settingAiBaseUrl', card.base_url);
+      set('settingModel', card.model);
+      set('settingApiKey', card.api_key);
+    },
+
+    /**
+     * 激活变更的轻量落盘：只写 profile 相关键 + 派生旧字段，
+     * 不弹 toast、不关面板（与底部「保存」的全量 save 区分）。
+     * merge-then-save：先读磁盘配置再合并，避免覆盖其他模块刚写的字段。
+     */
+    async _persistProfiles() {
+      if (!this._profileState.profiles.length) return;
+      this._flushFormToSelected();
+      const legacy = ProfileOps.deriveLegacy(this._profileState);
+      try {
+        const current = (await invoke('get_config')) || {};
+        const config = Object.assign({}, current, {
+          ai_profiles: this._profileState.profiles,
+          active_profile_id: this._profileState.active_id,
+          api_key: legacy.api_key,
+          ai_provider: legacy.ai_provider || 'anthropic',
+          ai_base_url: legacy.ai_base_url,
+          model: legacy.model
+        });
+        await invoke('set_config', { config });
+        // 落盘成功 → 让状态灯立刻重检新激活卡（不经过 onSettingsSaved，
+        // 那条路径只在底部「保存」时触发且会关面板）
+        if (global.TyporaNext && typeof global.TyporaNext.recheckAgentStatus === 'function') {
+          global.TyporaNext.recheckAgentStatus();
+        }
+      } catch (e) {
+        const message = `激活保存失败：${(e && e.message) || e}`;
+        console.error('[SettingsPanel]', message);
+        const hint = this._root && this._root.querySelector('#aiProfileEditorHint');
+        if (hint) hint.textContent = message;
+      }
+    },
+
+    /** 单卡立即检测（不经过保存）：用卡片自身字段调 test_llm_config。 */
+    async _checkProfileCard(card, checkEl) {
+      // 正在编辑的正是这张卡 → 先把表单值刷进来：检测的应是用户眼前看到的配置，
+      // 而不是上次的存量（2026-10-15 实机踩坑：改完 base_url 点检测，测的是旧值）
+      if (this._selectedProfileId === card.id) this._flushFormToSelected();
+      if (checkEl) checkEl.textContent = '检测中…';
+      try {
+        await invoke('test_llm_config', {
+          config: {
+            api_key: card.api_key || null,
+            ai_provider: card.provider || 'anthropic',
+            ai_base_url: card.base_url || null,
+            model: card.model || null
+          }
+        });
+        if (checkEl) checkEl.textContent = '连接成功';
+      } catch (err) {
+        if (checkEl) checkEl.textContent = `连接失败：${(err && err.message) || err}`;
+      }
     },
 
     _buildPapersGroup() {
@@ -293,10 +549,26 @@
         const input = this._root.querySelector(`#${id}`);
         if (input) input.value = value || '';
       };
-      set('settingApiProvider', cfg.ai_provider || 'anthropic');
-      set('settingAiBaseUrl', cfg.ai_base_url);
-      set('settingModel', cfg.model);
-      set('settingApiKey', cfg.api_key);
+      // profile 卡片：Rust get_config 已做迁移（旧四字段 → ai_profiles + active_profile_id）
+      if (Array.isArray(cfg.ai_profiles) && cfg.ai_profiles.length) {
+        this._profileState = {
+          profiles: cfg.ai_profiles.map((p) => Object.assign({}, p)),
+          active_id: cfg.active_profile_id || cfg.ai_profiles[0].id
+        };
+        const active = this._profileState.profiles.find((p) => p.id === this._profileState.active_id)
+          || this._profileState.profiles[0];
+        this._selectedProfileId = active.id;
+        this._fillFormFromCard(active);
+        this._renderProfileCards();
+      } else {
+        this._profileState = { profiles: [], active_id: null };
+        this._selectedProfileId = null;
+        set('settingApiProvider', cfg.ai_provider || 'anthropic');
+        set('settingAiBaseUrl', cfg.ai_base_url);
+        set('settingModel', cfg.model);
+        set('settingApiKey', cfg.api_key);
+        this._renderProfileCards();
+      }
       set('settingMineruToken', cfg.mineru_api_token);
       set('settingMineruBaseUrl', cfg.mineru_base_url);
       set('settingMineruModel', cfg.mineru_model_version || 'vlm');
@@ -328,11 +600,7 @@
         return input ? input.value.trim() : '';
       };
       const wordTpl = this._root.querySelector('#settingWordTemplate');
-      return {
-        api_key: val('settingApiKey') || null,
-        ai_provider: val('settingApiProvider') || 'anthropic',
-        ai_base_url: val('settingAiBaseUrl') || null,
-        model: val('settingModel') || null,
+      const config = {
         mineru_api_token: val('settingMineruToken') || null,
         mineru_base_url: val('settingMineruBaseUrl') || null,
         mineru_model_version: val('settingMineruModel') || null,
@@ -342,6 +610,23 @@
         custom_cursor: val('settingCustomCursor') || null,
         word_export_use_template: !!(wordTpl && wordTpl.checked)
       };
+      // profile 模式：旧四字段 = 激活卡的派生视图（与 Rust derive_legacy 一致）
+      if (this._profileState.profiles.length) {
+        this._flushFormToSelected();
+        const legacy = ProfileOps.deriveLegacy(this._profileState);
+        config.ai_profiles = this._profileState.profiles;
+        config.active_profile_id = this._profileState.active_id;
+        config.api_key = legacy.api_key;
+        config.ai_provider = legacy.ai_provider || 'anthropic';
+        config.ai_base_url = legacy.ai_base_url;
+        config.model = legacy.model;
+      } else {
+        config.api_key = val('settingApiKey') || null;
+        config.ai_provider = val('settingApiProvider') || 'anthropic';
+        config.ai_base_url = val('settingAiBaseUrl') || null;
+        config.model = val('settingModel') || null;
+      }
+      return config;
     },
 
     /**
@@ -358,30 +643,13 @@
         global.TyporaNext.onSettingsSaved(config);
       }
       return config;
-    },
-
-    async testConnection() {
-      const result = this._root.querySelector('#testResult');
-      try {
-        const cfg = this.collect();
-        await invoke('test_llm_config', {
-          config: {
-            api_key: cfg.api_key,
-            ai_provider: cfg.ai_provider,
-            ai_base_url: cfg.ai_base_url,
-            model: cfg.model
-          }
-        });
-        if (result) result.textContent = '连接成功';
-      } catch (err) {
-        if (result) result.textContent = `连接失败：${(err && err.message) || err}`;
-      }
     }
   };
 
   global.SettingsPanel = SettingsPanel;
+  global.ProfileOps = ProfileOps;
 
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SettingsPanel };
+    module.exports = { SettingsPanel, ProfileOps };
   }
 })(typeof window !== 'undefined' ? window : global);

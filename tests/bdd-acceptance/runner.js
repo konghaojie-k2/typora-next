@@ -496,6 +496,16 @@ async function runAcceptanceTests() {
   totalFailed += aiCompanionResult.failed;
   if (aiCompanionSteps._cleanup) aiCompanionSteps._cleanup.call({});
 
+  // LLM 状态感知与故障分级（断流事故容灾，见 docs/plans/2026-10-14-llm-provider-failover-design.md）
+  console.log(`\n${YELLOW}▶ LLM Resilience (status surfacing + error classification)${RESET}`);
+  const llmResilienceSteps = require('./llm_resilience.steps');
+  const llmResilienceResult = await runFeatureFile(
+    path.join(__dirname, '../llm-resilience/features/llm_resilience.feature'),
+    llmResilienceSteps
+  );
+  totalPassed += llmResilienceResult.passed;
+  totalFailed += llmResilienceResult.failed;
+
   if (sprint10Steps._cleanup) sprint10Steps._cleanup.call({});
   if (paperImportSteps._cleanup) paperImportSteps._cleanup.call({});
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});
