@@ -384,8 +384,9 @@ function _ownVoiceChat(args) {
   _ownVoiceChatCalls.push(args);
   const isFirst = !!args.firstTurn;
   return {
+    // 引导式形态（2026-10-20）：短回应 + 推进追问，不主动评价出题
     content: isFirst
-      ? `✅ 你说对的部分\n${args.userAnswer} 的方向是对的。\n\n⚠️ 需要修正\n其中「${args.selectedText || '概念'}」的表述要修正。\n\n❓ 反问\n你能举一个具体例子吗？`
+      ? `嗯，「把位置信息编进向量里」——那两个词挨得很近的时候，会发生什么？`
       : `针对你的补充回应：${args.userAnswer}`,
     done: false,
     session_id: args.sessionId || 'mock-own-voice-session-1'

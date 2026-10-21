@@ -74,15 +74,22 @@
   var MODES = {
     explain: { name: '解释', icon: '💡', label: '💡 解释', tag: '💡 解释', placeholder: '问点什么… 比如：为什么是这样？' },
     example: { name: '举例', icon: '📋', label: '📋 举例', tag: '📋 举例', placeholder: '想要什么样的例子？直接说' },
-    talk: { name: '我有话说', icon: '💬', label: '💬 我有话说', tag: '💬 我有话说', placeholder: '说说你的理解，我会给你反馈' },
+    talk: { name: '我有话说', icon: '💬', label: '💬 我有话说', tag: '💬 我有话说', placeholder: '说说你的理解，想到什么说什么' },
     visualize: { name: '画个图', icon: '🖼️', label: '🖼️ 画个图', tag: '🖼️ 画个图', placeholder: '想怎么改这张图？直接说' }
   };
 
   var FALLBACK_CHIPS = {
     explain: ['这是什么意思？', '举个例子', '有什么应用场景？'],
     example: ['换个场景再讲一次', '让我试着复述这个案例', '这个概念有什么反例？'],
-    talk: ['帮我总结我目前的理解水平', '我再补充一点', '再出一个检验我的问题'],
+    talk: ['我说不上来从哪说起', '我试试从头说说我的理解', '我再补充一点'],
     visualize: ['换个角度再画一张', '把关键部位标出来', '画一张对比图']
+  };
+
+  // 💬 开场白（render-only）：引导表达而非评价，AI 是接球手不是评委。
+  // 划词进入拼接概念名；不进线程、不落盘、不进 priorDiscussion。
+  var TALK_GUIDE_PLAIN = '聊聊你的理解吧——想到什么说什么，哪怕很碎也没关系，我接得住。';
+  var TALK_GUIDE_WITH_TERM = function(term) {
+    return '聊聊「' + term + '」吧——你是怎么理解的？想到什么说什么，哪怕很碎也没关系，我接得住。';
   };
 
   // 错误分级（断流容灾 2026-10-14，与 agent-bridge.mjs classifyError 同规则）：
@@ -387,6 +394,12 @@
         return;
       }
 
+      // 💬 开场引导（render-only）：划词直达其他模式会立刻自动开讲，不需要它；
+      // talk 模式永远等学生先说，开场白负责把「说说看」的邀请递出去。
+      if (this.initialMode === 'talk') {
+        this._appendGuideBubble();
+      }
+
       // 首轮种子：💡/📋/🖼️ 划词直达时自动开讲；💬 永远等学生先说（打开 ≠ 烧 token）
       if (this.initialMode === 'explain' && this.selectedText) {
         await this._sendExplainTurn(this.selectedText);
@@ -481,6 +494,23 @@
       else if (this._mode === 'example') this._sendExampleTurn(text);
       else if (this._mode === 'visualize') this._sendVisualizeTurn(text);
       else this._sendTalkTurn(text);
+    }
+
+    /**
+     * 💬 开场引导气泡（render-only）：只渲染不进 this.turns——它是对话氛围
+     * 而非对话内容，落盘 / priorDiscussion / 续聊回放均不含。
+     * 仅 talk 模式首次打开（非续聊回放）时出现。
+     */
+    _appendGuideBubble() {
+      if (!this._shell || !this._shell.chatEl) return;
+      this._guideBubbleShown = true;
+      const text = this.selectedText
+        ? window.CompanionTalkGuide.withTerm(this.selectedText)
+        : window.CompanionTalkGuide.plain;
+      const el = document.createElement('div');
+      el.className = 'socratic-bubble-row';
+      el.innerHTML = `<div class="socratic-avatar">✨</div><div class="socratic-bubble companion-guide-bubble">${escapeHtml(text)}</div>`;
+      this._shell.chatEl.appendChild(el);
     }
 
     _appendUserTurn(content, mode) {
@@ -858,6 +888,7 @@
 
   window.AICompanionModal = AICompanionModal;
   window.CompanionCore = CompanionCore;
+  window.CompanionTalkGuide = { plain: TALK_GUIDE_PLAIN, withTerm: TALK_GUIDE_WITH_TERM };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = { AICompanionModal, CompanionCore, CompanionErrors };
   }

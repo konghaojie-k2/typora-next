@@ -246,14 +246,34 @@ steps.then('the own-voice skill should exist with its trigger phrase', function(
   }
 });
 
-steps.then('the own-voice skill should require structured feedback sections', function() {
-  for (const section of ['✅', '⚠️', '💡', '❓']) {
-    if (!this.skillContent.includes(section)) {
-      throw new Error(`SKILL.md missing feedback section marker: ${section}`);
+steps.then('the own-voice skill should coach by guiding the student to express', function() {
+  // 形态决策 2026-10-20：AI 是接球手不是评委——引导表达而非抛四段评价
+  for (const marker of ['引导', '追问', '评价模式']) {
+    if (!this.skillContent.includes(marker)) {
+      throw new Error(`SKILL.md missing guiding marker: ${marker}`);
     }
   }
-  if (!this.skillContent.includes('Reflect') && !this.skillContent.includes('reflect back')) {
-    throw new Error('SKILL.md missing reflect-back principle');
+  // 引导式原则锚点：轻推不代答（不给直接纠正）、按需评价（学生要才给）
+  if (!this.skillContent.includes('轻推')) {
+    throw new Error('SKILL.md missing the nudge-with-contradiction principle');
+  }
+  if (!this.skillContent.includes('才进入评价模式')) {
+    throw new Error('SKILL.md missing on-demand evaluation gate');
+  }
+});
+
+steps.then('the own-voice skill should only evaluate when the student asks', function() {
+  // 评价由学生触发，且 AI 不得主动出检验题——「检验题/出题」只允许出现在
+  // 禁令语境里（不出/不出现/禁止），不允许出现祈使式指令
+  const clauses = this.skillContent.split(/[。；\n]/);
+  for (const c of clauses) {
+    if (/检验题|检验式出题/.test(c) && !/(不|禁止|不要)/.test(c)) {
+      throw new Error(`SKILL.md instructs quizzing outside a ban context: ${c.trim()}`);
+    }
+  }
+  if (this.skillContent.includes('### ✅') || this.skillContent.includes('### ⚠️') ||
+      this.skillContent.includes('### 💡') || this.skillContent.includes('### ❓')) {
+    throw new Error('SKILL.md still has the four-section verdict template');
   }
 });
 
@@ -413,6 +433,38 @@ steps.then('no LLM call should happen until the student speaks', function() {
   const calls = mockTauri.getOwnVoiceChatCalls();
   if (calls.length !== 0) {
     throw new Error(`opening the panel must not burn tokens, got ${calls.length} LLM calls`);
+  }
+});
+
+steps.then('a static guide bubble should greet the student without any LLM call', function() {
+  // 形态决策 2026-10-20：打开面板即有引导气泡（render-only，不调 LLM 不进线程）
+  if (typeof this.modal._appendGuideBubble !== 'function') {
+    throw new Error('companion modal missing _appendGuideBubble (static guide bubble)');
+  }
+  if (this.modal._guideBubbleShown !== true) {
+    throw new Error('guide bubble not shown on open');
+  }
+  // DOM mock 的 textContent 不聚合 innerHTML，改查模块暴露的引导文案常量；
+  // 划词进入时文案由 withTerm(term) 拼接概念名
+  const guide = global.window.CompanionTalkGuide;
+  if (!guide || !/你的理解/.test(guide.plain)) {
+    throw new Error('guide bubble copy should invite the student to express their understanding');
+  }
+  if (typeof guide.withTerm !== 'function' || !/「/.test(guide.withTerm('位置编码'))) {
+    throw new Error('guide bubble copy should embed the selected term');
+  }
+});
+
+steps.then('the guide bubble should not be persisted as a conversation turn', function() {
+  // 开场白是对话氛围，不是对话内容：线程里只有学生发言 + AI 回应，
+  // 引导文案不得混进 turns（priorDiscussion / 落盘 / 续聊回放因此天然不含它）
+  const guide = global.window.CompanionTalkGuide;
+  const leaked = this.modal.turns.some((t) => t.content === guide.plain);
+  if (leaked) {
+    throw new Error('guide bubble text leaked into this.turns');
+  }
+  if (this.modal.turns.length !== 2) {
+    throw new Error(`expected exactly 2 real turns, got ${this.modal.turns.length}`);
   }
 });
 

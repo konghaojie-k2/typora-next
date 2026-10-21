@@ -21,10 +21,11 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     And the sidebar history entry should merge both session kinds
     And the sidebar history entry should list saved explanations
 
-  Scenario: own-voice skill 控制回答方式
+  Scenario: own-voice skill 引导学生表达（而非评价出题）
     Given the app source files are loaded
     Then the own-voice skill should exist with its trigger phrase
-    And the own-voice skill should require structured feedback sections
+    And the own-voice skill should coach by guiding the student to express
+    And the own-voice skill should only evaluate when the student asks
     And the own-voice skill should forbid ascii double quotes
 
   Scenario: own-voice 链路端到端接线
@@ -45,10 +46,12 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
   Scenario: 面板路由与落盘（真实模块 + mock tauri）
     Given a real companion modal in a temp learning project
     When the panel is opened in talk mode
-    Then no LLM call should happen until the student speaks
+    Then a static guide bubble should greet the student without any LLM call
+    And no LLM call should happen until the student speaks
     When the student expresses an understanding
     Then the own voice chat should be invoked as the first turn
     And the thread should tag the turn as talk
+    And the guide bubble should not be persisted as a conversation turn
     And ending the panel should persist the talk session to own-voices
 
   Scenario: 我有话说续聊（伴学记录 → 覆盖原文件）

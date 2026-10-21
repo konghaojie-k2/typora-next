@@ -3869,6 +3869,12 @@ body.learning-mode .toolbar {
   color: var(--color-accent);
 }
 
+/* 💬 开场引导气泡（render-only）：比普通 tutor 气泡轻一档，示意这是邀请不是回答 */
+.companion-guide-bubble {
+  font-style: italic;
+  opacity: 0.88;
+}
+
 /* 用户消息上的模式标签（同一线程区分这轮是解释/举例/我有话说） */
 .companion-mode-tag {
   display: inline-block;
