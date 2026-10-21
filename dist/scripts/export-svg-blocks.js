@@ -128,6 +128,72 @@
   }
 
   /**
+   * 把 svg 归一化为「满宽/满视口 + 对称留白 + 居中」的导出形态。
+   *
+   * @param {string} svgText
+   * @param {{pad?: number, fillViewport?: boolean}} [opts]
+   *   - fillViewport: true  → width/height 均 100%，浏览器打开占满窗口、内容
+   *     一屏居中（Mermaid 独立文件截图用）
+   *   - fillViewport: false（默认）→ width="100%" + height 按 viewBox 比例
+   *     算出固定值，与预览的自适应宽高比一致（正文插图——补 height="100%"
+   *     会被解释成视口高，内容等比缩小泡在空白里，2026-10-21 实爆）
+   * @returns {string}
+   */
+  function normalizeForExport(svgText, opts) {
+    opts = opts || {};
+    const PAD = typeof opts.pad === 'number' && opts.pad >= 0 ? opts.pad : 24;
+    const m = svgText.match(/viewBox\s*=\s*"([\d.eE+\-\s]+)"/);
+    if (!m) return svgText;
+    const p = m[1].trim().split(/[\s,]+/).map(Number);
+    if (p.length !== 4 || !(p[2] > 0) || !(p[3] > 0)) return svgText;
+    const vx = p[0];
+    const vy = p[1];
+    const vw = p[2];
+    const vh = p[3];
+
+    const open = svgText.match(/<svg\b[^>]*>/i);
+    if (!open) return svgText;
+    let tag = open[0];
+
+    // 1. 剥内联 max-width（只动根开标签；其余 style 声明保留）
+    tag = tag.replace(/\sstyle="([^"]*)"/i, (full, body) => {
+      const kept = body.split(';')
+        .map((s) => s.trim())
+        .filter((s) => s && !/^max-width\s*:/i.test(s))
+        .join('; ');
+      return kept ? ` style="${kept}"` : '';
+    });
+
+    // 2. 宽高形态（见 @param）
+    const size = opts.fillViewport
+      ? { width: '100%', height: '100%' }
+      : { width: '100%', height: String(Math.round(((vh + PAD * 2) / (vw + PAD * 2)) * 10000) / 100) + '%' };
+    if (/\swidth\s*=/i.test(tag)) {
+      tag = tag.replace(/\swidth\s*=\s*"[^"]*"/i, ` width="${size.width}"`);
+    } else {
+      tag = tag.replace(/<svg\b/i, `<svg width="${size.width}"`);
+    }
+    if (/\sheight\s*=/i.test(tag)) {
+      tag = tag.replace(/\sheight\s*=\s*"[^"]*"/i, ` height="${size.height}"`);
+    } else {
+      tag = tag.replace(/<svg\b/i, `<svg height="${size.height}"`);
+    }
+
+    // 4. 居中声明（宽高比一致时 meet 是恒等变换，纯粹是查看器兼容保险）
+    if (/\spreserveAspectRatio\s*=/i.test(tag)) {
+      tag = tag.replace(/\spreserveAspectRatio\s*=\s*"[^"]*"/i, ' preserveAspectRatio="xMidYMid meet"');
+    } else {
+      tag = tag.replace(/<svg\b/i, '<svg preserveAspectRatio="xMidYMid meet"');
+    }
+
+    // 3. viewBox 重写为加留白后的坐标
+    tag = tag.replace(/\sviewBox\s*=\s*"[^"]*"/i,
+      ` viewBox="${vx - PAD} ${vy - PAD} ${vw + PAD * 2} ${vh + PAD * 2}"`);
+
+    return svgText.replace(open[0], () => tag);
+  }
+
+  /**
    * 把内联 svg 块原位重写为 mermaid 围栏，并返回 mermaid_images 条目。
    * @returns {Promise<{markdown: string, images: Array<{key, svg, width, height}>}>}
    */
@@ -159,6 +225,7 @@
     dedent,
     extractInlineSvgBlocks,
     measureSvg,
+    normalizeForExport,
     prepareForWordExport,
     _viewBoxSize: viewBoxSize
   };

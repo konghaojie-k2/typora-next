@@ -6698,6 +6698,7 @@ window.agentBridge = {
   function initDownloadButtons(container = elements.markdownBody) {
     addImageDownloadButtons(container);
     addMermaidDownloadButtons(container);
+    addInlineSvgDownloadButtons(container);
     addTableDownloadButtons(container);
   }
 
@@ -6803,10 +6804,61 @@ window.agentBridge = {
       alert('图表尚未渲染完成');
       return;
     }
+    downloadSvgElement(svg, 'diagram.svg', { fillViewport: true });
+  }
+
+  /**
+   * 正文内嵌 <svg> 图形（课程插图等）挂「⬇️ SVG」下载。
+   * 独立于 mermaid 管线：mermaid 在 pre.mermaid 里已有自己的按钮，
+   * KaTeX 数学符号内部也是 <svg>，两者都要排除。
+   */
+  function addInlineSvgDownloadButtons(container = elements.markdownBody) {
+    const svgs = container.querySelectorAll('svg');
+    svgs.forEach(svg => {
+      if (svg.dataset.downloadBtn === 'true') return;
+      // 排除：mermaid 渲染产物（有自己的按钮）、KaTeX 数学、按钮/图标内嵌
+      if (svg.closest('pre.mermaid')) return;
+      if (svg.closest('.katex')) return;
+      if (svg.closest('.download-btn')) return;
+      svg.dataset.downloadBtn = 'true';
+
+      // 块级插图保持块级铺满：wrapper 必须撑满整行（display:block + width:100%），
+      // 否则 inline-block 让 svg 的 width=100% 失去参照 → 插图塌缩变小
+      // （2026-10-21 实爆：正文插图被缩小成半栏）
+      const wrapper = document.createElement('div');
+      wrapper.className = 'downloadable-wrapper svg-block-wrapper';
+      wrapper.style.display = 'block';
+      wrapper.style.width = '100%';
+
+      svg.parentNode.insertBefore(wrapper, svg);
+      wrapper.appendChild(svg);
+
+      const btn = createDownloadButton('⬇️ SVG', '下载 SVG 图形');
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        downloadSvgElement(svg, 'figure.svg');
+      });
+      wrapper.appendChild(btn);
+    });
+  }
+
+  /**
+   * 下载一个 DOM 里的 svg 元素：序列化 → normalizeForExport 居中归一化
+   * （剥 max-width / viewBox 对称留白 / meet）→ 走保存对话框。
+   * @param {SVGSVGElement} svg
+   * @param {string} filename
+   * @param {object} [opts] - normalizeForExport 选项：
+   *   mermaid 独立文件 fillViewport:true（100%×100% 一屏居中）；
+   *   正文插图默认 fitWidth（width=100% + height 按 viewBox 比例，与预览一致）
+   */
+  function downloadSvgElement(svg, filename, opts) {
     const serializer = new XMLSerializer();
-    const svgString = serializer.serializeToString(svg);
+    const raw = serializer.serializeToString(svg);
+    const svgString = (window.ExportSvgBlocks && window.ExportSvgBlocks.normalizeForExport)
+      ? window.ExportSvgBlocks.normalizeForExport(raw, opts)
+      : raw;
     const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
-    triggerDownload(blob, 'diagram.svg');
+    triggerDownload(blob, filename);
   }
 
   function downloadTable(table) {

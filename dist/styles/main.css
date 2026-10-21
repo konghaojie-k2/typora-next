@@ -3029,6 +3029,13 @@ body.zen-mode .markdown-body {
   display: inline-block;
 }
 
+/* 正文内嵌 svg 插图的 wrapper：块级铺满整行，inline-block 会让
+   svg width=100% 失去参照导致插图塌缩（2026-10-21 实爆） */
+.downloadable-wrapper.svg-block-wrapper {
+  display: block;
+  width: 100%;
+}
+
 .download-btn {
   position: absolute;
   top: 4px;
