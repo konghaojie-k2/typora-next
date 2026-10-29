@@ -5,6 +5,8 @@
 
 const { StepRegistry } = require('../../shared/runner');
 const commonSteps = require('../../shared/steps/common');
+const fs = require('fs');
+const path = require('path');
 
 // Create sprint-specific registry, merge common steps
 const steps = new StepRegistry();
@@ -513,6 +515,49 @@ steps.then('前 {int} 章保持{string}状态', async function(count, status) {
       if (this.projectData.chapters[i].status !== status) {
         throw new Error(`Chapter ${i + 1} should be ${status}`);
       }
+    }
+  }
+});
+
+// ============================================
+// 已学完课程卡片样式区分（静态接线检查，与 acceptance 层同断言）
+// ============================================
+
+steps.given('the hub source files are loaded', async function() {
+  this.hubJs = fs.readFileSync(
+    path.join(__dirname, '../../../dist/scripts/learning/learning-hub.js'), 'utf-8');
+  this.learningCss = fs.readFileSync(
+    path.join(__dirname, '../../../dist/styles/learning.css'), 'utf-8');
+});
+
+steps.then('the hub card should mark completed courses with a badge', async function() {
+  for (const marker of ['learning-hub-card--completed', 'kg-course-completed-badge']) {
+    if (!this.hubJs.includes(marker)) {
+      throw new Error(`learning-hub.js missing completed-card marker: ${marker}`);
+    }
+  }
+  if (!this.learningCss.includes('.learning-hub-card--completed')) {
+    throw new Error('learning.css missing .learning-hub-card--completed styles');
+  }
+  if (!this.hubJs.includes('已学完')) {
+    throw new Error('learning-hub.js missing 已学完 meta text');
+  }
+});
+
+steps.then('the hub card should derive completion from the shared predicate', async function() {
+  if (!this.hubJs.includes('isProjectCourseCompleted')) {
+    throw new Error('learning-hub.js must call isProjectCourseCompleted');
+  }
+});
+
+steps.then('the completed card should use calm green styling', async function() {
+  for (const marker of [
+    '.learning-hub-card--completed {',
+    '.learning-hub-card--completed .learning-hub-card-progress-fill',
+    'rgba(16, 185, 129'
+  ]) {
+    if (!this.learningCss.includes(marker)) {
+      throw new Error(`learning.css missing calm green marker: ${marker}`);
     }
   }
 });

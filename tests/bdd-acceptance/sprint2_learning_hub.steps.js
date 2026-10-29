@@ -329,6 +329,53 @@ steps.then('localStorage 中删除对应记录', async function() {
   }
 });
 
+// ============================================
+// 已学完课程样式区分（静态接线检查）
+// ============================================
+
+steps.given('the hub source files are loaded', function() {
+  this.hubJs = fs.readFileSync(
+    path.join(__dirname, '../../dist/scripts/learning/learning-hub.js'), 'utf-8');
+  this.learningCss = fs.readFileSync(
+    path.join(__dirname, '../../dist/styles/learning.css'), 'utf-8');
+});
+
+steps.then('the hub card should mark completed courses with a badge', function() {
+  // 卡片修饰类 + 复用知识图谱 dashboard 的完结徽标样式
+  for (const marker of ['learning-hub-card--completed', 'kg-course-completed-badge']) {
+    if (!this.hubJs.includes(marker)) {
+      throw new Error(`learning-hub.js missing completed-card marker: ${marker}`);
+    }
+  }
+  if (!this.learningCss.includes('.learning-hub-card--completed')) {
+    throw new Error('learning.css missing .learning-hub-card--completed styles');
+  }
+  // 完结卡片 meta 文案：🎉 已学完（替换「100% 完成」数字）
+  if (!this.hubJs.includes('已学完')) {
+    throw new Error('learning-hub.js missing 已学完 meta text');
+  }
+});
+
+steps.then('the hub card should derive completion from the shared predicate', function() {
+  // 判定必须复用 course-completion.js 的权威函数，不许在 hub 里重写
+  if (!this.hubJs.includes('isProjectCourseCompleted')) {
+    throw new Error('learning-hub.js must call isProjectCourseCompleted');
+  }
+});
+
+steps.then('the completed card should use calm green styling', function() {
+  // 完结态去催促感：绿色系边框/进度条（半透明 rgba 双主题通用）
+  for (const marker of [
+    '.learning-hub-card--completed {',
+    '.learning-hub-card--completed .learning-hub-card-progress-fill',
+    'rgba(16, 185, 129'
+  ]) {
+    if (!this.learningCss.includes(marker)) {
+      throw new Error(`learning.css missing calm green marker: ${marker}`);
+    }
+  }
+});
+
 // Cleanup hook
 steps._cleanup = function() {
   if (this.tempHomeDir) cleanupTempDir(this.tempHomeDir);

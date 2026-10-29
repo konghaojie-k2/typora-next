@@ -1382,6 +1382,26 @@
   transition: width 0.3s ease;
 }
 
+/* 已学完课程卡片：徽标 + 淡绿边框 + 绿色进度条（完结态去催促感）。
+   半透明 rgba 与 .kg-course-completed-badge 同理，明暗主题通用无需覆盖 */
+.learning-hub-card--completed {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.04);
+}
+.learning-hub-card--completed:hover {
+  border-color: rgba(16, 185, 129, 0.6);
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.1);
+}
+.learning-hub-card--completed .learning-hub-card-progress-fill {
+  background: linear-gradient(90deg, #10b981, #059669);
+}
+.learning-hub-card-badge {
+  margin-left: 8px;
+  padding: 2px 10px;
+  font-size: 11px;
+  vertical-align: middle;
+}
+
 .learning-hub-card-actions {
   display: flex;
   align-items: center;

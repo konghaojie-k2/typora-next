@@ -44,3 +44,9 @@ Feature: 课程模式入口
     Then 弹出确认对话框
     And 确认后从列表移除
     And localStorage 中删除对应记录
+
+  Scenario: 已学完课程在列表中有完成样式区分
+    Given the hub source files are loaded
+    Then the hub card should mark completed courses with a badge
+    And the hub card should derive completion from the shared predicate
+    And the completed card should use calm green styling

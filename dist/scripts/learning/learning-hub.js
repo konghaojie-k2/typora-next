@@ -121,6 +121,7 @@
         if (info) {
           p.chapters = info.chapters;
           p.completed = info.completed;
+          p.courseCompleted = info.courseCompleted;
         }
       } catch (_) { /* keep cached value */ }
     }
@@ -188,14 +189,16 @@
       return;
     }
 
-    container.innerHTML = projects.map(project => `
-      <div class="learning-hub-card" data-path="${escapeAttr(project.path)}">
+    container.innerHTML = projects.map(project => {
+      const done = !!project.courseCompleted;
+      return `
+      <div class="learning-hub-card${done ? ' learning-hub-card--completed' : ''}" data-path="${escapeAttr(project.path)}">
         <div class="learning-hub-card-info">
-          <div class="learning-hub-card-name">${escapeHtml(project.name)}</div>
-          <div class="learning-hub-card-meta">${project.chapters} 章 · ${project.progress}% 完成</div>
+          <div class="learning-hub-card-name">${escapeHtml(project.name)}${done ? '<span class="kg-course-completed-badge learning-hub-card-badge">🎉 已学完</span>' : ''}</div>
+          <div class="learning-hub-card-meta">${done ? `${project.chapters} 章 · 已学完` : `${project.chapters} 章 · ${project.progress}% 完成`}</div>
           <div class="learning-hub-card-progress">
             <div class="learning-hub-card-progress-bar">
-              <div class="learning-hub-card-progress-fill" style="width: ${project.progress}%"></div>
+              <div class="learning-hub-card-progress-fill" style="width: ${done ? 100 : project.progress}%"></div>
             </div>
           </div>
         </div>
@@ -204,7 +207,8 @@
           <button class="learning-hub-card-delete" data-path="${escapeAttr(project.path)}" title="删除项目">🗑️</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     // Bind click events
     container.querySelectorAll('.learning-hub-card').forEach(card => {
@@ -368,7 +372,10 @@
       return {
         name: data.name || '未命名项目',
         chapters: data.chapters.length,
-        completed: completed
+        completed: completed,
+        courseCompleted: window.CourseCompletion
+          ? window.CourseCompletion.isProjectCourseCompleted(data)
+          : false
       };
     } catch (e) {
       console.warn('[LearningHub] detectProjectAt error:', e);
