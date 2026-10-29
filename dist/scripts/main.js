@@ -39,6 +39,9 @@ window.agentBridge = {
   // overriding the explicit user choice. See dist/scripts/theme-manager.js + tests/.
   const TM = window.ThemeManager;
 
+  // Tab drag-to-reorder pure logic (loaded before this script in index.html).
+  const TabDrag = window.TabDrag;
+
   // ============================================
   // State Management
   // ============================================
@@ -1122,12 +1125,14 @@ window.agentBridge = {
   }
 
   function renderTabs() {
+    cancelTabDrag(); // a rebuild mid-drag would strand the drag session
     elements.tabsList.innerHTML = '';
 
     state.tabs.forEach((tab, index) => {
       const tabEl = document.createElement('div');
       tabEl.className = 'tab-item' +
         (index === state.activeTab ? ' active' : '');
+      tabEl.dataset.index = index; // delegated drag resolves the tab via this
 
       const label = document.createElement('span');
       label.className = 'tab-label';
@@ -1155,6 +1160,147 @@ window.agentBridge = {
 
       elements.tabsList.appendChild(tabEl);
     });
+  }
+
+  // ============================================
+  // Tab drag-to-reorder (commit-on-drop)
+  //
+  // renderTabs' click/close/contextmenu handlers close over the loop index,
+  // so state.tabs is NOT reordered mid-drag — the dragged tab only follows
+  // the pointer visually (translateX) and neighbors get drop-before/after
+  // indicator classes. On mouseup the order commits via the TabDrag pure
+  // functions and renderTabs rebuilds every handler from fresh indices.
+  // ============================================
+  const tabDrag = {
+    phase: 'idle',   // 'idle' | 'pending' | 'dragging'
+    fromIndex: -1,
+    startX: 0,
+    tabEl: null,
+    midpoints: [],   // snapshot at drag start; DOM order never changes mid-drag
+    dropIndex: -1
+  };
+  let suppressNextTabClick = false;
+
+  function setupTabDrag() {
+    if (!TabDrag || !elements.tabsList) return;
+    elements.tabsList.addEventListener('mousedown', onTabMouseDown);
+    // The click fired right after a drag must not reach the stale
+    // index-closure switchTab (the commit re-render detaches the dragged
+    // node; click dispatch on detached nodes is engine-dependent).
+    elements.tabsList.addEventListener('click', onTabClickCapture, true);
+    // Wheel-scrolling mid-drag would invalidate the midpoint snapshot.
+    elements.tabsList.addEventListener('wheel', (e) => {
+      if (tabDrag.phase === 'dragging') e.preventDefault();
+    }, { passive: false });
+  }
+
+  function onTabMouseDown(e) {
+    if (e.button !== 0) return;
+    if (state.tabs.length < 2) return;
+    if (e.target.closest('.tab-close')) return;
+    const tabEl = e.target.closest('.tab-item');
+    if (!tabEl) return;
+    tabDrag.phase = 'pending';
+    tabDrag.fromIndex = Number(tabEl.dataset.index);
+    tabDrag.startX = e.clientX;
+    tabDrag.tabEl = tabEl;
+    tabDrag.dropIndex = tabDrag.fromIndex;
+    document.addEventListener('mousemove', onTabDragMove);
+    document.addEventListener('mouseup', onTabDragEnd);
+    window.addEventListener('blur', cancelTabDrag);
+  }
+
+  function onTabDragMove(e) {
+    if (tabDrag.phase === 'pending') {
+      if (!TabDrag.shouldStartDrag(tabDrag.startX, e.clientX)) return;
+      tabDrag.phase = 'dragging';
+      // Snapshot once: DOM order is stable for the whole drag
+      // (commit-on-drop). If edge auto-scroll is ever added, recompute
+      // per move instead.
+      tabDrag.midpoints = Array.from(
+        elements.tabsList.querySelectorAll('.tab-item')
+      ).map(el => {
+        const r = el.getBoundingClientRect();
+        return r.left + r.width / 2;
+      });
+      tabDrag.tabEl.classList.add('dragging');
+    }
+    if (tabDrag.phase !== 'dragging') return;
+    e.preventDefault();
+    tabDrag.tabEl.style.transform = `translateX(${e.clientX - tabDrag.startX}px)`;
+    tabDrag.dropIndex = TabDrag.computeDropIndex(
+      tabDrag.midpoints, e.clientX, tabDrag.fromIndex
+    );
+    updateTabDropIndicator();
+  }
+
+  function updateTabDropIndicator() {
+    const tabs = elements.tabsList.querySelectorAll('.tab-item');
+    tabs.forEach(el => el.classList.remove('drop-before', 'drop-after'));
+    const from = tabDrag.fromIndex;
+    const to = tabDrag.dropIndex;
+    if (to === from) return;
+    // `to` is a post-removal index; map it back to a DOM boundary:
+    //   to < from → left edge of the tab now at position `to`
+    //   to > from → right edge of the tab now at position `to`
+    // (when moving right, position `to` currently holds the tab the dragged
+    // tab will land after)
+    if (to < from) {
+      if (tabs[to]) tabs[to].classList.add('drop-before');
+    } else {
+      if (tabs[to]) tabs[to].classList.add('drop-after');
+    }
+  }
+
+  function onTabDragEnd() {
+    document.removeEventListener('mousemove', onTabDragMove);
+    document.removeEventListener('mouseup', onTabDragEnd);
+    window.removeEventListener('blur', cancelTabDrag);
+    if (tabDrag.phase === 'dragging') {
+      suppressNextTabClick = true;
+      const from = tabDrag.fromIndex;
+      const to = tabDrag.dropIndex;
+      if (to !== from) {
+        state.tabs = TabDrag.reorderArray(state.tabs, from, to);
+        state.activeTab = TabDrag.remapActiveIndex(state.activeTab, from, to);
+      }
+      resetTabDragSession();
+      renderTabs();
+      return;
+    }
+    resetTabDragSession();
+  }
+
+  function cancelTabDrag() {
+    if (tabDrag.phase === 'idle') return;
+    document.removeEventListener('mousemove', onTabDragMove);
+    document.removeEventListener('mouseup', onTabDragEnd);
+    window.removeEventListener('blur', cancelTabDrag);
+    resetTabDragSession();
+  }
+
+  function resetTabDragSession() {
+    if (tabDrag.tabEl && tabDrag.tabEl.isConnected) {
+      tabDrag.tabEl.classList.remove('dragging');
+      tabDrag.tabEl.style.transform = '';
+    }
+    if (elements.tabsList) {
+      elements.tabsList
+        .querySelectorAll('.tab-item.drop-before, .tab-item.drop-after')
+        .forEach(el => el.classList.remove('drop-before', 'drop-after'));
+    }
+    tabDrag.phase = 'idle';
+    tabDrag.fromIndex = -1;
+    tabDrag.tabEl = null;
+    tabDrag.midpoints = [];
+    tabDrag.dropIndex = -1;
+  }
+
+  function onTabClickCapture(e) {
+    if (!suppressNextTabClick) return;
+    suppressNextTabClick = false;
+    e.stopPropagation();
+    e.preventDefault();
   }
 
   async function loadTabContent(index) {
@@ -5761,6 +5907,7 @@ window.agentBridge = {
     initTranslation();
     setupKeyboardShortcuts();
     setupDragDrop();
+    setupTabDrag();
     setupScrollObserver();
     setupThemeDetection();
     setupFileWatcher();

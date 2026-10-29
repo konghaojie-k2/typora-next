@@ -1337,6 +1337,22 @@ main {
   color: white;
 }
 
+/* Tab drag-to-reorder feedback */
+.tab-item.dragging {
+  /* neutralize .tab-item's `transition: all` or the transform lags behind the cursor */
+  transition: none;
+  opacity: 0.85;
+  z-index: 2;
+}
+
+.tab-item.drop-before {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
+.tab-item.drop-after {
+  box-shadow: inset -2px 0 0 var(--color-accent);
+}
+
 /* Tab Context Menu */
 .tab-context-menu {
   position: fixed;

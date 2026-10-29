@@ -511,6 +511,16 @@ async function runAcceptanceTests() {
   if (toolbarTooltipSteps._cleanup) toolbarTooltipSteps._cleanup.call({});
   if (onboardingSteps._cleanup) onboardingSteps._cleanup.call({});
 
+  // Tab 拖拽重排（commit-on-drop：纯函数行为层 + 静态标记层）
+  console.log(`\n${YELLOW}▶ Tab Drag Reorder${RESET}`);
+  const tabDragSteps = require('./tab_drag.steps');
+  const tabDragResult = await runFeatureFile(
+    path.join(__dirname, '../tab-drag/features/tab_drag.feature'),
+    tabDragSteps
+  );
+  totalPassed += tabDragResult.passed;
+  totalFailed += tabDragResult.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);
