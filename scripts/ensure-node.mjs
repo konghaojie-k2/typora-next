@@ -16,12 +16,13 @@ const link = path.join(tools, 'node');
 const binary = path.join(link, 'bin', 'node');
 
 if (existsSync(binary)) process.exit(0);
+mkdirSync(tools, { recursive: true });
 if (platform !== 'darwin') {
-  console.log('[ensure-node] Non-macOS build: using Node from PATH.');
+  // The resource list is shared by platforms; keep the directory present so
+  // Tauri can bundle on Windows, while Windows continues using PATH Node.
+  mkdirSync(link, { recursive: true });
   process.exit(0);
 }
-
-mkdirSync(tools, { recursive: true });
 const tmp = path.join(tools, `${archive}.download`);
 const url = `https://nodejs.org/dist/v${version}/${archive}`;
 console.log(`[ensure-node] Downloading ${url}`);
