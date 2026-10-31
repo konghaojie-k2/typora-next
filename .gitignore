@@ -53,4 +53,7 @@ icon-*.html
 
 # Local cargo home cache
 .cargo-home/
+
+# Local build toolchain (Node runtime used for macOS packaging)
+.tools/
 test_class_pad*.html

@@ -7,6 +7,34 @@ use tauri::{AppHandle, Emitter, State};
 
 use crate::plan_prompt::{build_plan_prompt, parse_plan_response};
 use crate::{get_config, AppConfig, AppState};
+
+/// Build a command for Node that also works when the app is launched from
+/// Finder. GUI-launched macOS apps do not inherit the shell PATH, so a plain
+/// `Command::new("node")` fails with ENOENT even when Node is installed.
+fn node_command() -> Command {
+    let mut candidates = Vec::new();
+    if cfg!(target_os = "macos") {
+        // Tauri resources are placed in Contents/Resources on macOS.
+        if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf())) {
+            candidates.push(exe_dir.join("../Resources/node/bin/node"));
+            // Tauri preserves a leading ../ in resource paths under _up_.
+            candidates.push(exe_dir.join("../Resources/_up_/.tools/node/bin/node"));
+        }
+        candidates.extend([
+            std::path::PathBuf::from("/opt/homebrew/bin/node"),
+            std::path::PathBuf::from("/usr/local/bin/node"),
+            std::path::PathBuf::from("/usr/bin/node"),
+        ]);
+    }
+    for candidate in candidates {
+        if candidate.is_file() {
+            return Command::new(candidate);
+        }
+    }
+    // Preserve the original error and allow PATH-based resolution on other
+    // Unix environments or unusual Node installations.
+    Command::new("node")
+}
 // Re-export so existing `ai_agent::copy_bundled_skills_to_project` call sites
 // (lib.rs) keep resolving after the logic moved to the skills_bundle module.
 pub use crate::skills_bundle::{copy_bundled_skills_to_project, get_bundled_skills_dir};
@@ -231,7 +259,7 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
         "args": { "project_path": project_path }
     });
 
-    let mut cmd = Command::new("node");
+    let mut cmd = node_command();
     cmd.arg("--no-warnings")
         .arg(&bridge_path)
         .arg("init")
@@ -322,7 +350,7 @@ async fn run_agent_bridge(
         "args": args
     });
 
-    let mut cmd = Command::new("node");
+    let mut cmd = node_command();
     cmd.arg("--no-warnings")
         .arg(&bridge_path)
         .arg(stage)
@@ -1499,7 +1527,7 @@ pub async fn check_agent_sdk(app_handle: tauri::AppHandle) -> Result<serde_json:
         "args": {}
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg("--no-warnings")
         .arg(&bridge_path)
         .arg("check")
@@ -2332,7 +2360,7 @@ pub async fn evaluate_quiz(
         "answers": answers,
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("evaluate")
         .arg(payload.to_string())
@@ -2625,7 +2653,7 @@ pub async fn explain_selection_agent(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("explain")
         .arg(payload.to_string())
@@ -2733,7 +2761,7 @@ pub async fn adapt_subsequent_chapters(
         "weakConcepts": weak_concepts,
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("adapt")
         .arg(payload.to_string())
@@ -2838,7 +2866,7 @@ async fn spawn_generate_extra_quiz(
         std::fs::create_dir_all(parent).map_err(|e| format!("创建 extras 目录失败: {}", e))?;
     }
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(bridge_path)
         .arg("generate-extra-quiz")
         .arg(payload.to_string())
@@ -3093,7 +3121,7 @@ pub async fn socratic_chat(
     });
     log::info!("socratic_chat: payload={}", payload);
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("socratic")
         .arg(payload.to_string())
@@ -3206,7 +3234,7 @@ pub async fn case_study_chat(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("case-study")
         .arg(payload.to_string())
@@ -3361,7 +3389,7 @@ pub async fn own_voice_chat(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("own-voice")
         .arg(payload.to_string())
@@ -3509,7 +3537,7 @@ pub async fn visualize_chat(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("visualize")
         .arg(payload.to_string())
@@ -3650,7 +3678,7 @@ pub async fn generate_review_content_agent(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("review-gen")
         .arg(payload.to_string())
@@ -3748,7 +3776,7 @@ pub async fn generate_review_content_batch_agent(
         }
     });
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("review-gen-batch")
         .arg(payload.to_string())
@@ -3857,7 +3885,7 @@ pub async fn explore_chat(
         payload.to_string().len()
     );
 
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = node_command();
     cmd.arg(&bridge_path)
         .arg("explore")
         .arg(payload.to_string())
@@ -4018,7 +4046,7 @@ pub async fn generate_paper_reader_guide(
             }
         });
 
-        let mut cmd = std::process::Command::new("node");
+        let mut cmd = node_command();
         cmd.arg(&bridge_path)
             .arg("paper-reader")
             .arg(payload.to_string())

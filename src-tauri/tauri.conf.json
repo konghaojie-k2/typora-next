@@ -6,7 +6,7 @@
   "build": {
     "frontendDist": "../dist",
     "beforeDevCommand": "",
-    "beforeBuildCommand": "node tests/run-all.js"
+    "beforeBuildCommand": "node scripts/ensure-node.mjs && node tests/run-all.js"
   },
   "app": {
     "withGlobalTauri": true,
@@ -45,6 +45,7 @@
       "icons/md-file-256.png",
       "../agent-bridge.mjs",
       "../package.json",
+      "../.tools/node",
       "skills/",
       "../samples/full.md"
     ],
