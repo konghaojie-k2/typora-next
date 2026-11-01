@@ -521,6 +521,16 @@ async function runAcceptanceTests() {
   totalPassed += tabDragResult.passed;
   totalFailed += tabDragResult.failed;
 
+  // 课程生成事件项目归属隔离（chapter_complete 跨课程持久化污染修复）
+  console.log(`\n${YELLOW}▶ Course Event Scope${RESET}`);
+  const eventScopeSteps = require('./course_event_scope.steps');
+  const eventScopeResult = await runFeatureFile(
+    path.join(__dirname, '../course-event-scope/features/course_event_scope.feature'),
+    eventScopeSteps
+  );
+  totalPassed += eventScopeResult.passed;
+  totalFailed += eventScopeResult.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);

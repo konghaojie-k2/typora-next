@@ -340,6 +340,12 @@ async fn run_agent_bridge(
     eprintln!("[ai_agent] Agent bridge path: {:?}", bridge_path);
 
     // Build config JSON for agent bridge
+    // 课程类 stage 的 args 带 project_path——抽出来给转发的事件打项目身份，
+    // 前端 bridge 据此忽略其他课程的事件（跨课程持久化污染修复）。
+    let event_project_path = args
+        .get("project_path")
+        .and_then(|v| v.as_str())
+        .map(String::from);
     let config_json = serde_json::json!({
         "config": {
             "ai_provider": config.ai_provider.as_ref().map(|p| format!("{:?}", p).to_lowercase()).unwrap_or_else(|| "anthropic".to_string()),
@@ -451,7 +457,10 @@ async fn run_agent_bridge(
 
                 // Parse as generic JSON and forward immediately
                 match serde_json::from_str::<Value>(&trimmed) {
-                    Ok(event) => {
+                    Ok(mut event) => {
+                        if let Some(p) = &event_project_path {
+                            crate::agent_event_scope::tag_event_with_project(p, &mut event);
+                        }
                         let event_type = event
                             .get("type")
                             .and_then(|v| v.as_str())

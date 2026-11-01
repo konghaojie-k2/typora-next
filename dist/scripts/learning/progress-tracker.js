@@ -693,6 +693,19 @@
     handleEvent(payload) {
       if (!payload || !payload.type) return;
 
+      // 项目归属闸门：agent-event 是全局频道，每个存活 bridge 都会收到
+      // 所有课程的事件；chapter_complete 的持久化以本 bridge 的
+      // ui.projectPath 为目标，不过滤的话后台 A 课程的事件会写进前台
+      // B 课程的 project.json（2026-10-29 实爆，三课程头 2 章 file 互污）。
+      // 未携带 projectPath 的旧事件兼容放行。
+      const eventProject = payload.data && payload.data.projectPath;
+      if (eventProject) {
+        const mine = this.ui && this.ui.projectPath;
+        if (!mine || _normalizeProjectPath(eventProject) !== _normalizeProjectPath(mine)) {
+          return;
+        }
+      }
+
       this.manager.handleAgentEvent(payload);
 
       // Update UI for the affected chapter
@@ -1071,6 +1084,15 @@
       .replace(/-+/g, '-')
       .replace(/^-|-$/g, '');
     return `${paddedIndex}-${safeTitle}.md`;
+  }
+
+  /**
+   * Normalize a project path for identity comparison: unify separators and
+   * strip trailing slashes. The same project may arrive as C:/p or C:\p
+   * depending on which layer produced the string.
+   */
+  function _normalizeProjectPath(p) {
+    return String(p || '').replace(/\\/g, '/').replace(/\/+$/, '');
   }
 
   // ============================================

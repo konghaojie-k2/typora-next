@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
+pub mod agent_event_scope;
 pub mod agent_sdk_probe;
 pub mod ai_agent;
 pub mod ai_profiles;
