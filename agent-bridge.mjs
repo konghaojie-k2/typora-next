@@ -1226,7 +1226,7 @@ export async function ownVoiceChat(queryFnUnused, config, args) {
   log('info', 'Starting own-voice', { project_path, selected_text: selected_text || null, first_turn: !!first_turn });
 
   const prompt = first_turn
-    ? `请使用 typora-course-own-voice skill 听听学生的理解并给出反馈。\n` +
+    ? `请使用 typora-course-own-voice skill 与学生开放讨论，先直接回应内容，允许发散；仅在缺少关键信息时澄清，不要例行反问。\n` +
       `学生发言: ${JSON.stringify(user_answer)}\n` +
       (selected_text && selected_text.trim() ? `选中概念: ${JSON.stringify(selected_text)}\n` : '') +
       (context ? `章节上下文: ${JSON.stringify(context)}\n` : '')

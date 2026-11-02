@@ -1,7 +1,6 @@
-import { existsSync, mkdirSync, createWriteStream } from 'node:fs';
+import { existsSync, mkdirSync, copyFileSync, chmodSync, renameSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
-import https from 'node:https';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -15,7 +14,6 @@ const target = path.join(tools, `node-v${version}-${platform}-${arch}`);
 const link = path.join(tools, 'node');
 const binary = path.join(link, 'bin', 'node');
 
-if (existsSync(binary)) process.exit(0);
 mkdirSync(tools, { recursive: true });
 if (platform !== 'darwin') {
   // The resource list is shared by platforms; keep the directory present so
@@ -23,24 +21,47 @@ if (platform !== 'darwin') {
   mkdirSync(link, { recursive: true });
   process.exit(0);
 }
-const tmp = path.join(tools, `${archive}.download`);
-const url = `https://nodejs.org/dist/v${version}/${archive}`;
-console.log(`[ensure-node] Downloading ${url}`);
+// curl fails on incomplete transfers; tar must finish before binaries are published.
+async function installArchive(url, name, install) {
+  const staging = path.join(tools, `.prepare-${name}-${process.pid}`);
+  mkdirSync(staging, { recursive: true });
+  const archivePath = path.join(staging, 'archive.tar.gz');
+  try {
+    console.log(`[ensure-node] Downloading ${url}`);
+    execFileSync('/usr/bin/curl', ['-fL', '--retry', '3', '--connect-timeout', '15',
+      '--max-time', '300', '-o', archivePath, url], { stdio: 'inherit' });
+    execFileSync('/usr/bin/tar', ['-xzf', archivePath, '-C', staging]);
+    install(staging);
+  } finally {
+    await rm(staging, { recursive: true, force: true });
+  }
+}
 
-await new Promise((resolve, reject) => {
-  const request = https.get(url, response => {
-    if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
-      response.resume();
-      https.get(response.headers.location, next => next.pipe(createWriteStream(tmp)).on('finish', resolve)).on('error', reject);
-      return;
-    }
-    if (response.statusCode !== 200) return reject(new Error(`Node download failed: HTTP ${response.statusCode}`));
-    response.pipe(createWriteStream(tmp)).on('finish', resolve);
+if (!existsSync(binary)) {
+  await installArchive(`https://nodejs.org/dist/v${version}/${archive}`, 'node', staging => {
+    execFileSync(path.join(staging, path.basename(target), 'bin/node'), ['--version']);
+    renameSync(path.join(staging, path.basename(target)), target);
+    execFileSync('ln', ['-sfn', path.basename(target), link]);
   });
-  request.on('error', reject);
-});
+}
 
-execFileSync('tar', ['-xzf', tmp, '-C', tools]);
-execFileSync('ln', ['-sfn', path.basename(target), link]);
-await rm(tmp, { force: true });
-console.log(`[ensure-node] Ready: ${binary}`);
+const rustArch = arch === 'arm64' ? 'aarch64' : 'x86_64';
+// Versions supporting both Intel and Apple Silicon Macs.
+for (const tool of [
+  { name: 'fd', repo: 'sharkdp/fd', tag: 'v10.3.0', dir: `fd-v10.3.0-${rustArch}-apple-darwin` },
+  { name: 'rg', repo: 'BurntSushi/ripgrep', tag: '14.1.1', dir: `ripgrep-14.1.1-${rustArch}-apple-darwin` },
+]) {
+  const dest = path.join(link, 'bin', tool.name);
+  if (existsSync(dest)) {
+    execFileSync(dest, ['--version']);
+    continue;
+  }
+  await installArchive(`https://github.com/${tool.repo}/releases/download/${tool.tag}/${tool.dir}.tar.gz`, tool.name, staging => {
+    const src = path.join(staging, tool.dir, tool.name);
+    execFileSync(src, ['--version']);
+    copyFileSync(src, `${dest}.tmp`);
+    chmodSync(`${dest}.tmp`, 0o755);
+    renameSync(`${dest}.tmp`, dest);
+  });
+}
+console.log(`[ensure-node] Node, fd and rg ready: ${path.join(link, 'bin')}`);

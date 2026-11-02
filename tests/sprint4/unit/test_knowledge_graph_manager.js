@@ -199,6 +199,21 @@ TestRunner.test('loadGraph: returns null when graph.json does not exist', async 
   TestRunner.assertEquals(graph, null, 'should return null when no graph');
 });
 
+// A permission error must not masquerade as an absent graph / chapter list.
+for (const operation of ['exists', 'readTextFile']) {
+  TestRunner.test(`loadGraph: surfaces permission failure from ${operation}`, async () => {
+    setupEnv();
+    const graphPath = '/project/.learning/knowledge-graph.json';
+    mockFilesystem[graphPath] = { content: '{}', mtime: new Date() };
+    window.__TAURI__.fs[operation] = () => Promise.reject('forbidden path: ' + graphPath);
+    const KGM = loadModule();
+    let error;
+    try { await new KGM('/project').loadGraph(); } catch (e) { error = e; }
+    TestRunner.assert(error && error.message.includes('forbidden path'), 'should preserve permission failure');
+    TestRunner.assert(error && error.message.includes('知识图谱读取失败'), 'should explain graph load failure');
+  });
+}
+
 // ============================================
 // Test: computeStats
 // ============================================

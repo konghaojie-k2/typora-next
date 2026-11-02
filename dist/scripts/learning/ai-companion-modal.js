@@ -85,11 +85,11 @@
     visualize: ['换个角度再画一张', '把关键部位标出来', '画一张对比图']
   };
 
-  // 💬 开场白（render-only）：引导表达而非评价，AI 是接球手不是评委。
+  // 💬 开场白（render-only）：开放讨论：支持提问、联想与表达。
   // 划词进入拼接概念名；不进线程、不落盘、不进 priorDiscussion。
-  var TALK_GUIDE_PLAIN = '聊聊你的理解吧——想到什么说什么，哪怕很碎也没关系，我接得住。';
+  var TALK_GUIDE_PLAIN = '有什么想法或问题，都可以聊。一起解释、联想，或推演一个假设。';
   var TALK_GUIDE_WITH_TERM = function(term) {
-    return '聊聊「' + term + '」吧——你是怎么理解的？想到什么说什么，哪怕很碎也没关系，我接得住。';
+    return '聊聊「' + term + '」吧——可以提问、分享想法，也可以顺着它展开联想。';
   };
 
   // 错误分级（断流容灾 2026-10-14，与 agent-bridge.mjs classifyError 同规则）：

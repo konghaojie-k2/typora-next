@@ -247,18 +247,10 @@ steps.then('the own-voice skill should exist with its trigger phrase', function(
 });
 
 steps.then('the own-voice skill should coach by guiding the student to express', function() {
-  // 形态决策 2026-10-20：AI 是接球手不是评委——引导表达而非抛四段评价
-  for (const marker of ['引导', '追问', '评价模式']) {
+  for (const marker of ['先回应，再按需追问', '允许发散', '直接解答', '不要每轮结尾都抛问题', '不强行拉回', '取消每轮 2~4 句']) {
     if (!this.skillContent.includes(marker)) {
-      throw new Error(`SKILL.md missing guiding marker: ${marker}`);
+      throw new Error(`SKILL.md missing open discussion principle: ${marker}`);
     }
-  }
-  // 引导式原则锚点：轻推不代答（不给直接纠正）、按需评价（学生要才给）
-  if (!this.skillContent.includes('轻推')) {
-    throw new Error('SKILL.md missing the nudge-with-contradiction principle');
-  }
-  if (!this.skillContent.includes('才进入评价模式')) {
-    throw new Error('SKILL.md missing on-demand evaluation gate');
   }
 });
 
@@ -447,8 +439,8 @@ steps.then('a static guide bubble should greet the student without any LLM call'
   // DOM mock 的 textContent 不聚合 innerHTML，改查模块暴露的引导文案常量；
   // 划词进入时文案由 withTerm(term) 拼接概念名
   const guide = global.window.CompanionTalkGuide;
-  if (!guide || !/你的理解/.test(guide.plain)) {
-    throw new Error('guide bubble copy should invite the student to express their understanding');
+  if (!guide || !/想法或问题/.test(guide.plain)) {
+    throw new Error('guide bubble copy should invite open discussion and questions');
   }
   if (typeof guide.withTerm !== 'function' || !/「/.test(guide.withTerm('位置编码'))) {
     throw new Error('guide bubble copy should embed the selected term');

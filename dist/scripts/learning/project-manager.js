@@ -1102,7 +1102,7 @@
     } catch (err) {
       console.error('[LearningProject] startGeneration failed:', err);
       destroyInitStatusPanel(); // ensure no orphan panel after error
-      handleError(err.message || '启动生成失败');
+      handleError((err && err.message) || (typeof err === 'string' && err) || '启动生成失败');
     }
   }
 

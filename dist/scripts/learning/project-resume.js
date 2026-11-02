@@ -726,7 +726,7 @@
           } catch (e) {
             console.error('[ProjectResume] KG open error:', e);
             if (window.showToast) {
-              window.showToast('❌ 知识图谱加载失败', 'error');
+              window.showToast('❌ ' + ((e && e.message) || String(e)), 'error');
             }
           } finally {
             if (btn) btn.textContent = '🧠 图谱';

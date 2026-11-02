@@ -11,7 +11,7 @@ use crate::{get_config, AppConfig, AppState};
 /// Build a command for Node that also works when the app is launched from
 /// Finder. GUI-launched macOS apps do not inherit the shell PATH, so a plain
 /// `Command::new("node")` fails with ENOENT even when Node is installed.
-fn node_command() -> Command {
+pub(crate) fn node_command() -> Command {
     let mut candidates = Vec::new();
     if cfg!(target_os = "macos") {
         // Tauri resources are placed in Contents/Resources on macOS.
@@ -28,7 +28,15 @@ fn node_command() -> Command {
     }
     for candidate in candidates {
         if candidate.is_file() {
-            return Command::new(candidate);
+            let mut cmd = Command::new(&candidate);
+            // Pi discovers fd/rg through PATH. Include the bundled tools as well
+            // as common system locations for Finder-launched applications.
+            let mut paths = vec![candidate.parent().unwrap().to_path_buf(),
+                std::path::PathBuf::from("/opt/homebrew/bin"),
+                std::path::PathBuf::from("/usr/local/bin")];
+            paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+            if let Ok(path) = std::env::join_paths(paths) { cmd.env("PATH", path); }
+            return cmd;
         }
     }
     // Preserve the original error and allow PATH-based resolution on other
@@ -245,7 +253,7 @@ fn read_session_id(project_path: &str) -> Option<String> {
 /// Used by `create_project_with_session` (Phase B) on first project creation.
 /// The returned session_id is then persisted by the host to
 /// `.learning/agent-session.json` for use in subsequent invocations.
-pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Result<String, String> {
+pub async fn init_agent_session(config: &AppConfig, project_path: &str, app_handle: &AppHandle) -> Result<String, String> {
     log::info!("[init_agent_session] project_path={}", project_path);
     let bridge_path = get_agent_bridge_path()?;
 
@@ -267,7 +275,7 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("NODE_NO_WARNINGS", "1")
-        .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir_for_path(&bridge_path));
+        .env("TYPORA_NEXT_LOG_DIR", _agent_log_dir(app_handle));
 
     apply_agent_sdk_entry(&mut cmd, &bridge_path);
 
@@ -316,15 +324,6 @@ pub async fn init_agent_session(config: &AppConfig, project_path: &str) -> Resul
 
     log::info!("[init_agent_session] SUCCESS: session_id={}", session_id);
     Ok(session_id)
-}
-
-/// Helper: compute TYPORA_NEXT_LOG_DIR from bridge_path parent (for init stage
-/// which doesn't have an AppHandle).
-fn _agent_log_dir_for_path(bridge_path: &std::path::Path) -> String {
-    bridge_path
-        .parent()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|| ".".to_string())
 }
 
 /// Spawn the agent bridge process and stream events to frontend

@@ -1713,7 +1713,7 @@ async fn rescue_paper_imports(
     });
 
     let bridge_path = crate::ai_agent::get_agent_bridge_path()?;
-    let mut cmd = std::process::Command::new("node");
+    let mut cmd = ai_agent::node_command();
     cmd.arg(&bridge_path)
         .arg("paper-rescue")
         .arg(payload.to_string())
@@ -3021,7 +3021,7 @@ async fn setup_project_with_session(
 
     // Step 3: initialize agent session (synchronous ureq-like via cmd.output())
     let config = get_config(app_handle.clone()).map_err(|e| e.to_string())?;
-    let session_id = ai_agent::init_agent_session(&config, &project_path).await?;
+    let session_id = ai_agent::init_agent_session(&config, &project_path, &app_handle).await?;
 
     log::info!("[setup_project_with_session] session_id={}", session_id);
 

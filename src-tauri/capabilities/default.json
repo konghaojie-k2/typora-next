@@ -19,7 +19,13 @@
     "fs:allow-exists",
     {
       "identifier": "fs:scope",
-      "allow": [{ "path": "**" }]
+      "allow": [
+        { "path": "**" },
+        { "path": "**/.learning" },
+        { "path": "**/.learning/**" },
+        { "path": "$HOME/.typora-next" },
+        { "path": "$HOME/.typora-next/**" }
+      ]
     },
     "updater:default",
     "updater:allow-check",

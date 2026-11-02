@@ -73,7 +73,8 @@
         const data = await fs.readTextFile(this._graphPath);
         return JSON.parse(data);
       } catch (e) {
-        return null;
+        console.error('[KnowledgeGraphManager] Failed to load graph:', this._graphPath, e);
+        throw new Error('知识图谱读取失败：' + ((e && e.message) || String(e)));
       }
     }
 
