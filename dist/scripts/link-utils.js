@@ -27,14 +27,24 @@
   function resolveLinkHref(href, baseDir, filePath) {
     let h = String(href).trim().replace(/\\/g, '/');
 
+    // External URLs are routed separately and must keep their URL encoding.
+    if (/^https?:\/\//i.test(h)) return h;
+
+    // Remove URL suffixes before decoding so encoded #/? remain filename text.
+    h = h.split(/[?#]/, 1)[0];
+
+    // HTML renderers and WebViews may percent-encode non-ASCII filenames.
+    // Decode before filesystem resolution so Chinese names and spaces reach
+    // the native opener as real filesystem paths.
+    try {
+      h = decodeURIComponent(h);
+    } catch (err) {
+      // Keep malformed links unchanged; the native side will report the path.
+    }
+
     // file:// URL → 文件系统路径（macOS file:///a → /a；Windows file:///C:/ → C:/）
     if (/^file:\/\//i.test(h)) {
-      const raw = h.slice('file://'.length);
-      try {
-        h = decodeURIComponent(raw);
-      } catch (err) {
-        h = raw; // 非法编码保持原样
-      }
+      h = h.slice('file://'.length);
       if (/^\/[A-Za-z]:\//.test(h)) h = h.slice(1); // Windows 盘符前导斜杠
       return h;
     }

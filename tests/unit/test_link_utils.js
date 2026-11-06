@@ -39,11 +39,45 @@ test('file:// 带空格路径 decodeURIComponent 还原', () => {
   );
 });
 
+test('本地相对链接解码中文文件名并移除 fragment/query', () => {
+  assertEquals(
+    resolveLinkHref('../../../pages/%E6%8B%89%E6%99%B6.html#top', '', '/Users/haojie/experiments/baselines/position_baselines/EXP.md'),
+    '/Users/haojie/pages/拉晶.html',
+  );
+  assertEquals(
+    resolveLinkHref('../../../pages/%E6%8B%89%E6%99%B6.html?x=1', '', '/Users/haojie/experiments/baselines/position_baselines/EXP.md'),
+    '/Users/haojie/pages/拉晶.html',
+  );
+});
+
 test('file:// Windows 盘符去掉前导斜杠', () => {
   assertEquals(
     resolveLinkHref('file:///C:/CODE/page.html', '', ''),
     'C:/CODE/page.html'
   );
+});
+
+test('Windows 中文和空格链接可解析为盘符路径', () => {
+  assertEquals(
+    resolveLinkHref('file:///C:/My%20Docs/%E6%8B%89%E6%99%B6.html#top', '', ''),
+    'C:/My Docs/拉晶.html'
+  );
+  assertEquals(
+    resolveLinkHref('..\\pages\\%E6%8B%89%E6%99%B6.html?view=1', '', 'C:\\vault\\notes\\main.md'),
+    'C:/vault/pages/拉晶.html'
+  );
+});
+
+test('本地链接只解码一次并保留编码后的文件名标点', () => {
+  assertEquals(resolveLinkHref('file:///tmp/a%2520b.html', '', ''), '/tmp/a%20b.html');
+  assertEquals(resolveLinkHref('file:///tmp/a%23b%3Fc.html#top', '', ''), '/tmp/a#b?c.html');
+  assertEquals(resolveLinkHref('./a%23b.html', '', '/tmp/main.md'), '/tmp/a#b.html');
+  assertEquals(resolveLinkHref('./bad%ZZ.html', '', '/tmp/main.md'), '/tmp/bad%ZZ.html');
+});
+
+test('外部 URL 保留编码和查询参数', () => {
+  const url = 'https://example.com/a%20b?q=1#top';
+  assertEquals(resolveLinkHref(url, '', ''), url);
 });
 
 // ---------- 绝对路径 ----------

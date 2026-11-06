@@ -1892,7 +1892,7 @@ fn open_external(url: String) -> Result<(), String> {
         .args(["/c", "start", "", trimmed])
         .status();
     #[cfg(target_os = "macos")]
-    let status = std::process::Command::new("open").arg(trimmed).status();
+    let status = std::process::Command::new("/usr/bin/open").arg(trimmed).status();
     #[cfg(all(unix, not(target_os = "macos")))]
     let status = std::process::Command::new("xdg-open").arg(trimmed).status();
     let ok = status
@@ -1931,7 +1931,7 @@ fn open_local_file(path: String) -> Result<(), String> {
         .args(["/c", "start", "", trimmed])
         .status();
     #[cfg(target_os = "macos")]
-    let status = std::process::Command::new("open").arg(trimmed).status();
+    let status = std::process::Command::new("/usr/bin/open").arg(trimmed).status();
     #[cfg(all(unix, not(target_os = "macos")))]
     let status = std::process::Command::new("xdg-open").arg(trimmed).status();
     let ok = status
