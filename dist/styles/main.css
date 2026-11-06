@@ -1841,6 +1841,10 @@ img {
   margin: var(--spacing-md) 0;
   cursor: zoom-in;
   transition: transform var(--transition-fast);
+  /* WKWebView 原生图片拖拽会取消 click → lightbox 打不开（macOS 实爆
+     2026-11-05，Windows WebView2 无此问题）；禁掉拖拽保证点击落地 */
+  -webkit-user-drag: none;
+  user-select: none;
 }
 
 img:hover {

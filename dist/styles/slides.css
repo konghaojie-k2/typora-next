@@ -129,8 +129,12 @@
 }
 
 /* 横向纵向解耦：Reveal margin 绑死了 H/V，margin 设小值取纵向最大化，
-   横向留白由 CSS padding 单独补（不影响测量装箱高度预算） */
-.reveal .slides > section {
+   横向留白由 CSS padding 单独补（不影响测量装箱高度预算）。
+   注意必须同时匹配嵌套页面 section（.slides > section 是章节容器，
+   真正的页是其子 section）——只匹配直接子元素时页面满宽渲染，
+   与测量容器宽度不一致导致装箱溢出（2026-11-05 实爆） */
+.reveal .slides > section,
+.reveal .slides > section > section {
   padding-left: 2%;
   padding-right: 2%;
   box-sizing: border-box;

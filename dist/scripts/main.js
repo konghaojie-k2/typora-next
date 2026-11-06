@@ -1367,9 +1367,6 @@ window.agentBridge = {
       // Initialize mermaid diagrams (async, must complete before download buttons)
       await initMermaid();
 
-      // Initialize image handling
-      initImageHandling();
-
       // Initialize GFM Alerts styling
       initGFMAlerts();
 
@@ -1385,6 +1382,13 @@ window.agentBridge = {
       initObsidianCallouts();
       initWikiLinks();
       initObsidianEmbeds(baseDir);
+      // Image handling 必须在 Obsidian 嵌入图创建之后：![[img]] 嵌入图
+      // 在此之前不存在，放前面会漏绑 lightbox/error 处理
+      initImageHandling();
+      // 裸 URL 链接化（先于点击分流：<a> 必须先存在）
+      linkifyPlainTextUrls();
+      // 链接点击分流（委托 + guard，重复调用幂等）
+      initLinkHandling();
       initDownloadButtons();
 
       // Enhance learning elements (concept/question/quiz cards)
@@ -2916,6 +2920,61 @@ window.agentBridge = {
     }
   }
 
+  // ============================================
+  // Local Link Handling
+  // ============================================
+  /**
+   * 裸 URL 链接化：渲染器未开 autolink，正文粘贴的 file:///... /
+   * https://... 保持纯文本不可点击（2026-11-05 实爆）。
+   * 渲染后把文本节点里的裸 URL 包成 <a>，随后 initLinkHandling 的
+   * 点击分流即可接管。必须在 initLinkHandling() 之前执行。
+   */
+  function linkifyPlainTextUrls() {
+    const body = elements.markdownBody;
+    if (!body || !window.LinkUtils || !window.LinkUtils.linkifyElement) return;
+    window.LinkUtils.linkifyElement(body);
+  }
+
+  /**
+   * 正文 <a> 点击分流：渲染管线原本对链接零处理，相对路径按 webview
+   * 源导航 404、file:// 无动作（2026-11-05 实爆）。
+   * http(s) → open_external（系统浏览器）；
+   * 本地链接 → resolveLinkHref 归一化为绝对路径 → open_local_file（默认应用）。
+   * 委托挂 markdownBody 上且只绑一次（guard 标记），重渲染不重复。
+   */
+  function initLinkHandling() {
+    const body = elements.markdownBody;
+    if (!body || body.dataset.linkHandlingBound === 'true') return;
+    body.dataset.linkHandlingBound = 'true';
+
+    body.addEventListener('click', (e) => {
+      const a = e.target.closest('a[href]');
+      if (!a) return;
+      // 批注链接由批注处理链负责
+      if (a.closest('.annotation-highlight, .annotation-underline')) return;
+      const href = a.getAttribute('href');
+      if (!href || href.startsWith('#')) return; // 页内锚点走默认/TOC 逻辑
+
+      const tab = state.tabs[state.activeTab];
+      const baseDir = tab ? (tab.baseDir || '') : '';
+      const filePath = tab ? (tab.path || '') : '';
+
+      if (/^https?:\/\//i.test(href)) {
+        e.preventDefault();
+        invoke('open_external', { url: href })
+          .catch(err => showToast('打开链接失败: ' + err));
+        return;
+      }
+
+      e.preventDefault();
+      const abs = window.LinkUtils
+        ? window.LinkUtils.resolveLinkHref(href, baseDir, filePath)
+        : href;
+      invoke('open_local_file', { path: abs })
+        .catch(err => showToast('打开文件失败: ' + err));
+    });
+  }
+
   function initImageHandling(container = elements.markdownBody) {
     const images = container.querySelectorAll('img');
     images.forEach(img => {
@@ -2933,6 +2992,7 @@ window.agentBridge = {
       if (!img.hasAttribute('data-lightbox-handled')) {
         img.setAttribute('data-lightbox-handled', 'true');
         img.style.cursor = 'zoom-in';
+        img.draggable = false; // 防原生拖拽吞 click（WKWebView 上 lightbox 打不开）
 
         img.addEventListener('click', function(e) {
           if (!this.hasAttribute('data-error')) {
@@ -3386,13 +3446,15 @@ window.agentBridge = {
 
   /**
    * Obsidian Highlight: ==highlighted text==
+   *
+   * 跨内联元素版本：旧实现 replaceInTextNodes 逐“单个文本节点”跑正则，
+   * ==🔴**bold**== 的开头/结尾 == 落在 <strong> 两侧的不同节点里，配不上对
+   * （2026-11-05 实爆）。现由 obsidian-highlight.js 的 observeHighlight
+   * 处理跨节点范围包裹。
    */
   function initObsidianHighlight(container = elements.markdownBody) {
-    replaceInTextNodes(
-      /==([^=\s][^=]*|[^=\s])==/g,
-      (m, content) => `<mark class="obsidian-highlight">${escapeHtml(content)}</mark>`,
-      container
-    );
+    if (!container || !window.ObsidianHighlight) return;
+    window.ObsidianHighlight.observeHighlight(container);
   }
 
   /**

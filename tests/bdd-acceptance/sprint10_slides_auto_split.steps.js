@@ -10,6 +10,8 @@
 const { StepRegistry } = require('../shared/runner');
 const { parseMarkdownStructure } = require('../shared/slides-splitter');
 const { packItems } = require('../shared/slides-pack-core');
+const fs = require('fs');
+const path = require('path');
 
 const steps = new StepRegistry();
 const AVAIL = 100;
@@ -75,6 +77,24 @@ steps.given('a long H2 section that must split across pages', function() {
     item(10, { heading: true, h2: '## 长节', id: 'h2' }),
     item(60, { id: 'p1' }),
     item(80, { id: 'code', splittable: true })
+  ];
+});
+
+steps.given('an H2 section where a non-splittable element flips the page', function() {
+  this.elements = [
+    item(10, { heading: true, h2: '## 装箱节', id: 'h2' }),
+    item(85, { id: 'p1' }),
+    item(90, { id: 'p2' })
+  ];
+});
+
+steps.given('an H2 section containing an oversized unsplittable element', function() {
+  // 实爆 2026-11-05：竖版 svg 封顶后 = 整页高，装箱独占一页，
+  // 调用方再注入"（续）"标题 → 底部溢出
+  this.elements = [
+    item(10, { heading: true, h2: '## 图示节', id: 'h2' }),
+    item(30, { id: 'p1' }),
+    item(100, { id: 'svg' })
   ];
 });
 
@@ -158,4 +178,67 @@ steps.then('the continuation page is marked with the H2 text', function() {
   }
 });
 
+steps.then('the continuation page records the heading height', function() {
+  const page = this.pages[this.pages.length - 1];
+  if (!page.continuedH2) {
+    throw new Error('Expected a continuation marker');
+  }
+  if (page.continuedH !== 10) {
+    throw new Error('Continuation heading height not recorded: ' + page.continuedH);
+  }
+});
+
+steps.then('the continuation page content fits with the heading injected', function() {
+  for (let i = 0; i < this.pages.length; i++) {
+    const page = this.pages[i];
+    const h = page.items.reduce((s, it) => s + it.height, 0) + (page.continuedH || 0);
+    if (h > AVAIL) {
+      throw new Error('Page ' + i + ' overflows with continuation heading: ' + h);
+    }
+  }
+});
+
+steps.then('the oversized continuation page exceeds budget with the heading', function() {
+  const page = this.pages[this.pages.length - 1];
+  const h = page.items.reduce((s, it) => s + it.height, 0);
+  if (!page.continuedH2 || h + (page.continuedH || 0) <= AVAIL) {
+    throw new Error('Expected oversized continuation page (caller must skip heading)');
+  }
+});
+
 module.exports = steps;
+
+// ============================================
+// 图片段落拆分（懒续行单体段落实爆 2026-11-05）
+// ============================================
+steps.given('the slides.js packing pipeline source', function() {
+  this.slidesSource = fs.readFileSync(
+    path.join(__dirname, '../../dist/scripts/slides.js'), 'utf-8');
+});
+
+steps.when('checking the image-paragraph splitter wiring', function() {
+  this.splitFnIdx = this.slidesSource.indexOf('function splitParagraphsAroundImages');
+  this.callIdx = this.slidesSource.indexOf('splitParagraphsAroundImages(div)');
+  this.measureIdx = this.slidesSource.indexOf('var items = measureItems(div)');
+});
+
+steps.then('lazy-continuation paragraphs split at inline image boundaries before measuring', function() {
+  if (this.splitFnIdx === -1) {
+    throw new Error('splitParagraphsAroundImages must be defined');
+  }
+  if (this.callIdx === -1) {
+    throw new Error('measureAndPack must call splitParagraphsAroundImages(div)');
+  }
+  if (this.measureIdx === -1) {
+    throw new Error('pipeline must call measureItems');
+  }
+  if (this.callIdx > this.measureIdx) {
+    throw new Error('splitter must run BEFORE measureItems (split first, then measure)');
+  }
+});
+
+steps.then('list items with direct inline images are covered by the same splitter', function() {
+  if (!this.slidesSource.includes("querySelectorAll('p, li')")) {
+    throw new Error('splitter must cover both p and li (tight lists put imgs directly in li)');
+  }
+});

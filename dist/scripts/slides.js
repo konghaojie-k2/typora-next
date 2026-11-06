@@ -30,16 +30,28 @@
     var pages = [];
     var cur = [];
     var curH = 0;
+    // 当前（正在装填的）页的续节标记与预算：标记在页开始时确定，
+    // 关闭页面时随页落盘（flush 前设置会被 flush 清掉，最后一页丢标记）
+    var pageContinuedH2 = null;
+    var pageContinuedH = 0;
+    var pageBudget = availH;
     var currentH2 = null;
-    var nextContinuedH2 = null;
+    var currentH2H = 0;      // 当前 H2 标题的实测高度
 
-    function flush() {
+    function flushAndBegin(nextH2, nextH) {
       if (cur.length > 0) {
-        pages.push({ items: cur, continuedH2: nextContinuedH2 });
+        pages.push({
+          items: cur,
+          continuedH2: pageContinuedH2,
+          continuedH: pageContinuedH
+        });
         cur = [];
         curH = 0;
-        nextContinuedH2 = null;
       }
+      pageContinuedH2 = nextH2 || null;
+      pageContinuedH = pageContinuedH2 ? (nextH || 0) : 0;
+      // 带"（续）"标题的新页预留标题高度，防标题+满页内容溢出页底（实爆 2026-11-05）
+      pageBudget = pageContinuedH2 ? Math.max(0, availH - pageContinuedH) : availH;
     }
 
     function headingChainNeed(idx) {
@@ -59,27 +71,29 @@
 
       if (item.isHeading && cur.length > 0) {
         var loneHeading = cur.length === 1 && cur[0].isHeading;
-        if (!loneHeading && curH + headingChainNeed(i) > availH) {
-          flush();
+        if (!loneHeading && curH + headingChainNeed(i) > pageBudget) {
+          flushAndBegin(null, 0); // 标题从新页顶部开始（作为普通 item 计入）
         }
       }
 
       // 放得下：直接装入
-      if (curH + item.height <= availH) {
+      if (curH + item.height <= pageBudget) {
         cur.push(item);
         curH += item.height;
-        if (item.h2Text) currentH2 = item.h2Text;
+        if (item.h2Text) {
+          currentH2 = item.h2Text;
+          currentH2H = item.height;
+        }
         i++;
         continue;
       }
 
       // 放不下：尝试拆分（空页时用整页高度，故翻页后会自然重试）
       if (item.split) {
-        var parts = item.split(availH - curH);
+        var parts = item.split(pageBudget - curH);
         if (parts) {
           cur.push(parts[0]);
-          flush();
-          nextContinuedH2 = currentH2;
+          flushAndBegin(currentH2, currentH2H); // 拆分的剩余部分在同一小节内 → 续页
           items[i] = parts[1];
           continue;
         }
@@ -89,18 +103,19 @@
         // 空页 + 拆不动 + 超高 → 独占一页（设计允许的溢出）
         cur.push(item);
         curH += item.height;
-        if (item.h2Text) currentH2 = item.h2Text;
+        if (item.h2Text) {
+          currentH2 = item.h2Text;
+          currentH2H = item.height;
+        }
         i++;
         continue;
       }
 
       // 非空页：翻页，循环用整页高度重试（修复：拆分不再因剩余空间小而被跳过）
-      var continuedFrom = currentH2;
-      flush();
-      nextContinuedH2 = item.isHeading ? null : continuedFrom;
+      flushAndBegin(item.isHeading ? null : currentH2, item.isHeading ? 0 : currentH2H);
     }
 
-    flush();
+    flushAndBegin(null, 0);
     return pages;
   }
 
@@ -245,12 +260,141 @@
     ];
   }
 
+  /** li 直接子块高度缓存（含文本节点）。必须在 li 仍附着于文档时调用：
+     拆分产物是 cloneNode 克隆/游离节点，offsetHeight 恒为 0，
+     cloneNode 又不复制自定义属性 → 每一层克隆都要显式继承缓存 */
+  function stampKidHeights(li) {
+    if (li._kidHeights) return;
+    var kids = Array.prototype.filter.call(li.childNodes, function(n) {
+      if (n.nodeType === 3) return !!n.textContent.trim(); // 非空文本 = 子块
+      return n.nodeType === 1;
+    });
+    // 嵌套列表即使 li 单子块也要 stamp（后续拆分要在克隆上复用高度）
+    kids.forEach(function(k) {
+      if (k.nodeType === 1 && (k.tagName === 'UL' || k.tagName === 'OL')) stampListHeights(k);
+    });
+    if (kids.length < 2) return; // 单子块 li 无需按子块拆
+    li._kidHeights = kids.map(function(k) {
+      if (k.nodeType === 3) {
+        var tmp = document.createElement('p');
+        tmp.textContent = k.textContent;
+        li.appendChild(tmp);
+        var h = tmp.offsetHeight;
+        li.removeChild(tmp);
+        return h || 0;
+      }
+      return nodeHeights.get(k) || k.offsetHeight || 0;
+    });
+  }
+
+  /** UL/OL 的 LI 高度缓存（附着时量测）+ 递归 stamp 每个 li 的子块高度 */
+  function stampListHeights(el) {
+    if (el._liHeights) return;
+    var lis = Array.from(el.children).filter(function(n) { return n.tagName === 'LI'; });
+    if (lis.length) {
+      el._liHeights = lis.map(function(li) { return nodeHeights.get(li) || li.offsetHeight || 0; });
+      lis.forEach(stampKidHeights);
+    }
+  }
+
+  /** 深克隆并同步拆分高度缓存。cloneNode 不复制自定义属性，而游离克隆的
+     offsetHeight 恒为 0 → 缓存不随克隆传递 = 拆分链在第二层断裂 */
+  function cloneWithHeights(src) {
+    var copy = src.cloneNode(true);
+    (function walk(a, b) {
+      ['_kidHeights', '_liHeights', '_childHeights', '_rowHeights', '_preMetrics'].forEach(function(key) {
+        if (a[key] !== undefined) b[key] = a[key];
+      });
+      var ac = a.childNodes;
+      var bc = b.childNodes;
+      for (var i = 0; i < ac.length && i < bc.length; i++) walk(ac[i], bc[i]);
+    })(src, copy);
+    return copy;
+  }
+
+  /** 单个超高 li 按其子块拆分（如 URL+多图的巨型 fragment li，
+     li 级拆不动导致独占一页被裁 → 2026-11-05 实爆）。
+     子块取 childNodes（含直接文本节点）——紧凑列表 li 是
+     [文本, 嵌套列表] 混排，.children 只看元素会误判"拆不动"。
+     克隆 li 保留 class="fragment" 等属性；高度一律走 _kidHeights 缓存，
+     克隆/游离节点量不出来 */
+  function splitSingleLi(li, remainingH) {
+    stampKidHeights(li);
+    var kids = Array.prototype.filter.call(li.childNodes, function(n) {
+      if (n.nodeType === 3) return !!n.textContent.trim(); // 非空文本 = 子块
+      return n.nodeType === 1;
+    });
+    var cached = li._kidHeights;
+    if (!cached || kids.length <= 1) return null;
+    var m = elementMargin(li);
+    var avail = remainingH - m.top - m.bottom;
+    var used = 0;
+    var count = 0;
+    while (count < cached.length && used + cached[count] <= avail) {
+      used += cached[count];
+      count++;
+    }
+    var tailHeights = cached.slice(count);
+    function buildLi(subKids) {
+      var l = li.cloneNode(false);
+      subKids.forEach(function(k) { l.appendChild(cloneWithHeights(k)); });
+      return l;
+    }
+
+    // 拆分卡在嵌套列表上（块高 > 剩余空间）：递归拆列表本身，
+    // 两片分别并入前后两个 li 片段；否则嵌套列表整块被甩到续页溢出
+    if (count < kids.length) {
+      var blocker = kids[count];
+      if (blocker.nodeType === 1 && (blocker.tagName === 'UL' || blocker.tagName === 'OL')) {
+        var listParts = splitList(blocker, avail - used);
+        if (listParts) {
+          var p1 = buildLi(kids.slice(0, count).concat([listParts[0].payload]));
+          var p2 = buildLi([listParts[1].payload].concat(kids.slice(count + 1)));
+          p2._kidHeights = [listParts[1].height].concat(cached.slice(count + 1));
+          return [
+            { height: used + listParts[0].height + m.top + m.bottom, isHeading: false, h2Text: null, payload: p1, split: null },
+            { height: listParts[1].height + tailHeights.slice(1).reduce(function(s, h) { return s + h; }, 0) + m.top + m.bottom, isHeading: false, h2Text: null, payload: p2, split: function(r) { return splitSingleLi(p2, r); } }
+          ];
+        }
+      }
+    }
+
+    if (count === 0 || count >= kids.length) return null;
+
+    var part1Li = buildLi(kids.slice(0, count));
+    var part2Li = buildLi(kids.slice(count));
+    // cloneNode 不复制自定义属性：必须显式传递高度缓存，
+    // 否则递归拆分对克隆节点量出全 0 → 拆分失败 → 独占页溢出
+    part2Li._kidHeights = tailHeights;
+    return [
+      { height: used + m.top + m.bottom, isHeading: false, h2Text: null, payload: part1Li, split: null },
+      { height: tailHeights.reduce(function(s, h) { return s + h; }, 0) + m.top + m.bottom, isHeading: false, h2Text: null, payload: part2Li, split: function(r) { return splitSingleLi(part2Li, r); } }
+    ];
+  }
+
   /** UL/OL 按条目拆分（OL 续片保持编号连续） */
   function splitList(el, remainingH) {
     // 优先用缓存的 LI 高度数组（克隆节点 offsetHeight=0，需从原版读）
+    stampListHeights(el);
     var cached = el._liHeights;
     var lis = Array.from(el.children).filter(function(n) { return n.tagName === 'LI'; });
-    if (lis.length <= 1) return null;
+    if (lis.length <= 1) {
+      // 单 li 超页高：按 li 内部子块拆（cloneNode 保留 fragment 类，
+      // 拆出的两片各自仍是带 fragment 的 li，Reveal 分步显示不受影响）
+      var inner = lis.length === 1 ? splitSingleLi(lis[0], remainingH) : null;
+      if (!inner) return null;
+      var margins = elementMargin(el).top + elementMargin(el).bottom;
+      var ul1 = el.cloneNode(false);
+      ul1.appendChild(inner[0].payload);
+      var ul2 = el.cloneNode(false);
+      ul2.appendChild(inner[1].payload);
+      // cloneNode 不复制自定义属性：显式传高度缓存供递归拆分使用
+      ul2._liHeights = [inner[1].height];
+      return [
+        { height: inner[0].height + margins, isHeading: false, h2Text: null, payload: ul1, split: null },
+        { height: inner[1].height + margins, isHeading: false, h2Text: null, payload: ul2, split: function(r) { return splitList(ul2, r); } }
+      ];
+    }
 
     // 首调用：记录每个 LI 高度 + 缓存到元素属性（后续递归拆分复用）
     if (!cached) {
@@ -264,16 +408,36 @@
       used += cached[count];
       count++;
     }
-    if (count === 0 || count >= cached.length) return null;
 
     var isOrdered = el.tagName === 'OL';
     var startNum = isOrdered ? (parseInt(el.getAttribute('start') || '1', 10) || 1) : 0;
     var margins = elementMargin(el).top + elementMargin(el).bottom;
 
+    // 首 li 超过剩余预算（count=0）：对首 li 内部拆分，part1 归当前列表片段、
+    // part2 与余下 li 组成续片递归再拆。直接 return null 会把整段列表
+    // 独占一页溢出页底（实测 2142px，2026-11-05 实爆）
+    if (count === 0) {
+      var inner0 = splitSingleLi(lis[0], remainingH - margins);
+      if (!inner0) return null;
+      var headUl = el.cloneNode(false);
+      headUl.appendChild(inner0[0].payload);
+      var tailUl = el.cloneNode(false);
+      tailUl.appendChild(inner0[1].payload);
+      lis.slice(1).forEach(function(li) { tailUl.appendChild(li); });
+      var tailRest = cached.slice(1).reduce(function(s, h) { return s + h; }, 0);
+      tailUl._liHeights = [inner0[1].height].concat(cached.slice(1));
+      return [
+        { height: inner0[0].height + margins, isHeading: false, h2Text: null, payload: headUl, split: null },
+        { height: inner0[1].height + tailRest + margins, isHeading: false, h2Text: null, payload: tailUl, split: function(r) { return splitList(tailUl, r); } }
+      ];
+    }
+
+    if (count >= cached.length) return null;
+
     function buildList(subLis, start, heights) {
       var l = el.cloneNode(false);
       if (isOrdered && start != null) l.setAttribute('start', String(start));
-      subLis.forEach(function(li) { l.appendChild(li.cloneNode(true)); });
+      subLis.forEach(function(li) { l.appendChild(cloneWithHeights(li)); });
       if (heights) l._liHeights = heights; // 传递高度给递归拆分
       return l;
     }
@@ -331,9 +495,12 @@
     var box = contentBox();
     var div = document.createElement('div');
     div.className = 'slides-measure';
-    // 测量容器宽度与 section 对齐（含 padding），确保装箱高度准确
+    // 测量容器宽度必须与真实页面 section 的渲染宽度一致：页面 section
+    // 是 1280 满宽（Reveal margin 只影响缩放不改变布局宽度），2% padding
+    // 后内容宽 1229 —— 之前用 contentBox().width(1126) 测量，渲染宽于
+    // 测量宽，换行/图片尺寸全对不上，装箱溢出（2026-11-05 实爆）
     div.style.cssText = 'position:absolute;visibility:hidden;left:-99999px;top:0;'
-      + 'width:' + box.width + 'px;'
+      + 'width:' + SLIDE_W + 'px;'
       + 'padding-left:2%;padding-right:2%;'
       + 'box-sizing:border-box;';
     document.getElementById('slidesContainer').appendChild(div);
@@ -349,7 +516,9 @@
           img.addEventListener('load', res, { once: true });
           img.addEventListener('error', res, { once: true });
         }),
-        new Promise(function(res) { setTimeout(res, timeoutMs || 1500); })
+        // 大截图（多 MB PNG）解码可能超过 1.5s，超时测量会把图片当 0 高，
+        // 装箱全面失准（2026-11-05 实爆）；放宽到 8s 兜底坏图
+        new Promise(function(res) { setTimeout(res, timeoutMs || 8000); })
       ]);
     }));
   }
@@ -394,6 +563,92 @@
   }
 
   /**
+   * 内联 <svg> 插图（非 mermaid）尺寸约束：幻灯片是固定 1280×720 装箱，
+   * 无约束的竖版 svg（viewBox 高>宽 + width=100%）实测高度远超页高，
+   * 装箱层拆不动 svg → 独占一页允许溢出 → 播放时被裁切（2026-11-05 实爆）。
+   * 与 postProcessMermaidSvg 同策略：满宽 + viewBox 比例 + 页高封顶。
+   * 必须在测量前执行，装箱高度才准确。
+   */
+  function sizeInlineSvgs(container) {
+    if (typeof SlidesSvgSize === 'undefined') return;
+    var box = contentBox();
+    var svgs = container.querySelectorAll('svg');
+    for (var i = 0; i < svgs.length; i++) {
+      var svg = svgs[i];
+      if (svg.closest('.mermaid')) continue; // mermaid 有自己的尺寸管线
+      if (svg.closest('.katex')) continue;   // KaTeX 数学符号内嵌 svg
+      var vb = (svg.getAttribute('viewBox') || '').trim().split(/[\s,]+/).map(parseFloat);
+      // 基准字号 16px：与主视图 --font-size-base 一致，切断 .reveal 28px 级联
+      var sizing = SlidesSvgSize.inlineSvgSizing(vb[2], vb[3], box.height, 16);
+      if (sizing.stripSizeAttrs) {
+        svg.removeAttribute('width');
+        svg.removeAttribute('height');
+      }
+      for (var prop in sizing.styles) {
+        svg.style[prop] = sizing.styles[prop];
+      }
+    }
+  }
+
+  /**
+   * 段落级图片切分：markdown 懒续行把 `文本\n![](img)\n文本` 合并进同一个 <p>，
+   * 行内图片随段落成为不可拆分单体（实测 996px 高），装箱层拆不动 →
+   * 独占一页且超页高被裁（2026-11-05 实爆）。按图片边界把段落拆为
+   * [文本段, 独立图段, 文本段…]——图片变块级后，巨型 li 也随之获得
+   * 块级子元素可供 splitSingleLi 拆分。
+   * 切分边界 = 直接子级 IMG（标准图片）或 DIV（obsidian-embed 包装的
+   * ![[...]] 图片，slides.js processWikiLinkImages 产出）。紧凑列表图片
+   * 直接挂在 li 下，故 p 与 li 一并处理。纯图段落只在含 ≥2 个边界时拆
+   * （多图连排 ~820px 同样超预算），单图纯图段落已是块级单体，不拆。
+   */
+  function splitParagraphsAroundImages(root) {
+    function isBoundary(n) {
+      return n.nodeType === 1 && (n.tagName === 'IMG' || n.tagName === 'DIV');
+    }
+    var targets = Array.prototype.filter.call(
+      root.querySelectorAll('p, li'),
+      function(el) {
+        var boundaries = 0;
+        var hasProse = false;
+        var kids = el.childNodes;
+        for (var i = 0; i < kids.length; i++) {
+          var n = kids[i];
+          if (isBoundary(n)) {
+            boundaries++;
+          } else if (n.textContent && n.textContent.trim()) {
+            hasProse = true;
+          }
+        }
+        return boundaries > 0 && (hasProse || boundaries >= 2);
+      }
+    );
+    targets.forEach(function(el) {
+      var parent = el.parentNode;
+      var run = [];
+      function flushRun() {
+        var hasContent = run.some(function(n) { return n.textContent && n.textContent.trim(); });
+        if (!hasContent) { run = []; return; }
+        var np = el.cloneNode(false);
+        run.forEach(function(n) { np.appendChild(n); });
+        parent.insertBefore(np, el);
+        run = [];
+      }
+      Array.prototype.slice.call(el.childNodes).forEach(function(n) {
+        if (isBoundary(n)) {
+          flushRun();
+          var ip = el.cloneNode(false);
+          ip.appendChild(n);
+          parent.insertBefore(ip, el);
+        } else {
+          run.push(n);
+        }
+      });
+      flushRun();
+      parent.removeChild(el);
+    });
+  }
+
+  /**
    * 渲染并测量一个内容单元，返回分页后的节点数组（每页一个节点数组）。
    */
   async function measureAndPack(unitHtml, baseDir, filePath) {
@@ -405,6 +660,16 @@
 
     // 1.5 GFM alerts（与主视图一致的渲染）
     styleGfmAlerts(div);
+
+    // 1.6 裸 URL 链接化（渲染器无 autolink，PPT 内裸 file:// 文本不可点击）
+    if (window.LinkUtils && window.LinkUtils.linkifyElement) {
+      window.LinkUtils.linkifyElement(div);
+    }
+
+    // 1.7 Obsidian ==highlight== 跨内联元素高亮（==🔴**bold**== 跨节点场景）
+    if (window.ObsidianHighlight && window.ObsidianHighlight.observeHighlight) {
+      window.ObsidianHighlight.observeHighlight(div);
+    }
 
     // 2. 图片路径（WikiLink / 相对路径）
     processWikiLinkImages(div, baseDir);
@@ -430,8 +695,14 @@
     // 4. Mermaid（异步渲染完成后再测量）
     await renderMermaidBlocks(div);
 
+    // 4.5 内联 svg 尺寸约束（封顶后量测，装箱高度才准确）
+    sizeInlineSvgs(div);
+
     // 5. 图片加载完成（高度才可靠）
     await waitForImages(div);
+
+    // 5.5 段落级图片切分（图片移动不丢加载状态；拆完量的才是可装箱的块）
+    splitParagraphsAroundImages(div);
 
     // 6. 测量 + 装箱
     var items = measureItems(div);
@@ -441,7 +712,10 @@
     // 7. 物化：把节点从测量容器移出（随后容器销毁）
     var result = pages.map(function(page) {
       var nodes = [];
-      if (page.continuedH2) {
+      var pageH = page.items.reduce(function(s, it) { return s + it.height; }, 0);
+      // "（续）"标题仅预算内注入：超高独占页（如整图 svg）+ 标题会溢出页底，
+      // 此时跳过标题保图完整
+      if (page.continuedH2 && pageH + (page.continuedH || 0) <= availH) {
         var h = document.createElement('h2');
         h.textContent = page.continuedH2 + '（续）';
         nodes.push(h);
@@ -485,6 +759,7 @@
         if (group.cover) {
           var cov = document.createElement('section');
           cov.innerHTML = group.cover;
+          sizeInlineSvgs(cov); // 封面直插不经 measureAndPack，单独约束
           hSec.appendChild(cov);
         }
 
@@ -556,13 +831,24 @@
   }
 
   /**
+   * convertFileSrc 获取（含 iframe 回退）：slides.html 运行在 iframe 里，
+   * 部分环境不注入 window.__TAURI__；父窗口（index.html）同源必有，回退取之。
+   */
+  function getConvertFileSrc() {
+    var core = (window.__TAURI__ && window.__TAURI__.core)
+      || (window.parent && window.parent.__TAURI__ && window.parent.__TAURI__.core)
+      || null;
+    return core ? core.convertFileSrc : null;
+  }
+
+  /**
    * Process WikiLink images: ![[image.png]]
    * Mirrors main.js initObsidianEmbeds path resolution logic.
    */
   function processWikiLinkImages(container, baseDir) {
     var embedRegex = /!\[\[([^\]]+)\]\]/g;
     var imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico'];
-    var convertFileSrc = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc;
+    var convertFileSrc = getConvertFileSrc();
 
     var walker = document.createTreeWalker(container, NodeFilter.SHOW_TEXT, null, false);
     var textNodes = [];
@@ -663,7 +949,7 @@
    * Convert relative paths to Tauri convertFileSrc for local file access.
    */
   function processStandardImages(container, baseDir, filePath) {
-    var convertFileSrc = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.convertFileSrc;
+    var convertFileSrc = getConvertFileSrc();
     if (!convertFileSrc) return;
 
     var imgs = container.querySelectorAll('img');
@@ -1035,7 +1321,41 @@
   }
 
   function init() {
+    initSlidesLinkHandling();
     waitForReveal(function() { doInit(); });
+  }
+
+  // ============================================
+  // 链接点击分流（PPT 内 <a>：linkify 产物 + md 显式链接）
+  // ============================================
+  /**
+   * PPT 页里的裸 file:///...html 由 measureAndPack linkify 成 <a>；
+   * 点击分流与主视图 initLinkHandling 同构：http(s) → open_external，
+   * 其余 → resolveLinkHref → open_local_file（系统默认应用）。
+   * iframe 可能未注入 Tauri API → 回退 window.parent（与图片转换同策略）。
+   * 只绑一次（guard 标记）；baseDir/filePath 点击时从 window 作用域现读。
+   */
+  function initSlidesLinkHandling() {
+    if (document.body.dataset.slidesLinkBound === 'true') return;
+    document.body.dataset.slidesLinkBound = 'true';
+    document.body.addEventListener('click', function(e) {
+      var a = e.target.closest ? e.target.closest('a[href]') : null;
+      if (!a) return;
+      var href = a.getAttribute('href');
+      if (!href || href.charAt(0) === '#') return;
+      e.preventDefault();
+      var core = (window.__TAURI__ && window.__TAURI__.core)
+        || (window.parent && window.parent.__TAURI__ && window.parent.__TAURI__.core);
+      if (!core) return; // 无 Tauri 环境（浏览器直开预览）不动作
+      if (/^https?:\/\//i.test(href)) {
+        core.invoke('open_external', { url: href }).catch(function() {});
+        return;
+      }
+      var abs = (window.LinkUtils && window.LinkUtils.resolveLinkHref)
+        ? window.LinkUtils.resolveLinkHref(href, window.__slides_baseDir || '', window.__slides_filePath || '')
+        : href;
+      core.invoke('open_local_file', { path: abs }).catch(function() {});
+    });
   }
 
   window.__reloadSlides = function() {

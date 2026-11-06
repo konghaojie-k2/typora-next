@@ -35,3 +35,20 @@ Feature: Slides v3 — structure split and measured packing
     Given a long H2 section that must split across pages
     When they are packed by available height
     Then the continuation page is marked with the H2 text
+
+  Scenario: Continuation page reserves the continued-heading height
+    Given an H2 section where a non-splittable element flips the page
+    When they are packed by available height
+    Then the continuation page records the heading height
+    And the continuation page content fits with the heading injected
+
+  Scenario: Oversized unsplittable item page must skip the continuation heading
+    Given an H2 section containing an oversized unsplittable element
+    When they are packed by available height
+    Then the oversized continuation page exceeds budget with the heading
+
+  Scenario: Paragraph with inline images splits into packable blocks
+    Given the slides.js packing pipeline source
+    When checking the image-paragraph splitter wiring
+    Then lazy-continuation paragraphs split at inline image boundaries before measuring
+    And list items with direct inline images are covered by the same splitter

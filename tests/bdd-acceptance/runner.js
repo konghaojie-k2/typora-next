@@ -216,6 +216,16 @@ async function runAcceptanceTests() {
   totalPassed += slidesAutoSplitResult.passed;
   totalFailed += slidesAutoSplitResult.failed;
 
+  // Sprint 10: Local file link handling（裸 URL linkify + 点击分流）
+  console.log(`\n${YELLOW}▶ Link Handling${RESET}`);
+  const linkHandlingSteps = require('./sprint10_link_handling.steps');
+  const linkHandlingResult = await runFeatureFile(
+    path.join(sprint10FeaturesDir, 'link_handling.feature'),
+    linkHandlingSteps
+  );
+  totalPassed += linkHandlingResult.passed;
+  totalFailed += linkHandlingResult.failed;
+
   // Sprint 11: Toolbar export menu consolidation
   console.log(`\n${YELLOW}▶ Sprint 11: Toolbar Export Menu Consolidation${RESET}`);
   const toolbarExportMenuSteps = require('./sprint11_toolbar_export_menu.steps');

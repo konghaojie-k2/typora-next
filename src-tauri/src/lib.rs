@@ -1905,6 +1905,45 @@ fn open_external(url: String) -> Result<(), String> {
     }
 }
 
+/// Open a local file with the system default application.
+///
+/// 正文内嵌链接的打开通道：[说明](./doc.html) 等本地链接由前端
+/// resolveLinkHref 归一化为绝对路径后调这里（open_external 只放行 http(s)）。
+/// 只接受绝对路径且要求文件存在，防 webview 内容随意触达文件系统。
+#[tauri::command]
+fn open_local_file(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    let bytes = trimmed.as_bytes();
+    let is_abs = trimmed.starts_with('/')
+        || (bytes.len() >= 3
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/'));
+    if !is_abs {
+        return Err(format!("拒绝打开相对路径: {}", trimmed));
+    }
+    match std::fs::exists(trimmed) {
+        Ok(true) => {}
+        Ok(false) => return Err(format!("文件不存在: {}", trimmed)),
+        Err(e) => return Err(format!("访问失败: {}", e)),
+    }
+    #[cfg(target_os = "windows")]
+    let status = std::process::Command::new("cmd")
+        .args(["/c", "start", "", trimmed])
+        .status();
+    #[cfg(target_os = "macos")]
+    let status = std::process::Command::new("open").arg(trimmed).status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = std::process::Command::new("xdg-open").arg(trimmed).status();
+    let ok = status
+        .map_err(|e| format!("打开文件失败: {}", e))?
+        .success();
+    if ok {
+        Ok(())
+    } else {
+        Err("打开文件失败".to_string())
+    }
+}
+
 /// Query the status of an in-flight import task.
 ///
 /// Currently the import commands block until completion, so this command
@@ -5409,6 +5448,7 @@ pub fn run() {
             delete_paper_domain,
             rescue_paper_imports,
             open_external,
+            open_local_file,
             mac_pdf::export_pdf,
             create_project_subdir,
             get_demo_file,

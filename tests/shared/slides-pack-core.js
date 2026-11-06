@@ -23,22 +23,37 @@
  *   当前页只剩孤标题时允许溢出（防死循环）
  * - 可拆分项：剩余空间放得下第一部分就先放，其余进下一页
  * - 不可拆且超高的项：独占一页（允许溢出）
- * - 翻页落在 H2 小节中间时，下一页标记 continuedH2（调用方渲染"（续）"前缀）
+ * - 翻页落在 H2 小节中间时，下一页标记 continuedH2（调用方渲染"（续）"前缀），
+ *   并记录 continuedH（标题高度）——新页预算扣除该高度，防止标题+满页内容
+ *   溢出页底（实爆 2026-11-05）；调用方注入标题前应校验
+ *   pageH + continuedH <= availH，超出（如超高 svg 独占页）则跳过标题
  */
 function packItems(items, availH) {
   const pages = [];
   let cur = [];
   let curH = 0;
+  // 当前（正在装填的）页的续节标记与预算：标记在页开始时确定，
+  // 关闭页面时随页落盘（flush 前设置会被 flush 清掉，最后一页丢标记）
+  let pageContinuedH2 = null;
+  let pageContinuedH = 0;
+  let pageBudget = availH;
   let currentH2 = null;
-  let nextContinuedH2 = null;
+  let currentH2H = 0;      // 当前 H2 标题的实测高度
 
-  function flush() {
+  function flushAndBegin(nextH2, nextH) {
     if (cur.length > 0) {
-      pages.push({ items: cur, continuedH2: nextContinuedH2 });
+      pages.push({
+        items: cur,
+        continuedH2: pageContinuedH2,
+        continuedH: pageContinuedH
+      });
       cur = [];
       curH = 0;
-      nextContinuedH2 = null;
     }
+    pageContinuedH2 = nextH2 || null;
+    pageContinuedH = pageContinuedH2 ? (nextH || 0) : 0;
+    // 带"（续）"标题的新页预留标题高度，防标题+满页内容溢出页底（实爆 2026-11-05）
+    pageBudget = pageContinuedH2 ? Math.max(0, availH - pageContinuedH) : availH;
   }
 
   // 标题链前瞻：返回标题项连同后续标题链+第一个非标题项的总高度
@@ -59,28 +74,29 @@ function packItems(items, availH) {
 
     if (item.isHeading && cur.length > 0) {
       const loneHeading = cur.length === 1 && cur[0].isHeading;
-      if (!loneHeading && curH + headingChainNeed(i) > availH) {
-        flush();
+      if (!loneHeading && curH + headingChainNeed(i) > pageBudget) {
+        flushAndBegin(null, 0); // 标题从新页顶部开始（作为普通 item 计入）
       }
     }
 
     // 放得下：直接装入
-    if (curH + item.height <= availH) {
+    if (curH + item.height <= pageBudget) {
       cur.push(item);
       curH += item.height;
-      if (item.h2Text) currentH2 = item.h2Text;
+      if (item.h2Text) {
+        currentH2 = item.h2Text;
+        currentH2H = item.height;
+      }
       i++;
       continue;
     }
 
     // 放不下：尝试拆分（空页时用整页高度，故翻页后会自然重试）
     if (item.split) {
-      const parts = item.split(availH - curH);
+      const parts = item.split(pageBudget - curH);
       if (parts) {
         cur.push(parts[0]);
-        flush();
-        // 拆分的剩余部分在同一小节内 → 续页
-        nextContinuedH2 = currentH2;
+        flushAndBegin(currentH2, currentH2H); // 拆分的剩余部分在同一小节内 → 续页
         items[i] = parts[1];
         continue;
       }
@@ -90,18 +106,19 @@ function packItems(items, availH) {
       // 空页 + 拆不动 + 超高 → 独占一页（设计允许的溢出）
       cur.push(item);
       curH += item.height;
-      if (item.h2Text) currentH2 = item.h2Text;
+      if (item.h2Text) {
+        currentH2 = item.h2Text;
+        currentH2H = item.height;
+      }
       i++;
       continue;
     }
 
     // 非空页：翻页，循环用整页高度重试（修复：拆分不再因剩余空间小而被跳过）
-    const continuedFrom = currentH2;
-    flush();
-    nextContinuedH2 = item.isHeading ? null : continuedFrom;
+    flushAndBegin(item.isHeading ? null : currentH2, item.isHeading ? 0 : currentH2H);
   }
 
-  flush();
+  flushAndBegin(null, 0);
   return pages;
 }
 
