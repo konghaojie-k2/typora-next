@@ -4,6 +4,15 @@ on:
   push:
     branches: [master]
     tags: ["v*"]
+    # 纯发版提交（只动版本号/CHANGELOG）不再触发 nightly：
+    # 否则 master 推送与 tag 推送会对同一个 commit 各构建一整套多平台包。
+    # 代码提交会带着上述文件以外的改动，paths-ignore 不生效，nightly 照常跑。
+    # 注意：GitHub 对 tag 推送不评估 path filters，v* 发布不受影响。
+    paths-ignore:
+      - CHANGELOG.md
+      - src-tauri/Cargo.toml
+      - src-tauri/Cargo.lock
+      - src-tauri/tauri.conf.json
   workflow_dispatch:
 
 env:
