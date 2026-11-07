@@ -55,9 +55,21 @@
   // 纯函数层（Node 可测，不碰 DOM）
   // ============================================
 
-  /** 章节名去掉扩展名（与 Rust chapter_stem 同规则） */
+  /**
+   * 章节名去掉目录与扩展名（与 Rust `chapter_stem` 同规则：Path::file_stem）。
+   * 落盘的解释按 `{章节basename}/{cue}.json` 归档，而会话的 chapter_file
+   * 是完整路径；这里必须两边都归一成 basename，否则同一概念的
+   * 💡解释 与 📋/💬/🖼 会话会被拆成两条记录（2026-11-07 实爆）。
+   */
   function chapterStem(path) {
-    return String(path || '').replace(/\.[^./\\]+$/, '');
+    var name = String(path || '').replace(/\\/g, '/').split('/').pop() || '';
+    return name.replace(/\.[^./\\]+$/, '');
+  }
+
+  /** 全局起点（未划词）：每次打开面板各成一条，不参与正文留痕。 */
+  function isGlobalKey(key) {
+    var k = String(key || '');
+    return !k || k.indexOf('global::') === 0 || k.indexOf('session::') === 0;
   }
 
   /**
@@ -120,6 +132,30 @@
     FALLBACK_CHIPS: FALLBACK_CHIPS,
     chapterStem: chapterStem,
     recordKey: recordKey,
+    isGlobalKey: isGlobalKey,
+
+    /**
+     * 把一条记录的各模式轮次压成 {q, a} 对，供正文波浪线的 hover 提示。
+     * 只用于展示，不参与落盘/续聊（避免把会话内容误写成解释 Q&A）。
+     */
+    cueHistory: function(record) {
+      var qa = [];
+      function push(q, a) {
+        if (q) qa.push({ q: String(q), a: String(a || '') });
+      }
+      if (record && record.explain && Array.isArray(record.explain.qa_history)) {
+        record.explain.qa_history.forEach(function(h) { push(h.q, h.a); });
+      }
+      ['example', 'talk', 'visualize'].forEach(function(kind) {
+        var turns = (record && record[kind] && record[kind].turns) || [];
+        for (var i = 0; i < turns.length; i++) {
+          if (turns[i].role !== 'user') continue;
+          var next = turns[i + 1];
+          push(turns[i].content, next && next.role !== 'user' ? next.content : '');
+        }
+      });
+      return qa;
+    },
 
     /**
      * 建议 chips：优先用 LLM 返回的 suggested_questions，否则按模式给静态兜底。
@@ -170,10 +206,24 @@
       });
       [['example', lists.caseSessions || []], ['talk', lists.talkSessions || []], ['visualize', lists.visualizeSessions || []]].forEach(function(pair) {
         pair[1].forEach(function(s) {
-          var key = s.start_key
-            || (s.selected_text ? chapterStem(s.chapter_file || '') + '::' + s.selected_text
-              : 'session::' + s.file);
-          var g = groupOf(key, { term: s.selected_text || '', chapterFile: s.chapter_file || '' });
+          var rawKey = String(s.start_key || '');
+          // 归并键必须与解释记录同语义：{章节 basename}::{概念}。
+          // 旧会话的 start_key 是「完整路径::概念」，直接拿来用会与解释
+          // 记录分成两条（各带一半历史）——划词起点一律按 chapter_file 归一。
+          var key;
+          if (rawKey && isGlobalKey(rawKey)) {
+            key = rawKey;
+          } else if (s.selected_text) {
+            // 划词起点（含旧版完整路径 start_key / 无 start_key 的旧会话）
+            key = chapterStem(s.chapter_file || '') + '::' + s.selected_text;
+          } else {
+            key = rawKey || ('session::' + s.file);
+          }
+          var g = groupOf(key, {
+            term: s.selected_text || '',
+            chapterFile: s.chapter_file || '',
+            global: isGlobalKey(key)
+          });
           // 同一部分只留最新一次会话（续聊会覆盖原文件，正常不会有两条）
           if (!g[pair[0]] || String(g[pair[0]].ended_at || '') < String(s.ended_at || '')) {
             g[pair[0]] = s;
@@ -213,7 +263,7 @@
           primary: parts[0].mode,
           title: g.term || MODES[parts[0].mode].name,
           chapter: g.chapterFile ? chapterStem(g.chapterFile) : '',
-          global: !g.term,
+          global: !!g.global,
           rounds: rounds,
           modes: parts.map(function(p) {
             return MODES[p.mode].icon + p.n;
@@ -374,7 +424,9 @@
         placeholder: this._resumed
           ? (this._mode === 'explain' ? '接着追问…' : '接着说你的理解…')
           : '选一种模式开始：💡 解释 / 📋 举例 / 💬 我有话说 / 🖼️ 画个图',
-        tutorAvatar: '✨'
+        tutorAvatar: '✨',
+        // 平铺阅读面板用 <p> 段距，而不是每段白占一整行（<br><br>）
+        markdownOptions: { paragraphs: true }
       });
       this._shell.render();
       this._shell.bindEvents({
@@ -869,6 +921,10 @@
         this._saved = false;  // 允许重试
         this._shell.appendTutorBubble('保存失败（' + failures.join('、') + '）：磁盘写入错误。对话仍保留在面板中，可再次点结束。');
         return;
+      }
+      // 会话刚落盘：刷新正文波浪线，不切章也能立刻看到这条伴学记录的痕迹
+      if (window.LearningModeIntegration && window.LearningModeIntegration.refreshCompanionMarks) {
+        window.LearningModeIntegration.refreshCompanionMarks();
       }
       this._close();
     }

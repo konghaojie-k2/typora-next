@@ -134,6 +134,16 @@ Feature: AI 伴学统一入口（给个解释 / 举个例子 / 我有话说）
     When the learning records are collected
     Then the concept record should carry the visualize part for resuming
 
+  Scenario: 旧版完整路径 start_key 的记录与解释归并为一条
+    Given a real companion modal in a temp learning project
+    And an explanation record and a legacy full-path example session on the same concept
+    When the learning records are collected
+    Then the legacy concept should appear as a single record
+
+  Scenario: 非解释模式的划词记录也在正文留痕
+    Given the app source files are loaded
+    Then the chapter mark loader should include session records and refresh after save
+
   Scenario: AI 回答里的数学公式渲染为 KaTeX（与主预览同方案）
     Given a real companion modal in a temp learning project
     When the tutor bubble renders markdown containing math

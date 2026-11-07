@@ -65,6 +65,9 @@
       this.inputPlaceholder = opts.inputPlaceholder || '输入你的回答... (Shift+Enter 换行, Enter 发送)';
       this.tutorAvatar = opts.tutorAvatar || '🤖';
       this.endLabel = opts.endLabel || '结束';
+      // 透传给 markdownToHtml 的选项（AI 伴学用 {paragraphs:true}：
+      // 空行转 <p> 段距，避免一个空行占一整行高度）
+      this.markdownOptions = opts.markdownOptions || null;
 
       this._overlay = null;
       this._card = null;
@@ -171,7 +174,7 @@
       el.className = 'socratic-bubble-row';
       el.innerHTML = `
         <div class="socratic-avatar-tutor">${this.tutorAvatar}</div>
-        <div class="socratic-bubble-tutor socratic-bubble-md">${renderMarkdown(content)}</div>
+        <div class="socratic-bubble-tutor socratic-bubble-md">${renderMarkdown(content, this.markdownOptions)}</div>
       `;
       this._chatEl.appendChild(el);
       this._chatEl.scrollTop = this._chatEl.scrollHeight;
@@ -223,6 +226,7 @@
      * @returns {{el: Element, update: (text: string) => void, finalize: (text: string) => void, remove: () => void}}
      */
     startTutorStream() {
+      const markdownOptions = this.markdownOptions;
       const el = document.createElement('div');
       el.className = 'socratic-bubble-row';
       el.innerHTML = `
@@ -236,11 +240,11 @@
       return {
         el,
         update(text) {
-          contentEl.innerHTML = renderMarkdown(text);
+          contentEl.innerHTML = renderMarkdown(text, markdownOptions);
           scroll();
         },
         finalize(text) {
-          contentEl.innerHTML = renderMarkdown(text);
+          contentEl.innerHTML = renderMarkdown(text, markdownOptions);
           contentEl.classList.remove('socratic-bubble-streaming');
           scroll();
         },
@@ -303,9 +307,9 @@
    * AI 气泡内容渲染：优先全局 markdownToHtml（markdown-utils.js，
    * 与探索模式聊天同源）；Node 测试等无该模块场景兜底 escapeHtml。
    */
-  function renderMarkdown(text) {
+  function renderMarkdown(text, options) {
     if (typeof window !== 'undefined' && typeof window.markdownToHtml === 'function') {
-      return window.markdownToHtml(String(text || ''));
+      return window.markdownToHtml(String(text || ''), options);
     }
     return escapeHtml(text);
   }

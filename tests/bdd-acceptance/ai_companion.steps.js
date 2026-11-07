@@ -1142,6 +1142,82 @@ steps.then('the concept record should carry the visualize part for resuming', fu
 });
 
 // ============================================
+// Scenario：旧版完整路径 start_key 的记录与解释归并（2026-11-07 实爆）
+// ============================================
+
+steps.given('an explanation record and a legacy full-path example session on the same concept', function() {
+  const concept = '位置编码';
+  this.conv = {
+    id: 'cue-1', selected_text: concept, chapter: '03-attention', rounds: 1,
+    created_at: '2026-11-07T10:00:00.000Z', last_ts: '2026-11-07T10:00:00.000Z',
+    qa_history: [{ q: '位置编码是什么？', a: '把位置信息编进向量。', ts: '2026-11-07T10:00:00.000Z' }]
+  };
+  // 旧版 start_key 是「完整路径::概念」，与解释的 {章节 basename}::{概念} 不同
+  this.exampleSession = {
+    version: '1.0',
+    start_key: '/Users/me/course/03-attention::' + concept,
+    selected_text: concept,
+    chapter_file: '/Users/me/course/03-attention.md',
+    session_id: 'mock-case-legacy',
+    started_at: '2026-11-07T10:05:00.000Z',
+    ended_at: '2026-11-07T10:12:00.000Z',
+    end_reason: 'user_ended',
+    turns: [
+      { role: 'user', content: '举个位置编码的例子' },
+      { role: 'tutor', content: '比如…' }
+    ]
+  };
+  mockTauri.mockInvoke('case_study_save_session', {
+    projectPath: this.projectPath, session: this.exampleSession
+  });
+  mockTauri.mockInvoke('persist_explanation', {
+    projectPath: this.projectPath, chapter: '03-attention', conversation: this.conv
+  });
+});
+
+steps.then('the legacy concept should appear as a single record', function() {
+  const hit = this.records.filter((r) => r.title === '位置编码');
+  if (hit.length !== 1) {
+    throw new Error(`旧版完整路径 start_key 也应归并为一条，got ${hit.length} 条`);
+  }
+  if (!hit[0].record.explain || !hit[0].record.example) {
+    throw new Error('merged record should carry both explain and example parts');
+  }
+  if (hit[0].chapter !== '03-attention') {
+    throw new Error(`chapter should be basename, got: ${hit[0].chapter}`);
+  }
+});
+
+// ============================================
+// Scenario：非解释模式的划词记录也在正文留痕
+// ============================================
+
+steps.then('the chapter mark loader should include session records and refresh after save', function() {
+  const loader = this.modeIntegration;
+
+  for (const cmd of ['case_study_list_sessions', 'own_voice_list_sessions', 'visualize_list_sessions']) {
+    if (!loader.includes(cmd)) {
+      throw new Error(`正文留痕加载器缺少 ${cmd}：非解释模式的记录不会打波浪线`);
+    }
+  }
+  if (!loader.includes("kind: 'record'")) {
+    throw new Error('正文留痕加载器缺少会话记录 cue（kind: record）');
+  }
+  if (!loader.includes('refreshCompanionMarks')) {
+    throw new Error('缺少 refreshCompanionMarks：结束会话后波浪线不会立即出现');
+  }
+  if (!loader.includes('removeAllCueMarks')) {
+    throw new Error('刷新前必须移除旧 mark，否则重复叠加');
+  }
+  if (!this.companionJs.includes('refreshCompanionMarks')) {
+    throw new Error('会话落盘后没有调用 refreshCompanionMarks');
+  }
+  if (!this.companionJs.includes("replace(/\\\\/g, '/')")) {
+    throw new Error('chapterStem 必须归一目录分隔符（与 Rust file_stem 同语义）');
+  }
+});
+
+// ============================================
 // Scenario：AI 回答里的数学公式渲染为 KaTeX（与主预览同方案）
 // ============================================
 

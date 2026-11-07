@@ -1394,16 +1394,21 @@
       onCueClick: (cueId) => {
         const cue = _cornellCues.find(c => c.id === cueId);
         if (!cue) return;
-        // chapter 用章节 basename：解释落盘按 {chapter_stem}/{cue_id}.json
+        // 📋/💬/🖼 记录（无解释落盘）：直接打开归并后的整条记录
+        if (cue.kind === 'record' && cue.record) {
+          openAICompanion(cue.term, cue.primary || 'talk', { record: cue.record });
+          return;
+        }
+        // 💡 解释：chapter 用章节 basename（解释落盘按 {chapter_stem}/{cue_id}.json），
+        // linkedRecord 带上同概念的其他模式，续聊时四种模式历史都在
         const conversation = cueToConversation(cue);
         conversation.chapter = getChapterBasename(_currentChapterFile);
-        openAICompanion(cue.term, 'explain', {
-          record: {
-            selected_text: cue.term,
-            chapter_file: _currentChapterFile,
-            explain: conversation
-          }
+        const record = Object.assign({}, cue.linkedRecord || {}, {
+          selected_text: cue.term,
+          chapter_file: _currentChapterFile,
+          explain: conversation
         });
+        openAICompanion(cue.term, 'explain', { record });
       }
     });
   }
@@ -1432,22 +1437,34 @@
     // Snapshot for the race guard: the await below may resolve after the
     // user already switched chapters — never inject stale marks then.
     const chapterAtCall = _currentChapterFile;
+    const chapterBasename = getChapterBasename(_currentChapterFile);
+    // 与 Rust chapter_stem 同语义：basename 去扩展名
+    const chapterKey = chapterBasename.replace(/\.[^./\\]+$/, '');
     try {
-      const data = await window.__TAURI__.core.invoke('load_chapter_explanations', {
-        projectPath: _projectPath,
-        chapter: getChapterBasename(_currentChapterFile)
-      });
-      if (!data || !data.conversations || !data.conversations.length) return;
+      // 正文留痕不能只看解释：📋举例 / 💬我有话说 / 🖼画图 也是伴学记录。
+      // 四类清单一并取，划词起点的记录统一在正文打波浪线（2026-11-07 实爆）。
+      const [data, caseSessions, talkSessions, visualizeSessions] = await Promise.all([
+        window.__TAURI__.core.invoke('load_chapter_explanations', {
+          projectPath: _projectPath,
+          chapter: chapterBasename
+        }).catch(() => null),
+        window.__TAURI__.core.invoke('case_study_list_sessions', { projectPath: _projectPath }).catch(() => []),
+        window.__TAURI__.core.invoke('own_voice_list_sessions', { projectPath: _projectPath }).catch(() => []),
+        window.__TAURI__.core.invoke('visualize_list_sessions', { projectPath: _projectPath }).catch(() => [])
+      ]);
+      if (chapterAtCall !== _currentChapterFile) return;
 
       clearCues();
 
+      const conversations = (data && data.conversations) || [];
       let maxIdNum = 0;
-      data.conversations.forEach(conv => {
+      conversations.forEach(conv => {
         _cornellCues.push({
           id: conv.id,
           term: conv.selected_text,
           qaHistory: conv.qa_history.map(h => ({ q: h.q, a: h.a, ts: h.ts })),
-          createdAt: conv.created_at
+          createdAt: conv.created_at,
+          kind: 'explain'
         });
 
         const match = conv.id.match(/(\d+)$/);
@@ -1457,6 +1474,58 @@
         }
       });
       _cornellCueIdCounter = maxIdNum;
+
+      // 会话记录按「章节 + 概念」归并后，同样进正文留痕；
+      // 已有解释的同一概念只挂 linkedRecord（点击时能看见完整多模式历史）。
+      if (window.CompanionCore && window.CompanionCore.buildRecords) {
+        // load_chapter_explanations 的 conversation 不带 chapter 字段，
+        // buildRecords 需要它来生成 {章节}::{概念} 归并键——这里补齐。
+        const conversationsForRecords = conversations.map(conv =>
+          Object.assign({}, conv, {
+            chapter: conv.chapter || chapterKey,
+            // load_chapter_explanations 的 conversation 也不带 rounds，
+            // buildRecords 用它统计轮次；按 qa_history 补上。
+            rounds: typeof conv.rounds === 'number'
+              ? conv.rounds
+              : (Array.isArray(conv.qa_history) ? conv.qa_history.length : 0)
+          })
+        );
+        const items = window.CompanionCore.buildRecords({
+          explanations: conversationsForRecords,
+          caseSessions: caseSessions || [],
+          talkSessions: talkSessions || [],
+          visualizeSessions: visualizeSessions || []
+        });
+        let recordCueIndex = 0;
+        items.forEach(item => {
+          const rec = item.record || {};
+          const term = rec.selected_text || '';
+          if (!term) return;
+          if (window.CompanionCore.isGlobalKey(item.key)) return;
+          if (window.CompanionCore.chapterStem(rec.chapter_file || '') !== chapterKey) return;
+
+          const existing = _cornellCues.find(c => c.term === term);
+          if (existing) {
+            existing.linkedRecord = rec;
+            existing.primary = item.primary;
+            return;
+          }
+          _cornellCues.push({
+            id: 'record-cue-' + (++recordCueIndex),
+            term: term,
+            qaHistory: window.CompanionCore.cueHistory(rec),
+            createdAt: (rec.explain && rec.explain.created_at)
+              || (rec.example && rec.example.started_at)
+              || (rec.talk && rec.talk.started_at)
+              || (rec.visualize && rec.visualize.started_at)
+              || '',
+            kind: 'record',
+            record: rec,
+            primary: item.primary
+          });
+        });
+      }
+
       updateSidebarHeader();
       updateExtraReviewButton();
 
@@ -1465,6 +1534,8 @@
         const mdPaneLoad = document.getElementById('markdownBody');
         if (mdPaneLoad) {
           attachCueMarks();
+          // 先拆旧 mark 再全量注入：重复刷新（结束会话后）不会叠加重复标记
+          window.CornellTextMarks.removeAllCueMarks(mdPaneLoad);
           window.CornellTextMarks.injectAllCueMarks(mdPaneLoad, _cornellCues);
         }
       }
@@ -1951,15 +2022,27 @@
     const question = info.question || term;
     const answer = info.answer || '';
 
-    let cue = _cornellCues.find(c => c.term === term);
+    let cue = _cornellCues.find(c => c.term === term && c.kind !== 'record');
     if (!cue) {
-      cue = {
-        id: 'cue-' + (++_cornellCueIdCounter),
-        term: term,
-        qaHistory: [],
-        createdAt: new Date().toISOString()
-      };
-      _cornellCues.push(cue);
+      // 该概念此前只有 📋/💬/🖼 会话留痕：升级为解释 cue，而不是新建同名
+      // cue（否则正文会出现两条 mark，且把会话 Q&A 误写成解释落盘）。
+      const recordCue = _cornellCues.find(c => c.term === term);
+      if (recordCue) {
+        cue = recordCue;
+        cue.kind = 'explain';
+        cue.qaHistory = [];
+        cue.linkedRecord = cue.record;
+        delete cue.record;
+      } else {
+        cue = {
+          id: 'cue-' + (++_cornellCueIdCounter),
+          term: term,
+          qaHistory: [],
+          createdAt: new Date().toISOString(),
+          kind: 'explain'
+        };
+        _cornellCues.push(cue);
+      }
     }
     cue.qaHistory.push({ q: question, a: answer, ts: new Date().toISOString() });
     updateSidebarHeader();
@@ -1987,6 +2070,8 @@
     openAICompanion,
     openCompanionHistory,
     syncCompanionCue,
+    /** 结束会话后刷新正文留痕（不切章也能立刻看到新记录的波浪线） */
+    refreshCompanionMarks: loadChapterExplanations,
     getProjectPath() { return _projectPath; },
     teardown() {
       if (_quizAreaEl) { _quizAreaEl.remove(); _quizAreaEl = null; }

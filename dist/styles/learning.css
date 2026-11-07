@@ -4076,7 +4076,10 @@ body.learning-mode .toolbar {
 #companionModalCard .socratic-bubble-tutor,
 #companionModalCard .companion-guide-bubble {
   font-size: 15px;
-  line-height: 1.8;
+  /* 与全站聊天区一致（--line-height-normal: 1.6）。不能用 1.8：
+     markdown 渲染把空行转成 <br><br>，空行会按整行行高占位，
+     1.8 会让段落间距放大到 ~54px（2026-11-07 实机反馈太稀疏）。 */
+  line-height: 1.6;
   white-space: normal;
 }
 
@@ -4085,9 +4088,14 @@ body.learning-mode .toolbar {
   font-style: italic;
 }
 
-/* markdown 正文留白（气泡时代沿用 4px 的紧凑节奏，平铺后放宽） */
+/* markdown 正文留白：段落改用真正的 <p>（markdownOptions.paragraphs），
+   段距是 8px，而不是一个空行的整行高度 */
 #companionModalCard .socratic-bubble-md p {
-  margin: 8px 0;
+  margin: 0 0 8px;
+}
+
+#companionModalCard .socratic-bubble-md p:last-child {
+  margin-bottom: 0;
 }
 
 #companionModalCard .socratic-bubble-md h1,

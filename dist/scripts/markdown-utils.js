@@ -83,13 +83,37 @@
   }
 
   /**
+   * 可选的分段输出：把 `\n\n` 产生的 `<br><br>` 改成真正的 `<p>` 段落。
+   * 聊天面板按行高排版时，一个空行 = 一整行高度，段落间距会大得离谱；
+   * 平铺阅读面板（如 AI 伴学）需要“段距”而不是“空行”。
+   * 块级元素（列表/代码/表格/标题…）原样保留，避免把 <p> 套在块级元素外。
+   * @param {string} html
+   * @returns {string}
+   */
+  function toParagraphs(html) {
+    // <li> 已是块级元素，列表项之间的 <br> 是多余的空行
+    html = html.replace(/<\/li><br>/g, '</li>');
+    // 列表后常只剩一个 <br>（列表规则吃掉了换行），统一补成段落分隔，
+    // 否则后面的小标题会贴着列表且不被 <p> 包裹
+    html = html.replace(/(<\/(?:ul|ol|pre|table|blockquote)>)(?:<br>)+/g, '$1<br><br>');
+    var blockStart = /^<(h[1-6]|ul|ol|pre|table|blockquote|hr|div|figure|svg)\b/i;
+    return html.split(/<br><br>/).map(function (part) {
+      // 代码围栏/列表前后的换行会留下孤立的 <br>；先剥掉再判断块级起点
+      var trimmed = part.replace(/^(?:<br>)+|(?:<br>)+$/g, '').trim();
+      if (!trimmed) return '';
+      return blockStart.test(trimmed) ? trimmed : '<p>' + trimmed + '</p>';
+    }).join('');
+  }
+
+  /**
    * Convert lightweight markdown to HTML.
    * Block-level elements are processed first, then inline formatting.
    *
    * @param {string} content — raw markdown text
+   * @param {{paragraphs?: boolean}} [options] — paragraphs: 空行转 <p> 段距
    * @returns {string} safe HTML
    */
-  function markdownToHtml(content) {
+  function markdownToHtml(content, options) {
     if (!content) return '';
 
     // Step 0: pull ```svg fences out first (they must NOT become code blocks),
@@ -221,6 +245,8 @@
     html = html.replace(/%%CHATMATH_(\d+)%%/g, function (_, i) {
       return renderMathBlock(mathBlocks[+i]);
     });
+
+    if (options && options.paragraphs) html = toParagraphs(html);
 
     return html;
   }
