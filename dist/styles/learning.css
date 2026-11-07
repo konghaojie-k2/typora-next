@@ -3969,3 +3969,167 @@ body.learning-mode .toolbar {
   opacity: 0.5;
   cursor: default;
 }
+
+/* ============================================
+   AI 伴学面板：上下平铺的问答流（非左右对话气泡）
+   用户提问在上、AI 回答在下，各自整行铺开；去掉气泡底色 / 紫色渐变 /
+   圆形头像，用字号、字重与分隔线区分角色，给正文更多呼吸空间。
+   作用域限定 #companionModalCard，不影响共用 socratic-* 结构的
+   苏格拉底复习与案例研习面板。
+   ============================================ */
+
+#companionModalCard {
+  width: min(860px, 92vw);
+}
+
+#companionModalCard .socratic-chat {
+  padding: 20px 32px 30px;
+  gap: 0;
+}
+
+/* 头像改为行首小标签，不再占左右两侧 */
+#companionModalCard .socratic-avatar,
+#companionModalCard .socratic-avatar-tutor,
+#companionModalCard .socratic-avatar-user {
+  display: block;
+  width: auto;
+  height: auto;
+  margin: 0 0 6px;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+
+#companionModalCard .socratic-avatar-tutor::after {
+  content: ' 伴学';
+}
+
+/* AI 回答：整行平铺，无气泡框 */
+#companionModalCard .socratic-bubble-row {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 10px 0 0;
+}
+
+/* 用户提问：与上一轮 AI 回答之间用分隔线断开 */
+#companionModalCard .socratic-bubble-row-user {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  margin: 20px 0 0;
+  padding: 20px 0 0;
+  border-top: 1px solid var(--color-border);
+}
+
+/* 提问头部一行：「我 · 💬 模式」 */
+#companionModalCard .companion-user-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--color-text-muted);
+}
+
+/* 第一条提问（紧跟面板头部或开场引导）不需要再画分隔线 */
+#companionModalCard .socratic-chat > .socratic-bubble-row-user:first-child,
+#companionModalCard .socratic-chat > .socratic-bubble-row:first-child + .socratic-bubble-row-user,
+#companionModalCard .socratic-chat-placeholder + .socratic-bubble-row-user {
+  border-top: 0;
+  margin-top: 4px;
+  padding-top: 0;
+}
+
+/* 正文：全部平铺，去掉底色 / 边框 / 阴影 / 宽度限制 */
+#companionModalCard .socratic-bubble-user,
+#companionModalCard .socratic-bubble-tutor,
+#companionModalCard .companion-guide-bubble {
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  color: var(--color-text-primary);
+}
+
+/* 提问比回答更突出，扫读时一眼分辨「谁在说」 */
+#companionModalCard .socratic-bubble-user {
+  font-size: 15.5px;
+  font-weight: 600;
+  line-height: 1.65;
+  white-space: pre-wrap;
+}
+
+#companionModalCard .socratic-bubble-tutor,
+#companionModalCard .companion-guide-bubble {
+  font-size: 15px;
+  line-height: 1.8;
+  white-space: normal;
+}
+
+#companionModalCard .companion-guide-bubble {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* markdown 正文留白（气泡时代沿用 4px 的紧凑节奏，平铺后放宽） */
+#companionModalCard .socratic-bubble-md p {
+  margin: 8px 0;
+}
+
+#companionModalCard .socratic-bubble-md h1,
+#companionModalCard .socratic-bubble-md h2,
+#companionModalCard .socratic-bubble-md h3,
+#companionModalCard .socratic-bubble-md h4 {
+  margin: 16px 0 8px;
+}
+
+#companionModalCard .socratic-bubble-md ul,
+#companionModalCard .socratic-bubble-md ol {
+  margin: 8px 0;
+}
+
+/* 模式标签去掉色块底，只留彩色文字，避免平铺层里再出现一块「气泡」 */
+#companionModalCard .companion-mode-tag {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  opacity: 1;
+}
+
+/* loading / 故障：同样平铺，故障保留左侧警示线 */
+#companionModalCard .socratic-bubble-loading {
+  padding: 0;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+}
+
+#companionModalCard .companion-error-bubble {
+  padding: 0 0 0 12px;
+  background: none;
+  border: 0;
+  border-left: 3px solid var(--color-warning, #d97706);
+  border-radius: 0;
+  max-width: 100%;
+}

@@ -385,6 +385,11 @@
       this._injectInputExtras();
       this._updateInputUi();
 
+      // 平铺问答流不需要「选一种模式开始」的聊天气泡占位：
+      // 模式选择已在输入区的分段控件里，空面板留白比一段陈旧提示干净
+      const chatPlaceholder = this._shell.chatEl.querySelector('.socratic-chat-placeholder');
+      if (chatPlaceholder) chatPlaceholder.remove();
+
       if (this._resumed) {
         // 只回放，不发 LLM 调用（打开历史 ≠ 续聊）；输入保持可用
         for (const t of this.turns) {
@@ -516,9 +521,13 @@
     _appendUserTurn(content, mode) {
       const el = document.createElement('div');
       el.className = 'socratic-bubble-row-user';
+      // 上下平铺：提问头部一行「我 · 模式」，正文整行在下方
       el.innerHTML = `
-        <div class="socratic-bubble-user"><span class="companion-mode-tag t-${mode}">${MODES[mode].tag}</span>${escapeHtml(content)}</div>
-        <div class="socratic-avatar-user">我</div>
+        <div class="companion-user-head">
+          <span class="companion-user-self">我 ·</span>
+          <span class="companion-mode-tag t-${mode}">${MODES[mode].tag}</span>
+        </div>
+        <div class="socratic-bubble-user">${escapeHtml(content)}</div>
       `;
       this._shell.chatEl.appendChild(el);
       this._shell.chatEl.scrollTop = this._shell.chatEl.scrollHeight;
