@@ -1,68 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 7 12. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 杯身圆柱：左亮带 + 右暗侧 -->
-    <linearGradient id="cCup" gradientUnits="userSpaceOnUse" x1="6.2" y1="20" x2="21.8" y2="20">
-      <stop offset="0"    stop-color="#c7c3c1"/>
-      <stop offset="0.06" stop-color="#fafaf9"/>
-      <stop offset="0.22" stop-color="#ffffff"/>
-      <stop offset="0.52" stop-color="#f5f5f4"/>
-      <stop offset="0.80" stop-color="#e7e5e4"/>
-      <stop offset="1"    stop-color="#b8b3b0"/>
-    </linearGradient>
-    <!-- 咖啡液面 -->
-    <radialGradient id="cBrew" cx="0.36" cy="0.30" r="0.85">
-      <stop offset="0"    stop-color="#a5714a"/>
-      <stop offset="0.35" stop-color="#7a4d2c"/>
-      <stop offset="0.72" stop-color="#5a3620"/>
-      <stop offset="1"    stop-color="#331d0f"/>
-    </radialGradient>
-    <!-- 杯把瓷质 -->
-    <linearGradient id="cHandle" gradientUnits="userSpaceOnUse" x1="22" y1="24" x2="28" y2="13">
-      <stop offset="0"    stop-color="#b8b3b0"/>
-      <stop offset="0.40" stop-color="#fafaf9"/>
-      <stop offset="0.75" stop-color="#ffffff"/>
-      <stop offset="1"    stop-color="#c7c3c1"/>
-    </linearGradient>
-    <!-- 热气 -->
-    <linearGradient id="cSteam" gradientUnits="userSpaceOnUse" x1="12" y1="9.5" x2="12" y2="2.5">
-      <stop offset="0" stop-color="#8f8b88" stop-opacity="0.8"/>
-      <stop offset="1" stop-color="#8f8b88" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="cSteam2" gradientUnits="userSpaceOnUse" x1="16.5" y1="9.5" x2="16.5" y2="3.5">
-      <stop offset="0" stop-color="#8f8b88" stop-opacity="0.62"/>
-      <stop offset="1" stop-color="#8f8b88" stop-opacity="0"/>
-    </linearGradient>
+    <path id="outline" d="M7 12H22Q29 12 28 18 27 22 22 22L21.5 24Q21 27 18 27H12Q9 27 8.5 24Z"/>
   </defs>
-
-  <!-- ═══ 热气 ═══ -->
-  <path d="M11.0 9.6 C9.9 7.7 12.1 6.6 11.0 4.4" fill="none" stroke="url(#cSteam)" stroke-width="1.7" stroke-linecap="round"/>
-  <path d="M16.4 9.6 C15.4 7.9 17.5 6.8 16.4 4.9" fill="none" stroke="url(#cSteam2)" stroke-width="1.5" stroke-linecap="round"/>
-
-  <!-- ═══ 杯把：外描边 + 内瓷渐变（双线出立体） ═══ -->
-  <path d="M21.4 13.0 C26.9 13.4 28.6 16.9 27.6 19.9 C26.6 22.9 24.1 23.9 21.4 23.4"
-        fill="none" stroke="#1a1a2e" stroke-width="2.5" stroke-linecap="round"/>
-  <path d="M21.4 13.0 C26.9 13.4 28.6 16.9 27.6 19.9 C26.6 22.9 24.1 23.9 21.4 23.4"
-        fill="none" stroke="url(#cHandle)" stroke-width="1.3" stroke-linecap="round"/>
-
-  <!-- ═══ 杯身 ═══ -->
-  <path d="M6.0 12 L8.05 27.0 C8.15 28.2 9.15 29.1 10.35 29.1 L17.65 29.1 C18.85 29.1 19.85 28.2 19.95 27.0 L22.0 12 Z"
-        fill="url(#cCup)" stroke="#1a1a2e" stroke-width="1.35" stroke-linejoin="round"/>
-  <!-- 杯身左缘亮棱 -->
-  <path d="M7.15 13.3 L8.95 26.6 C9.0 27.25 9.35 27.75 9.85 28.05"
-        fill="none" stroke="#ffffff" stroke-width="0.75" opacity="0.95"/>
-  <!-- 杯身右缘暗棱 -->
-  <path d="M20.85 13.3 L18.95 26.7" fill="none" stroke="#a8a29e" stroke-width="0.6" opacity="0.85"/>
-  <!-- 杯身下缘落地暗影 -->
-  <path d="M9.6 28.35 L18.4 28.35" fill="none" stroke="#8f8b88" stroke-width="0.9" opacity="0.55"/>
-
-  <!-- ═══ 咖啡液面 ═══ -->
-  <ellipse cx="14" cy="12" rx="8" ry="2.6" fill="url(#cBrew)" stroke="#1a1a2e" stroke-width="1.25"/>
-  <!-- 液面月牙反光 -->
-  <path d="M9.4 11.05 C11.0 10.25 13.1 10.15 14.8 10.5 C12.9 10.35 10.8 10.55 9.4 11.05 Z"
-        fill="#c9a077" opacity="0.95"/>
-  <ellipse cx="10.7" cy="11.6" rx="1.9" ry="0.42" fill="#ffffff" opacity="0.42"/>
-  <!-- 液面右下的暗弧（液面凹陷） -->
-  <path d="M18.6 12.6 C19.6 12.2 20.4 11.7 20.9 11.1" fill="none" stroke="#2a1608" stroke-width="0.7" opacity="0.7"/>
-  <!-- 杯口内壁受光弧 -->
-  <path d="M6.45 12.5 C8.6 13.9 19.4 13.9 21.55 12.5" fill="none" stroke="#ffffff" stroke-width="0.7" opacity="0.7"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M21 13h2q5 0 5 4t-6 4" fill="#f5e7d4"/>
+    <path d="M7 12h16l-1.5 12q-.5 3-3.5 3h-6q-3 0-3.5-3Z" fill="#f5e7d4"/>
+    <path d="m9 18 1 6q.2 1.4 2 1.4h6q1.8 0 2-1.4l.8-6Z" fill="#d9aa83" stroke="none"/>
+    <ellipse cx="15" cy="12" rx="8" ry="2.2" fill="#976f54"/>
+    <path d="M11 11.7q3-1 6-.5" stroke="#e8c8a0" stroke-width="1" fill="none"/>
+    <path d="M12 7.5q-1.5-1.5 0-3M17 8q-1.5-1.5 0-3" stroke="#a6adb4" fill="none"/>
+  </g>
 </svg>

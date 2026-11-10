@@ -1,66 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 5 5. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 杖身三段棱面：深靛蓝漆面 -->
-    <linearGradient id="wShaftMid" gradientUnits="userSpaceOnUse" x1="8.53" y1="9.47" x2="25.53" y2="26.47">
-      <stop offset="0"    stop-color="#3730a3"/>
-      <stop offset="0.36" stop-color="#4f46e5"/>
-      <stop offset="0.68" stop-color="#818cf8"/>
-      <stop offset="1"    stop-color="#4338ca"/>
-    </linearGradient>
-    <linearGradient id="wShaftUp" gradientUnits="userSpaceOnUse" x1="9.47" y1="8.53" x2="26.47" y2="25.53">
-      <stop offset="0"   stop-color="#1e1b4b"/>
-      <stop offset="0.6" stop-color="#312e81"/>
-      <stop offset="1"   stop-color="#1c1947"/>
-    </linearGradient>
-    <linearGradient id="wShaftDown" gradientUnits="userSpaceOnUse" x1="7.59" y1="10.41" x2="27.41" y2="24.59">
-      <stop offset="0"   stop-color="#161340"/>
-      <stop offset="0.55" stop-color="#211d5c"/>
-      <stop offset="1"   stop-color="#12102f"/>
-    </linearGradient>
-    <!-- 金属箍 -->
-    <linearGradient id="wFerrule" gradientUnits="userSpaceOnUse" x1="9.0" y1="11.83" x2="12.96" y2="10.13">
-      <stop offset="0"    stop-color="#4a5462"/>
-      <stop offset="0.30" stop-color="#cbd5e1"/>
-      <stop offset="0.58" stop-color="#f8fafc"/>
-      <stop offset="0.82" stop-color="#94a3b8"/>
-      <stop offset="1"    stop-color="#5b6675"/>
-    </linearGradient>
-    <!-- 星芒 -->
-    <linearGradient id="wStar" gradientUnits="userSpaceOnUse" x1="3.5" y1="3.5" x2="12.5" y2="12.5">
-      <stop offset="0"    stop-color="#fef9c3"/>
-      <stop offset="0.32" stop-color="#fde047"/>
-      <stop offset="0.68" stop-color="#f59e0b"/>
-      <stop offset="1"    stop-color="#b45309"/>
-    </linearGradient>
+    <path id="outline" d="M5 5 11 6 14 10 12 13 27 25 25 27 10 14 6 15 7 11Z"/>
   </defs>
-
-  <!-- ═══ 杖身三段棱面 ═══ -->
-  <path d="M7.59 10.41 L8.53 9.47 L25.53 26.47 L24.59 27.41 Z" fill="url(#wShaftDown)"/>
-  <path d="M8.53 9.47 L9.47 8.53 L26.47 25.53 L25.53 26.47 Z" fill="url(#wShaftMid)"/>
-  <path d="M9.47 8.53 L10.41 7.59 L27.41 24.59 L26.47 25.53 Z" fill="url(#wShaftUp)"/>
-  <path d="M9.47 8.53 L26.47 25.53" fill="none" stroke="#c7d2fe" stroke-width="0.45" opacity="0.85"/>
-  <path d="M8.53 9.47 L25.53 26.47" fill="none" stroke="#12102f" stroke-width="0.4" opacity="0.85"/>
-
-  <!-- ═══ 金属箍 ═══ -->
-  <path d="M9.0 11.83 L11.83 9.0 L12.96 10.13 L10.13 12.96 Z"
-        fill="url(#wFerrule)" stroke="#1a1a2e" stroke-width="1" stroke-linejoin="round"/>
-  <path d="M9.0 11.83 L11.83 9.0" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.9"/>
-
-  <!-- ═══ 星芒（对角切分出明暗两半 + 中心亮核） ═══ -->
-  <path d="M8 2.5 L11.23 3.55 L13.23 6.3 L10.19 8.71 L11.23 12.45 L8 10.3 L4.77 12.45 L5.81 8.71 L2.77 6.3 L4.77 3.55 Z"
-        fill="url(#wStar)" stroke="#1a1a2e" stroke-width="1.15" stroke-linejoin="round"/>
-  <!-- 右下暗面 -->
-  <path d="M8 2.5 L11.23 3.55 L13.23 6.3 L10.19 8.71 L11.23 12.45 L8 10.3 L8 2.5 Z"
-        fill="#b45309" opacity="0.32"/>
-  <!-- 左上受光棱 -->
-  <path d="M8 2.5 L4.77 3.55 L2.77 6.3" fill="none" stroke="#fef9c3" stroke-width="0.6" opacity="0.95"/>
-  <!-- 中心亮核 -->
-  <path d="M8 5.6 L9.15 8 L8 10.4 L6.85 8 Z" fill="#ffffff" opacity="0.85"/>
-  <circle cx="8" cy="8" r="0.75" fill="#ffffff"/>
-
-  <!-- ═══ 次级星芒 ═══ -->
-  <path d="M14.5 1.7 Q 14.5 3.5 16.3 3.5 Q 14.5 3.5 14.5 5.3 Q 14.5 3.5 12.7 3.5 Q 14.5 3.5 14.5 1.7 Z"
-        fill="#fde047" stroke="#1a1a2e" stroke-width="0.7" stroke-linejoin="round"/>
-  <path d="M3.5 13 Q 3.5 14.5 5 14.5 Q 3.5 14.5 3.5 16 Q 3.5 14.5 2 14.5 Q 3.5 14.5 3.5 13 Z"
-        fill="#fde047" stroke="#1a1a2e" stroke-width="0.65" stroke-linejoin="round"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="m10 12 15 15 2-2-15-15Z" fill="#a99ac7"/>
+    <path d="m20 22 2-2" stroke="#eee5f7"/>
+    <path d="m5 5 6 1 3 4-4 1-1 4-3-4 1-3Z" fill="#eed393"/>
+    <path d="M22 4v4m-2-2h4M6 22v3m-1.5-1.5h3" stroke="#af9ac6" stroke-width="1.4"/>
+  </g>
 </svg>

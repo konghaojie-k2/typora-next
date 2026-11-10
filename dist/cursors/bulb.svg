@@ -1,63 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 16 3. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 玻璃泡：光心偏左上，边缘转冷蓝 -->
-    <radialGradient id="bGlass" cx="0.33" cy="0.27" r="0.86">
-      <stop offset="0"    stop-color="#ffffff"/>
-      <stop offset="0.30" stop-color="#f0f9ff"/>
-      <stop offset="0.58" stop-color="#dbeafe"/>
-      <stop offset="0.82" stop-color="#93c5fd"/>
-      <stop offset="1"    stop-color="#5fa4e8"/>
-    </radialGradient>
-    <!-- 灯头金属壳 -->
-    <linearGradient id="bBase" gradientUnits="userSpaceOnUse" x1="12" y1="24" x2="20.5" y2="21">
-      <stop offset="0"    stop-color="#4a5462"/>
-      <stop offset="0.22" stop-color="#b6c0cd"/>
-      <stop offset="0.48" stop-color="#eef2f6"/>
-      <stop offset="0.70" stop-color="#94a3b8"/>
-      <stop offset="0.88" stop-color="#cbd5e1"/>
-      <stop offset="1"    stop-color="#5b6675"/>
-    </linearGradient>
-    <linearGradient id="bContact" gradientUnits="userSpaceOnUse" x1="12" y1="28.5" x2="20" y2="26.5">
-      <stop offset="0"   stop-color="#3f4854"/>
-      <stop offset="0.5" stop-color="#8b96a5"/>
-      <stop offset="1"   stop-color="#2f3742"/>
-    </linearGradient>
+    <path id="outline" d="M16 3C6 3 4 14 10 20L12 23V26L14 29H18L20 26V23L22 20C28 14 26 3 16 3Z"/>
   </defs>
-
-  <!-- ═══ 光芒 ═══ -->
-  <g stroke="#fbbf24" stroke-width="1.5" stroke-linecap="round" opacity="0.9">
-    <path d="M7.57 8.57 L6.03 7.85"/>
-    <path d="M12.07 4.07 L11.35 2.53"/>
-    <path d="M19.93 4.07 L20.65 2.53"/>
-    <path d="M24.43 8.57 L25.97 7.85"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M16 3C6 3 4 14 10 20l2 3h8l2-3C28 14 26 3 16 3Z" fill="#f0d793"/>
+    <path d="M10 11q.5-3 3-4" stroke="#fff5d4" stroke-width="1.8" fill="none"/>
+    <path d="m13 15 3 3 3-3m-3 3v5" stroke="#b78f48" fill="none"/>
+    <path d="M12 23h8v3l-2 3h-4l-2-3Z" fill="#c8d3dd"/>
+    <path d="M12 26h8" stroke="#7a8a99" stroke-width="1"/>
   </g>
-
-  <!-- ═══ 玻璃泡 ═══ -->
-  <circle cx="16" cy="12.5" r="8.2" fill="url(#bGlass)" stroke="#1a1a2e" stroke-width="1.35"/>
-
-  <!-- ═══ 灯丝（内发光 + 亮芯三层叠加） ═══ -->
-  <path d="M12.8 16.4 Q 12.8 11.6 14.4 11.6 Q 16 11.6 16 13.9 Q 16 11.6 17.6 11.6 Q 19.2 11.6 19.2 16.4"
-        fill="none" stroke="#f59e0b" stroke-width="3.2" stroke-linecap="round" opacity="0.20"/>
-  <path d="M12.8 16.4 Q 12.8 11.6 14.4 11.6 Q 16 11.6 16 13.9 Q 16 11.6 17.6 11.6 Q 19.2 11.6 19.2 16.4"
-        fill="none" stroke="#fcd34d" stroke-width="1.7" stroke-linecap="round" opacity="0.55"/>
-  <path d="M12.8 16.4 Q 12.8 11.6 14.4 11.6 Q 16 11.6 16 13.9 Q 16 11.6 17.6 11.6 Q 19.2 11.6 19.2 16.4"
-        fill="none" stroke="#fef9c3" stroke-width="0.75" stroke-linecap="round"/>
-  <circle cx="16" cy="13.3" r="0.8" fill="#ffffff" opacity="0.9"/>
-
-  <!-- ═══ 玻璃反光：月牙 + 顶点点光 + 底部回光 ═══ -->
-  <path d="M9.9 8.6 C 8.3 10.6 7.9 13.2 8.5 15.4 C 7.0 12.8 7.4 9.7 9.9 8.6 Z"
-        fill="#ffffff" opacity="0.92"/>
-  <ellipse cx="12.6" cy="6.6" rx="1.5" ry="0.85" fill="#ffffff" opacity="0.75"
-           transform="rotate(-38 12.6 6.6)"/>
-  <path d="M11.2 18.6 Q 16 21.4 20.8 18.6" fill="none" stroke="#ffffff" stroke-width="1.1" opacity="0.5"/>
-
-  <!-- ═══ 灯头：颈 + 螺纹壳 + 触点 ═══ -->
-  <path d="M12.6 20.6 L19.4 20.6 L18.7 23.0 L13.3 23.0 Z" fill="url(#bBase)" stroke="#1a1a2e" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M13.3 23.0 L18.7 23.0 L18.2 27.0 L13.8 27.0 Z" fill="url(#bBase)" stroke="#1a1a2e" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M13.42 23.9 L18.58 23.9 M13.50 25.0 L18.50 25.0 M13.60 26.1 L18.40 26.1"
-        fill="none" stroke="#4a5462" stroke-width="0.55" opacity="0.8"/>
-  <path d="M12.6 20.6 L19.4 20.6" fill="none" stroke="#ffffff" stroke-width="0.45" opacity="0.8"/>
-  <path d="M13.8 27.0 L18.2 27.0 Q 17.6 28.5 16 28.5 Q 14.4 28.5 13.8 27 Z"
-        fill="url(#bContact)" stroke="#1a1a2e" stroke-width="1.2" stroke-linejoin="round"/>
-  <ellipse cx="16" cy="27.5" rx="1.4" ry="0.5" fill="#cbd5e1" opacity="0.8"/>
 </svg>

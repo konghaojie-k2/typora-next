@@ -2799,62 +2799,81 @@ body.pdf-exporting-mac .markdown-body {
    ============================================ */
 body.cursor-pencil,
 body.cursor-pencil * {
-  cursor: url('../cursors/pencil.svg') 4 4, auto !important;
+  --custom-cursor: url('../cursors/pencil.svg') 4 4, auto;
 }
 
 body.cursor-highlighter,
 body.cursor-highlighter * {
-  cursor: url('../cursors/highlighter.svg') 4 4, auto !important;
+  --custom-cursor: url('../cursors/highlighter.svg') 4 4, auto;
 }
 
 body.cursor-pen,
 body.cursor-pen * {
-  cursor: url('../cursors/pen.svg') 4 4, auto !important;
+  --custom-cursor: url('../cursors/pen.svg') 4 4, auto;
 }
 
 body.cursor-cat,
 body.cursor-cat * {
-  cursor: url('../cursors/cat.svg') 16 19, auto !important;
+  --custom-cursor: url('../cursors/cat.svg') 6 6, auto;
 }
 
 body.cursor-microphone,
 body.cursor-microphone * {
-  cursor: url('../cursors/microphone.svg') 11 11, auto !important;
+  --custom-cursor: url('../cursors/microphone.svg') 8 6, auto;
 }
 
 body.cursor-rocket,
 body.cursor-rocket * {
-  cursor: url('../cursors/rocket.svg') 4 4, auto !important;
+  --custom-cursor: url('../cursors/rocket.svg') 4 4, auto;
 }
 
 body.cursor-falcon9,
 body.cursor-falcon9 * {
-  cursor: url('../cursors/falcon9.svg') 4 4, auto !important;
+  --custom-cursor: url('../cursors/falcon9.svg') 4 4, auto;
 }
 
 body.cursor-wand,
 body.cursor-wand * {
-  cursor: url('../cursors/wand.svg') 8 8, auto !important;
+  --custom-cursor: url('../cursors/wand.svg') 5 5, auto;
 }
 
 body.cursor-leaf,
 body.cursor-leaf * {
-  cursor: url('../cursors/leaf.svg') 7 7, auto !important;
+  --custom-cursor: url('../cursors/leaf.svg') 5 5, auto;
 }
 
 body.cursor-star,
 body.cursor-star * {
-  cursor: url('../cursors/star.svg') 16 16, auto !important;
+  --custom-cursor: url('../cursors/star.svg') 16 3, auto;
 }
 
 body.cursor-coffee,
 body.cursor-coffee * {
-  cursor: url('../cursors/coffee.svg') 14 12, auto !important;
+  --custom-cursor: url('../cursors/coffee.svg') 7 12, auto;
 }
 
 body.cursor-bulb,
 body.cursor-bulb * {
-  cursor: url('../cursors/bulb.svg') 16 12, auto !important;
+  --custom-cursor: url('../cursors/bulb.svg') 16 3, auto;
+}
+
+/* Inherit the artwork on ordinary surfaces. Explicit text, zoom and drag
+   cursors keep their native feedback; interactive controls share the artwork. */
+body[class*="cursor-"],
+body[class*="cursor-"] :where(a, button, select, summary, label, [role="button"],
+  input[type="button"], input[type="submit"], input[type="reset"],
+  input[type="checkbox"], input[type="radio"]) {
+  cursor: var(--custom-cursor, auto);
+}
+
+body[class*="cursor-"] :where(textarea, [contenteditable="true"], [contenteditable=""],
+  input:not([type]), input[type="text"], input[type="search"], input[type="email"],
+  input[type="password"], input[type="url"], input[type="tel"], input[type="number"]) {
+  cursor: text;
+}
+
+body[class*="cursor-"] :where(:disabled, [aria-disabled="true"]) {
+  cursor: not-allowed;
 }
 
 /* ============================================

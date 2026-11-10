@@ -1,93 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 4 4. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 六角杆三段棱面 -->
-    <linearGradient id="pFaceMid" gradientUnits="userSpaceOnUse" x1="7.5" y1="9.0" x2="19.6" y2="19.6">
-      <stop offset="0"    stop-color="#fbbf24"/>
-      <stop offset="0.45" stop-color="#fde047"/>
-      <stop offset="0.72" stop-color="#fef9c3"/>
-      <stop offset="1"    stop-color="#fcd34d"/>
-    </linearGradient>
-    <linearGradient id="pFaceUp" gradientUnits="userSpaceOnUse" x1="8.95" y1="7.54" x2="20.97" y2="16.73">
-      <stop offset="0"   stop-color="#f59e0b"/>
-      <stop offset="0.6" stop-color="#fbbf24"/>
-      <stop offset="1"   stop-color="#d97706"/>
-    </linearGradient>
-    <linearGradient id="pFaceDown" gradientUnits="userSpaceOnUse" x1="6.12" y1="10.36" x2="16.73" y2="20.97">
-      <stop offset="0"    stop-color="#a16207"/>
-      <stop offset="0.55" stop-color="#ca8a04"/>
-      <stop offset="1"    stop-color="#854d0e"/>
-    </linearGradient>
-    <!-- 木锥：受光半 / 背光半 -->
-    <linearGradient id="pWoodUp" gradientUnits="userSpaceOnUse" x1="4.9" y1="4.9" x2="10.4" y2="5.3">
-      <stop offset="0"   stop-color="#e0c39c"/>
-      <stop offset="0.5" stop-color="#f5e6cd"/>
-      <stop offset="1"   stop-color="#d4b489"/>
-    </linearGradient>
-    <linearGradient id="pWoodDown" gradientUnits="userSpaceOnUse" x1="4.9" y1="4.9" x2="5.3" y2="10.4">
-      <stop offset="0"   stop-color="#b38b60"/>
-      <stop offset="0.5" stop-color="#96714a"/>
-      <stop offset="1"   stop-color="#7a5a39"/>
-    </linearGradient>
-    <!-- 金属箍：多段反射 -->
-    <linearGradient id="pFerrule" gradientUnits="userSpaceOnUse" x1="18.85" y1="23.94" x2="23.94" y2="18.85">
-      <stop offset="0"    stop-color="#475569"/>
-      <stop offset="0.14" stop-color="#94a3b8"/>
-      <stop offset="0.34" stop-color="#f8fafc"/>
-      <stop offset="0.52" stop-color="#cbd5e1"/>
-      <stop offset="0.68" stop-color="#64748b"/>
-      <stop offset="0.86" stop-color="#e2e8f0"/>
-      <stop offset="1"    stop-color="#334155"/>
-    </linearGradient>
-    <linearGradient id="pEraser" gradientUnits="userSpaceOnUse" x1="21.4" y1="25.7" x2="25.7" y2="21.4">
-      <stop offset="0"    stop-color="#831843"/>
-      <stop offset="0.26" stop-color="#db2777"/>
-      <stop offset="0.58" stop-color="#fbcfe8"/>
-      <stop offset="0.80" stop-color="#f472b6"/>
-      <stop offset="1"    stop-color="#be185d"/>
-    </linearGradient>
-    <linearGradient id="pLead" gradientUnits="userSpaceOnUse" x1="4.2" y1="5.5" x2="5.5" y2="4.2">
-      <stop offset="0"   stop-color="#1f2937"/>
-      <stop offset="0.5" stop-color="#111827"/>
-      <stop offset="1"   stop-color="#6b7280"/>
-    </linearGradient>
+    <path id="outline" d="M4 4 10.5 6 26 21.5Q28 23.5 26 25.5L25.5 26Q23.5 28 21.5 26L6 10.5Z"/>
   </defs>
-
-  <!-- ═══ 笔杆：三段棱面 ═══ -->
-  <path d="M6.12 10.36 L7.54 8.95 L18.14 19.56 L16.73 20.97 Z" fill="url(#pFaceDown)"/>
-  <path d="M7.54 8.95 L8.95 7.54 L19.56 18.14 L18.14 19.56 Z" fill="url(#pFaceMid)"/>
-  <path d="M8.95 7.54 L10.36 6.12 L20.97 16.73 L19.56 18.14 Z" fill="url(#pFaceUp)"/>
-  <path d="M8.95 7.54 L19.56 18.14" fill="none" stroke="#fffbeb" stroke-width="0.5" opacity="0.9"/>
-  <path d="M7.54 8.95 L18.14 19.56" fill="none" stroke="#a16207" stroke-width="0.45" opacity="0.85"/>
-
-  <!-- ═══ 木锥（短锥，只占 20%） ═══ -->
-  <path d="M4.92 4.92 L7.89 7.89 L5.34 10.44 L4.32 5.52 Z" fill="url(#pWoodDown)"/>
-  <path d="M5.52 4.32 L10.44 5.34 L7.89 7.89 L4.92 4.92 Z" fill="url(#pWoodUp)"/>
-  <path d="M6.35 5.10 L9.65 6.45" fill="none" stroke="#c9a077" stroke-width="0.35" opacity="0.9"/>
-  <path d="M4.98 6.35 L8.28 7.70" fill="none" stroke="#8d6a48" stroke-width="0.3" opacity="0.6"/>
-
-  <!-- ═══ 石墨芯 ═══ -->
-  <path d="M4 4 L5.52 4.32 L4.32 5.52 Z" fill="url(#pLead)"/>
-  <path d="M4.22 4.22 L4.78 4.40 L4.40 4.78 Z" fill="#d1d5db" opacity="0.85"/>
-
-  <!-- ═══ 金属箍 ═══ -->
-  <path d="M16.73 20.97 L20.97 16.73 L23.94 18.85 L18.85 23.94 Z" fill="url(#pFerrule)"/>
-  <path d="M17.60 20.10 L18.55 21.05 M19.35 18.35 L20.30 19.30 M21.10 16.60 L22.05 17.55"
-        stroke="#334155" stroke-width="0.45" opacity="0.65" fill="none"/>
-  <path d="M16.73 20.97 L20.97 16.73" fill="none" stroke="#f1f5f9" stroke-width="0.4" opacity="0.7"/>
-
-  <!-- ═══ 箍/橡皮交界的环境光遮蔽 ═══ -->
-  <path d="M18.85 23.94 L23.94 18.85" stroke="#701a3f" stroke-width="1.1" opacity="0.6" fill="none"/>
-
-  <!-- ═══ 橡皮 ═══ -->
-  <path d="M18.85 23.94 L23.94 18.85 L27.05 21.96 L21.96 27.05 Z" fill="url(#pEraser)"/>
-  <path d="M23.94 18.85 L27.05 21.96" fill="none" stroke="#fce7f3" stroke-width="0.5" opacity="0.95"/>
-  <path d="M18.85 23.94 L21.96 27.05" fill="none" stroke="#831843" stroke-width="0.5" opacity="0.8"/>
-  <ellipse cx="23.3" cy="21.5" rx="1.3" ry="0.45" fill="#ffffff" opacity="0.55"
-           transform="rotate(-45 23.3 21.5)"/>
-
-  <!-- ═══ 轮廓压线 ═══ -->
-  <path d="M4 4 L10.44 5.34 L20.97 16.73 L23.94 18.85 L27.05 21.96 L21.96 27.05 L18.85 23.94 L16.73 20.97 L5.34 10.44 Z"
-        fill="none" stroke="#1a1a2e" stroke-width="1.35" stroke-linejoin="round"/>
-  <path d="M5.52 4.32 L4.32 5.52 M10.44 5.34 L5.34 10.44 M16.73 20.97 L20.97 16.73 M18.85 23.94 L23.94 18.85"
-        fill="none" stroke="#1a1a2e" stroke-width="0.85" opacity="0.9"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <use href="#outline" fill="#f4ca65"/>
+    <path d="m4 4 6.5 2L6 10.5Z" fill="#f3dfbd"/>
+    <path d="m4 4 3 .9L4.9 7Z" fill="#344052" stroke="none"/>
+    <path d="m21.5 17.1 4.5 4.4q2 2 0 4l-.5.5q-2 2-4 0l-4.4-4.5Z" fill="#eaa4a0"/>
+    <path d="m17.1 21.5 4.4-4.4 2.2 2.2-4.4 4.4Z" fill="#dbe3e9"/>
+    <path d="m11 9 8.5 8.5" stroke="#fff5ce" stroke-width="1.6"/>
+    <use href="#outline" fill="none"/>
+  </g>
 </svg>

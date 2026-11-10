@@ -1,117 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 4 4. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 白色箭体三段棱面 -->
-    <linearGradient id="fFaceMid" gradientUnits="userSpaceOnUse" x1="6.64" y1="7.87" x2="19.30" y2="20.53">
-      <stop offset="0"    stop-color="#f8fafc"/>
-      <stop offset="0.30" stop-color="#ffffff"/>
-      <stop offset="0.70" stop-color="#fcfdfe"/>
-      <stop offset="1"    stop-color="#eef1f5"/>
-    </linearGradient>
-    <linearGradient id="fFaceUp" gradientUnits="userSpaceOnUse" x1="7.87" y1="6.64" x2="20.53" y2="19.30">
-      <stop offset="0"    stop-color="#e4eaf1"/>
-      <stop offset="0.45" stop-color="#f7f9fb"/>
-      <stop offset="1"    stop-color="#eaefF4"/>
-    </linearGradient>
-    <linearGradient id="fFaceDown" gradientUnits="userSpaceOnUse" x1="5.42" y1="9.09" x2="18.07" y2="21.75">
-      <stop offset="0"    stop-color="#b9c2cd"/>
-      <stop offset="0.5"  stop-color="#dbe1e8"/>
-      <stop offset="1"    stop-color="#c2cad5"/>
-    </linearGradient>
-    <!-- 整流罩 -->
-    <linearGradient id="fFairUp" gradientUnits="userSpaceOnUse" x1="4" y1="4" x2="9.09" y2="5.42">
-      <stop offset="0"   stop-color="#e6ebf1"/>
-      <stop offset="0.5" stop-color="#ffffff"/>
-      <stop offset="1"   stop-color="#dde3ea"/>
-    </linearGradient>
-    <linearGradient id="fFairDown" gradientUnits="userSpaceOnUse" x1="4" y1="4" x2="5.42" y2="9.09">
-      <stop offset="0"   stop-color="#9aa5b3"/>
-      <stop offset="0.5" stop-color="#7d8894"/>
-      <stop offset="1"   stop-color="#6f7a85"/>
-    </linearGradient>
-    <!-- 黑色级间段 -->
-    <linearGradient id="fInterMid" gradientUnits="userSpaceOnUse" x1="9.68" y1="10.91" x2="12.18" y2="10.95">
-      <stop offset="0"   stop-color="#292930"/>
-      <stop offset="0.6" stop-color="#3a3a42"/>
-      <stop offset="1"   stop-color="#303038"/>
-    </linearGradient>
-    <linearGradient id="fInterUp" gradientUnits="userSpaceOnUse" x1="10.91" y1="9.68" x2="13.40" y2="9.73">
-      <stop offset="0"   stop-color="#1e1e24"/>
-      <stop offset="0.6" stop-color="#2b2b32"/>
-      <stop offset="1"   stop-color="#232329"/>
-    </linearGradient>
-    <linearGradient id="fInterDown" gradientUnits="userSpaceOnUse" x1="8.46" y1="12.13" x2="9.73" y2="13.40">
-      <stop offset="0"   stop-color="#16161a"/>
-      <stop offset="0.6" stop-color="#202026"/>
-      <stop offset="1"   stop-color="#191920"/>
-    </linearGradient>
-    <!-- 栅格舵 -->
-    <linearGradient id="fGrid" gradientUnits="userSpaceOnUse" x1="9.23" y1="14.61" x2="15.81" y2="10.44">
-      <stop offset="0"    stop-color="#252b34"/>
-      <stop offset="0.48" stop-color="#525d6c"/>
-      <stop offset="0.82" stop-color="#65717f"/>
-      <stop offset="1"    stop-color="#39414d"/>
-    </linearGradient>
-    <!-- 发动机段 / 喷管 -->
-    <linearGradient id="fEng" gradientUnits="userSpaceOnUse" x1="18.07" y1="21.75" x2="23.23" y2="19.56">
-      <stop offset="0"    stop-color="#1c2027"/>
-      <stop offset="0.5"  stop-color="#3b4450"/>
-      <stop offset="1"    stop-color="#262d36"/>
-    </linearGradient>
-    <linearGradient id="fNozzle" gradientUnits="userSpaceOnUse" x1="20.44" y1="22.35" x2="23.83" y2="21.36">
-      <stop offset="0"    stop-color="#212630"/>
-      <stop offset="0.38" stop-color="#525d6b"/>
-      <stop offset="0.70" stop-color="#798593"/>
-      <stop offset="1"    stop-color="#2f3741"/>
-    </linearGradient>
+    <path id="outline" d="M4 4Q8 3 11 7L23 19 24 23 27 27 24 28 20 24 17 23 5 11Q3 8 4 4Z"/>
   </defs>
-
-  <!-- ═══ 栅格舵（先画，内侧被箭体压住） ═══ -->
-  <path d="M10.08 13.76 L9.23 14.61 L10.43 15.81 L11.28 14.96 Z"
-        fill="url(#fGrid)" stroke="#1a1a2e" stroke-width="0.95" stroke-linejoin="round"/>
-  <path d="M10.43 15.81 L11.28 14.96" fill="none" stroke="#8b98a8" stroke-width="0.42" opacity="0.9"/>
-
-  <path d="M13.76 10.08 L14.61 9.23 L15.81 10.43 L14.96 11.28 Z"
-        fill="url(#fGrid)" stroke="#1a1a2e" stroke-width="0.95" stroke-linejoin="round"/>
-  <path d="M14.61 9.23 L15.81 10.43" fill="none" stroke="#8b98a8" stroke-width="0.42" opacity="0.9"/>
-
-  <!-- ═══ 白色箭体：三段棱面 ═══ -->
-  <path d="M5.42 9.09 L6.64 7.87 L19.30 20.53 L18.07 21.75 Z" fill="url(#fFaceDown)"/>
-  <path d="M6.64 7.87 L7.87 6.64 L20.53 19.30 L19.30 20.53 Z" fill="url(#fFaceMid)"/>
-  <path d="M7.87 6.64 L9.09 5.42 L21.75 18.07 L20.53 19.30 Z" fill="url(#fFaceUp)"/>
-  <path d="M7.87 6.64 L20.53 19.30" fill="none" stroke="#ffffff" stroke-width="0.45" opacity="0.95"/>
-  <path d="M6.64 7.87 L19.30 20.53" fill="none" stroke="#98a3b0" stroke-width="0.4" opacity="0.85"/>
-
-  <!-- ═══ 黑色级间段（核心识别特征） ═══ -->
-  <path d="M8.46 12.13 L9.68 10.91 L10.95 12.18 L9.73 13.40 Z" fill="url(#fInterDown)"/>
-  <path d="M9.68 10.91 L10.91 9.68 L12.18 10.95 L10.95 12.18 Z" fill="url(#fInterMid)"/>
-  <path d="M10.91 9.68 L12.13 8.46 L13.40 9.73 L12.18 10.95 Z" fill="url(#fInterUp)"/>
-  <path d="M10.91 9.68 L12.18 10.95" fill="none" stroke="#525260" stroke-width="0.4" opacity="0.9"/>
-
-  <!-- ═══ 舱段缝线 ═══ -->
-  <path d="M7.25 7.25 L9.09 5.42" fill="none" stroke="#1a1a2e" stroke-width="0.5" opacity="0.6"/>
-  <path d="M13.55 13.55 L14.74 12.36" fill="none" stroke="#1a1a2e" stroke-width="0.45" opacity="0.45"/>
-
-  <!-- ═══ 发动机段（八爪鱼底座） ═══ -->
-  <path d="M18.07 21.75 L19.30 20.53 L20.78 22.01 L19.56 23.23 Z" fill="#171b21"/>
-  <path d="M19.30 20.53 L20.53 19.30 L22.01 20.78 L20.78 22.01 Z" fill="url(#fEng)"/>
-  <path d="M20.53 19.30 L21.75 18.07 L23.23 19.56 L22.01 20.78 Z" fill="#2f3741"/>
-
-  <!-- ═══ 梅林发动机喷管 ═══ -->
-  <path d="M21.64 21.15 L22.35 20.44 L23.83 21.36 L22.63 22.56 Z"
-        fill="url(#fNozzle)" stroke="#1a1a2e" stroke-width="0.8" stroke-linejoin="round"/>
-  <path d="M22.63 22.56 L23.83 21.36" fill="none" stroke="#96a1af" stroke-width="0.3" opacity="0.85"/>
-
-  <path d="M20.44 22.35 L21.15 21.64 L22.56 22.63 L21.36 23.83 Z"
-        fill="url(#fNozzle)" stroke="#1a1a2e" stroke-width="0.8" stroke-linejoin="round"/>
-  <path d="M20.44 22.35 L21.36 23.83" fill="none" stroke="#636d7a" stroke-width="0.3" opacity="0.8"/>
-
-  <!-- ═══ 整流罩（圆钝头锥） ═══ -->
-  <path d="M4 4 Q 4.95 6.8 5.42 9.09 L 7.25 7.25 Z" fill="url(#fFairDown)"/>
-  <path d="M4 4 Q 6.8 4.95 9.09 5.42 L 7.25 7.25 Z" fill="url(#fFairUp)"/>
-  <path d="M4 4 Q 6.8 4.95 9.09 5.42" fill="none" stroke="#ffffff" stroke-width="0.45" opacity="0.9"
-        transform="translate(0.22,-0.22)"/>
-
-  <!-- ═══ 轮廓压线 ═══ -->
-  <path d="M4 4 Q 6.8 4.95 9.09 5.42 L21.75 18.07 L23.23 19.56 L23.83 21.36 L22.63 22.56 L22.56 22.63 L21.36 23.83 L20.44 22.35 L19.56 23.23 L18.07 21.75 L5.42 9.09 Q 4.95 6.8 4 4 Z"
-        fill="none" stroke="#1a1a2e" stroke-width="1.15" stroke-linejoin="round"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="m21 23 3 5 3-1-4-5Z" fill="#f1ba6b"/>
+    <path d="M4 4q4-1 7 3l12 12-4 4L7 11Q3 8 4 4Z" fill="#edf1f4"/>
+    <path d="m9 13 4-4 3 3-4 4Z" fill="#566477"/>
+    <path d="m17 21 4-4 2 2-4 4Z" fill="#566477"/>
+    <path d="m19 23 4-4 1 4-1 1Z" fill="#344052"/>
+    <path d="m15 16 2 2" stroke="#8eafd2" stroke-width="1.6"/>
+    <path d="m15 19-1 3 3-1m2-6 3-1-1 3" fill="#dce4ec" stroke-width="1"/>
+  </g>
 </svg>

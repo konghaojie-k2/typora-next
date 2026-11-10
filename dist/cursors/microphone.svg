@@ -1,71 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 8 6. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 球面网罩：光心偏左上，边缘转暗形成球感 -->
-    <radialGradient id="mGrille" cx="0.33" cy="0.29" r="0.82">
-      <stop offset="0"    stop-color="#ffffff"/>
-      <stop offset="0.28" stop-color="#e2e8f0"/>
-      <stop offset="0.62" stop-color="#aab6c6"/>
-      <stop offset="0.86" stop-color="#6c7889"/>
-      <stop offset="1"    stop-color="#3d4756"/>
-    </radialGradient>
-    <!-- 领圈金属 -->
-    <linearGradient id="mCollar" gradientUnits="userSpaceOnUse" x1="13.83" y1="17.65" x2="18.92" y2="15.10">
-      <stop offset="0"    stop-color="#4a5462"/>
-      <stop offset="0.30" stop-color="#cbd5e1"/>
-      <stop offset="0.58" stop-color="#f8fafc"/>
-      <stop offset="0.82" stop-color="#94a3b8"/>
-      <stop offset="1"    stop-color="#5b6675"/>
-    </linearGradient>
-    <!-- 手柄三段棱面 -->
-    <linearGradient id="mGripMid" gradientUnits="userSpaceOnUse" x1="15.43" y1="16.57" x2="22.93" y2="24.07">
-      <stop offset="0"    stop-color="#3b4757"/>
-      <stop offset="0.38" stop-color="#5a6a80"/>
-      <stop offset="0.70" stop-color="#7a8ca3"/>
-      <stop offset="1"    stop-color="#4d5c70"/>
-    </linearGradient>
-    <linearGradient id="mGripUp" gradientUnits="userSpaceOnUse" x1="16.57" y1="15.43" x2="24.07" y2="22.93">
-      <stop offset="0"   stop-color="#212b38"/>
-      <stop offset="0.6" stop-color="#2e3c4d"/>
-      <stop offset="1"   stop-color="#1c2531"/>
-    </linearGradient>
-    <linearGradient id="mGripDown" gradientUnits="userSpaceOnUse" x1="14.30" y1="17.70" x2="21.80" y2="25.20">
-      <stop offset="0"   stop-color="#111925"/>
-      <stop offset="0.55" stop-color="#1c2531"/>
-      <stop offset="1"   stop-color="#0e151e"/>
-    </linearGradient>
+    <path id="outline" d="M8 6Q12 2 16 6L19 9Q23 13 19 17L17.5 18.5 26 26 23 29 15 20.5Q12 22 9 19L6 16Q2 12 6 8Z"/>
   </defs>
-
-  <!-- ═══ 手柄三段棱面 ═══ -->
-  <path d="M14.30 17.70 L15.43 16.57 L22.93 24.07 L21.80 25.20 Z" fill="url(#mGripDown)"/>
-  <path d="M15.43 16.57 L16.57 15.43 L24.07 22.93 L22.93 24.07 Z" fill="url(#mGripMid)"/>
-  <path d="M16.57 15.43 L17.70 14.30 L25.20 21.80 L24.07 22.93 Z" fill="url(#mGripUp)"/>
-  <path d="M16.57 15.43 L24.07 22.93" fill="none" stroke="#9fb0c6" stroke-width="0.45" opacity="0.75"/>
-  <path d="M15.43 16.57 L22.93 24.07" fill="none" stroke="#0e151e" stroke-width="0.4" opacity="0.85"/>
-  <!-- 手柄收尾的圆头 -->
-  <path d="M21.80 25.20 L24.07 22.93 L25.20 21.80 L22.93 24.07 Z" fill="#111925"/>
-  <path d="M22.93 24.07 Q 24.8 24.8 25.20 21.80" fill="none" stroke="#1a1a2e" stroke-width="1.25" stroke-linecap="round"/>
-
-  <!-- ═══ 领圈（网罩与手柄的分件） ═══ -->
-  <path d="M13.83 17.65 L17.65 13.83 L18.92 15.10 L15.10 18.92 Z"
-        fill="url(#mCollar)" stroke="#1a1a2e" stroke-width="1.1" stroke-linejoin="round"/>
-  <path d="M13.83 17.65 L17.65 13.83" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.9"/>
-
-  <!-- ═══ 球面网罩 ═══ -->
-  <circle cx="11.5" cy="11.5" r="6" fill="url(#mGrille)" stroke="#1a1a2e" stroke-width="1.3"/>
-  <!-- 网格：横向随球面下弯 -->
-  <path d="M6.63 8 Q 11.5 10.2 16.37 8" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.75"/>
-  <path d="M5.58 10.5 Q 11.5 12.9 17.42 10.5" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.75"/>
-  <path d="M5.69 13 Q 11.5 15.4 17.31 13" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.7"/>
-  <path d="M7.03 15.5 Q 11.5 17.7 15.97 15.5" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.6"/>
-  <!-- 网格：纵向随球面外弓 -->
-  <path d="M9 6.05 Q 6.9 11.5 9 16.95" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.7"/>
-  <path d="M14 6.05 Q 16.1 11.5 14 16.95" fill="none" stroke="#5d6a7c" stroke-width="0.5" opacity="0.7"/>
-  <!-- 球面高光（月牙）与顶点点光 -->
-  <path d="M7.6 7.4 C 6.4 9.0 6.1 11.0 6.6 12.7 C 5.4 10.7 5.7 8.3 7.6 7.4 Z"
-        fill="#ffffff" opacity="0.9"/>
-  <circle cx="12.9" cy="7.6" r="0.62" fill="#ffffff" opacity="0.8"/>
-
-  <!-- ═══ 轮廓压线 ═══ -->
-  <path d="M11.5 5.5 A6 6 0 0 1 17.65 13.83 L18.92 15.10 L25.20 21.80 A 2.6 2.6 0 0 1 22.93 24.07 L15.10 18.92 L13.83 17.65 A6 6 0 0 1 11.5 5.5 Z"
-        fill="none" stroke="#1a1a2e" stroke-width="1.3" stroke-linejoin="round"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="m14 18 9 10 3-3-10-9Z" fill="#8eafd2"/>
+    <path d="m20 24 3-3" fill="none"/>
+    <path d="M8 6q4-4 8 0l3 3q4 4 0 8l-2 2q-4 4-8 0l-3-3q-4-4 0-8Z" fill="#dce4ec"/>
+    <path d="m7 10 9 9m-6-13 10 10M6 14l8-8m-5 12L18 9" stroke="#718297" stroke-width="1"/>
+    <path d="m6 16 13-7" stroke="#344052"/>
+  </g>
 </svg>

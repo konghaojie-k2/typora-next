@@ -1,98 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 4 4. Keep the silhouette legible at native size. -->
   <defs>
-    <linearGradient id="rFaceMid" gradientUnits="userSpaceOnUse" x1="7.54" y1="8.95" x2="18.85" y2="18.85">
-      <stop offset="0"    stop-color="#e5e7eb"/>
-      <stop offset="0.40" stop-color="#ffffff"/>
-      <stop offset="0.72" stop-color="#f8fafc"/>
-      <stop offset="1"    stop-color="#dde3ea"/>
-    </linearGradient>
-    <linearGradient id="rFaceUp" gradientUnits="userSpaceOnUse" x1="8.95" y1="7.54" x2="20.97" y2="16.73">
-      <stop offset="0"    stop-color="#cbd5e1"/>
-      <stop offset="0.45" stop-color="#f1f5f9"/>
-      <stop offset="1"    stop-color="#c3cdd8"/>
-    </linearGradient>
-    <linearGradient id="rFaceDown" gradientUnits="userSpaceOnUse" x1="6.12" y1="10.36" x2="16.73" y2="20.97">
-      <stop offset="0"    stop-color="#5b6675"/>
-      <stop offset="0.5" stop-color="#8e9aab"/>
-      <stop offset="1"    stop-color="#6b7787"/>
-    </linearGradient>
-    <linearGradient id="rNoseUp" gradientUnits="userSpaceOnUse" x1="4" y1="4" x2="10.36" y2="6.12">
-      <stop offset="0"    stop-color="#f87171"/>
-      <stop offset="0.45" stop-color="#fca5a5"/>
-      <stop offset="1"    stop-color="#dc2626"/>
-    </linearGradient>
-    <linearGradient id="rNoseDown" gradientUnits="userSpaceOnUse" x1="4" y1="4" x2="6.12" y2="10.36">
-      <stop offset="0"    stop-color="#b91c1c"/>
-      <stop offset="0.5"  stop-color="#991b1b"/>
-      <stop offset="1"    stop-color="#701a1a"/>
-    </linearGradient>
-    <linearGradient id="rFin" gradientUnits="userSpaceOnUse" x1="14.3" y1="21.96" x2="21.0" y2="15.3">
-      <stop offset="0"    stop-color="#991b1b"/>
-      <stop offset="0.32" stop-color="#dc2626"/>
-      <stop offset="0.68" stop-color="#f87171"/>
-      <stop offset="1"    stop-color="#b91c1c"/>
-    </linearGradient>
-    <radialGradient id="rGlass" cx="0.34" cy="0.30" r="0.84">
-      <stop offset="0"    stop-color="#eff6ff"/>
-      <stop offset="0.22" stop-color="#60a5fa"/>
-      <stop offset="0.62" stop-color="#2563eb"/>
-      <stop offset="1"    stop-color="#172554"/>
-    </radialGradient>
-    <linearGradient id="rFlame" gradientUnits="userSpaceOnUse" x1="18.9" y1="18.9" x2="25.0" y2="25.0">
-      <stop offset="0"    stop-color="#fffbeb"/>
-      <stop offset="0.20" stop-color="#fde047"/>
-      <stop offset="0.50" stop-color="#fb923c"/>
-      <stop offset="0.78" stop-color="#ea580c"/>
-      <stop offset="1"    stop-color="#dc2626"/>
-    </linearGradient>
+    <path id="outline" d="M4 4Q12 3 17 10L23 11 24 17 20 18 22 22Q27 23 28 28 23 27 22 22L18 20 17 24 11 23 10 17Q3 12 4 4Z"/>
   </defs>
-
-  <!-- ═══ 尾焰 ═══ -->
-  <path d="M21.30 17.10 C23.70 19.45 24.45 22.00 24.15 24.15 C21.60 22.95 19.00 21.80 17.10 21.30 C18.60 20.20 20.20 18.70 21.30 17.10 Z"
-        fill="url(#rFlame)" stroke="#1a1a2e" stroke-width="1.2" stroke-linejoin="round"/>
-  <path d="M20.55 18.55 C22.05 20.10 22.60 21.65 22.45 22.75 C20.95 22.05 19.60 21.35 18.85 20.65 C19.45 20.05 20.05 19.30 20.55 18.55 Z"
-        fill="#fde047" opacity="0.95"/>
-  <path d="M20.10 19.55 C20.75 20.35 21.05 21.05 20.98 21.60 C20.30 21.25 19.65 20.90 19.30 20.55 C19.55 20.25 19.82 19.90 20.10 19.55 Z"
-        fill="#ffffff"/>
-
-  <!-- ═══ 尾翼 ═══ -->
-  <path d="M11.07 15.31 L14.32 21.96 L16.02 20.26 Z"
-        fill="url(#rFin)" stroke="#1a1a2e" stroke-width="1.25" stroke-linejoin="round"/>
-  <path d="M11.07 15.31 L12.05 18.45 L12.95 17.55 Z" fill="#7f1d1d" opacity="0.75"/>
-
-  <path d="M15.31 11.07 L21.96 14.32 L20.26 16.02 Z"
-        fill="url(#rFin)" stroke="#1a1a2e" stroke-width="1.25" stroke-linejoin="round"/>
-  <path d="M15.31 11.07 L18.45 12.05 L17.55 12.95 Z" fill="#7f1d1d" opacity="0.75"/>
-
-  <!-- ═══ 机身三段棱面 ═══ -->
-  <path d="M6.12 10.36 L7.54 8.95 L18.14 19.56 L16.73 20.97 Z" fill="url(#rFaceDown)"/>
-  <path d="M7.54 8.95 L8.95 7.54 L19.56 18.14 L18.14 19.56 Z" fill="url(#rFaceMid)"/>
-  <path d="M8.95 7.54 L10.36 6.12 L20.97 16.73 L19.56 18.14 Z" fill="url(#rFaceUp)"/>
-  <path d="M8.95 7.54 L19.56 18.14" fill="none" stroke="#ffffff" stroke-width="0.5" opacity="0.95"/>
-  <path d="M7.54 8.95 L18.14 19.56" fill="none" stroke="#8e9aab" stroke-width="0.4" opacity="0.9"/>
-  <!-- 机身红色环带 -->
-  <path d="M13.60 15.00 L15.30 16.70 L13.45 18.55 L12.55 17.65 Z" fill="#dc2626" opacity="0.9"
-        stroke="#7f1d1d" stroke-width="0.4"/>
-  <!-- 铆钉 -->
-  <circle cx="10.30" cy="10.10" r="0.32" fill="#94a3b8" opacity="0.85"/>
-  <circle cx="17.20" cy="17.00" r="0.32" fill="#94a3b8" opacity="0.85"/>
-
-  <!-- ═══ 机头锥 ═══ -->
-  <path d="M4 4 L8.24 8.24 L6.12 10.36 Z" fill="url(#rNoseDown)"/>
-  <path d="M4 4 L10.36 6.12 L8.24 8.24 Z" fill="url(#rNoseUp)"/>
-  <path d="M4 4 L10.36 6.12" fill="none" stroke="#fecaca" stroke-width="0.5" opacity="0.9"/>
-  <circle cx="5.45" cy="5.45" r="0.8" fill="#ffffff" opacity="0.95"/>
-
-  <!-- ═══ 舷窗 ═══ -->
-  <circle cx="11.43" cy="11.43" r="1.90" fill="url(#rGlass)" stroke="#1a1a2e" stroke-width="1.2"/>
-  <circle cx="11.43" cy="11.43" r="1.90" fill="none" stroke="#1e3a8a" stroke-width="0.45" opacity="0.85"/>
-  <path d="M10.15 10.15 C9.62 10.90 9.50 11.82 9.78 12.48 C9.18 11.65 9.30 10.60 10.15 10.15 Z"
-        fill="#ffffff" opacity="0.95"/>
-  <circle cx="12.28" cy="10.62" r="0.36" fill="#ffffff" opacity="0.8"/>
-
-  <!-- ═══ 轮廓压线 ═══ -->
-  <path d="M4 4 L10.36 6.12 L20.97 16.73 L16.73 20.97 L6.12 10.36 Z"
-        fill="none" stroke="#1a1a2e" stroke-width="1.35" stroke-linejoin="round"/>
-  <path d="M10.36 6.12 L6.12 10.36 M8.24 8.24 L7.54 8.95"
-        fill="none" stroke="#1a1a2e" stroke-width="0.85" opacity="0.9"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M19 20q8 1 9 8-7-1-8-8Z" fill="#f1ba6b"/>
+    <path d="m21 22 3.5 3.5" stroke="#fff1bf" stroke-width="1.7"/>
+    <path d="m10 15 1 8 6 1 1-6m-3-8 8 1 1 6-6 1" fill="#d78d88"/>
+    <path d="M4 4q10-1 17 13l-4 4Q3 14 4 4Z" fill="#edf1f4"/>
+    <path d="M4 4q5-.5 8 2.5L6.5 12Q3.5 9 4 4Z" fill="#d78d88"/>
+    <circle cx="12.5" cy="12.5" r="2.6" fill="#85b5d0"/>
+    <path d="m11.5 11.5 1-.5" stroke="#e4f3f8" stroke-width="1.2"/>
+  </g>
 </svg>

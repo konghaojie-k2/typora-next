@@ -1,38 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 16 3. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 星体：NW 受光 → SE 背光 -->
-    <linearGradient id="sBody" gradientUnits="userSpaceOnUse" x1="7" y1="7" x2="25" y2="25">
-      <stop offset="0"    stop-color="#fef9c3"/>
-      <stop offset="0.28" stop-color="#fde047"/>
-      <stop offset="0.58" stop-color="#fbbf24"/>
-      <stop offset="0.82" stop-color="#d97706"/>
-      <stop offset="1"    stop-color="#92400e"/>
-    </linearGradient>
+    <path id="outline" d="M16 3 19.8 11 28 12.2 22 18.2 23.5 27 16 23 8.5 27 10 18.2 4 12.2 12.2 11Z"/>
   </defs>
-
-  <!-- ═══ 五个角 ═══ -->
-  <path d="M16 4 L18.94 11.96 L27.41 12.29 L20.76 17.55 L23.05 25.71 L16 21 L8.95 25.71 L11.25 17.55 L4.59 12.29 L13.06 11.96 Z"
-        fill="url(#sBody)" stroke="#1a1a2e" stroke-width="1.3" stroke-linejoin="round"/>
-
-  <!-- ═══ SE 背光面：切出硬边明暗，避免平涂 ═══ -->
-  <path d="M16 4 L18.94 11.96 L27.41 12.29 L20.76 17.55 L23.05 25.71 L16 21 L16 4 Z"
-        fill="#92400e" opacity="0.30"/>
-
-  <!-- ═══ 上角与左上角受光棱 ═══ -->
-  <path d="M16 4 L13.06 11.96 L4.59 12.29" fill="none" stroke="#fefce8" stroke-width="0.75" opacity="0.95"/>
-  <path d="M16 4 L18.94 11.96" fill="none" stroke="#fffbeb" stroke-width="0.5" opacity="0.6"/>
-
-  <!-- ═══ 中心亮核 ═══ -->
-  <path d="M16 9.4 L17.5 14.2 L16 19 L14.5 14.2 Z" fill="#ffffff" opacity="0.55"/>
-  <path d="M10.6 13.6 L16 14.6 L21.4 13.6 L16 16.2 Z" fill="#ffffff" opacity="0.32"/>
-  <circle cx="16" cy="14.6" r="1.5" fill="#ffffff" opacity="0.9"/>
-  <circle cx="15.4" cy="14.0" r="0.6" fill="#ffffff"/>
-
-  <!-- ═══ 次级星芒 ═══ -->
-  <path d="M25.6 4.6 Q 25.6 6.9 27.9 6.9 Q 25.6 6.9 25.6 9.2 Q 25.6 6.9 23.3 6.9 Q 25.6 6.9 25.6 4.6 Z"
-        fill="#fde047" stroke="#1a1a2e" stroke-width="0.7" stroke-linejoin="round"/>
-  <path d="M6.2 24.0 Q 6.2 25.6 7.8 25.6 Q 6.2 25.6 6.2 27.2 Q 6.2 25.6 4.6 25.6 Q 6.2 25.6 6.2 24.0 Z"
-        fill="#fde047" stroke="#1a1a2e" stroke-width="0.65" stroke-linejoin="round"/>
-  <circle cx="27.4" cy="23.2" r="0.85" fill="#fde047" stroke="#1a1a2e" stroke-width="0.5"/>
-  <circle cx="4.4" cy="6.4" r="0.7" fill="#fde047" stroke="#1a1a2e" stroke-width="0.45"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <use href="#outline" fill="#f0d189"/>
+    <path d="m16 3 3.8 8 8.2 1.2-6 6 1.5 8.8-7.5-4Z" fill="#e6ba68" stroke="none"/>
+    <path d="m14.2 11.5 1.8-4" stroke="#fff3ce" stroke-width="1.6"/>
+    <use href="#outline" fill="none"/>
+  </g>
 </svg>

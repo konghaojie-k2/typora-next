@@ -1,77 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+  <!-- Soft stationery palette; hotspot: 4 4. Keep the silhouette legible at native size. -->
   <defs>
-    <!-- 笔身三段棱面：深海军蓝杆 -->
-    <linearGradient id="nFaceMid" gradientUnits="userSpaceOnUse" x1="7.56" y1="8.93" x2="18.16" y2="19.54">
-      <stop offset="0"    stop-color="#334155"/>
-      <stop offset="0.38" stop-color="#4e5f78"/>
-      <stop offset="0.70" stop-color="#6b7f9c"/>
-      <stop offset="1"    stop-color="#42536a"/>
-    </linearGradient>
-    <linearGradient id="nFaceUp" gradientUnits="userSpaceOnUse" x1="8.93" y1="7.56" x2="19.54" y2="18.16">
-      <stop offset="0"    stop-color="#1e293b"/>
-      <stop offset="0.6"  stop-color="#2b3a4f"/>
-      <stop offset="1"    stop-color="#1a2434"/>
-    </linearGradient>
-    <linearGradient id="nFaceDown" gradientUnits="userSpaceOnUse" x1="6.19" y1="10.29" x2="16.80" y2="20.90">
-      <stop offset="0"    stop-color="#0f1722"/>
-      <stop offset="0.55" stop-color="#1a2433"/>
-      <stop offset="1"    stop-color="#0d141d"/>
-    </linearGradient>
-    <!-- 金属锥头 -->
-    <linearGradient id="nConeUp" gradientUnits="userSpaceOnUse" x1="4.6" y1="4.6" x2="10.29" y2="6.19">
-      <stop offset="0"    stop-color="#e2e8f0"/>
-      <stop offset="0.45" stop-color="#ffffff"/>
-      <stop offset="1"    stop-color="#aab4c2"/>
-    </linearGradient>
-    <linearGradient id="nConeDown" gradientUnits="userSpaceOnUse" x1="4.6" y1="4.6" x2="6.19" y2="10.29">
-      <stop offset="0"   stop-color="#8b96a5"/>
-      <stop offset="0.5" stop-color="#5f6a79"/>
-      <stop offset="1"   stop-color="#4a5462"/>
-    </linearGradient>
-    <!-- 笔杆环带 -->
-    <linearGradient id="nBand" gradientUnits="userSpaceOnUse" x1="7.29" y1="9.2" x2="20.38" y2="17.9">
-      <stop offset="0"   stop-color="#8b96a5"/>
-      <stop offset="0.5" stop-color="#e8edf3"/>
-      <stop offset="1"   stop-color="#7a8695"/>
-    </linearGradient>
-    <!-- 笔夹 -->
-    <linearGradient id="nClip" gradientUnits="userSpaceOnUse" x1="18.78" y1="14.68" x2="23.52" y2="18.42">
-      <stop offset="0"    stop-color="#9aa5b4"/>
-      <stop offset="0.4"  stop-color="#f1f5f9"/>
-      <stop offset="0.75" stop-color="#c3ccd8"/>
-      <stop offset="1"    stop-color="#7d8896"/>
-    </linearGradient>
+    <path id="outline" d="M4 4 10.5 6.5 26 22Q27.5 23.5 26 25L25 26Q23.5 27.5 22 26L6.5 10.5Z"/>
   </defs>
-
-  <!-- ═══ 笔夹（先画，内侧被笔杆压住） ═══ -->
-  <path d="M18.78 14.68 L19.27 14.18 L23.52 18.42 L23.02 18.92 Z"
-        fill="url(#nClip)" stroke="#1a1a2e" stroke-width="1" stroke-linejoin="round"/>
-  <path d="M19.27 14.18 L23.52 18.42" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.9"/>
-
-  <!-- ═══ 笔身三段棱面 ═══ -->
-  <path d="M6.19 10.29 L7.56 8.93 L18.16 19.54 L16.80 20.90 Z" fill="url(#nFaceDown)"/>
-  <path d="M7.56 8.93 L8.93 7.56 L19.54 18.16 L18.16 19.54 Z" fill="url(#nFaceMid)"/>
-  <path d="M8.93 7.56 L10.29 6.19 L20.90 16.80 L19.54 18.16 Z" fill="url(#nFaceUp)"/>
-  <path d="M8.93 7.56 L19.54 18.16" fill="none" stroke="#93a3ba" stroke-width="0.45" opacity="0.7"/>
-  <path d="M7.56 8.93 L18.16 19.54" fill="none" stroke="#0d141d" stroke-width="0.4" opacity="0.8"/>
-
-  <!-- ═══ 笔杆环带 ═══ -->
-  <path d="M9.20 7.29 L9.77 6.72 L20.38 17.33 L19.81 17.90 Z" fill="url(#nBand)"/>
-  <path d="M16.45 14.54 L17.02 13.97 L20.90 17.85 L20.33 18.42 Z" fill="url(#nBand)"/>
-
-  <!-- ═══ 金属锥头 ═══ -->
-  <path d="M4.6 4.6 L8.24 8.24 L6.19 10.29 Z" fill="url(#nConeDown)"/>
-  <path d="M4.6 4.6 L10.29 6.19 L8.24 8.24 Z" fill="url(#nConeUp)"/>
-  <path d="M4.6 4.6 L10.29 6.19" fill="none" stroke="#ffffff" stroke-width="0.5" opacity="0.95"/>
-
-  <!-- ═══ 走珠 ═══ -->
-  <circle cx="4.35" cy="4.35" r="0.95" fill="#1e293b"/>
-  <circle cx="4.35" cy="4.35" r="0.95" fill="none" stroke="#0f1722" stroke-width="0.35"/>
-  <circle cx="4.05" cy="4.05" r="0.3" fill="#cbd5e1" opacity="0.95"/>
-
-  <!-- ═══ 轮廓压线 ═══ -->
-  <path d="M4.6 4.6 L10.29 6.19 L20.90 16.80 L23.02 18.92 L23.52 18.42 L19.27 14.18 L18.78 14.68 L16.80 20.90 L6.19 10.29 Z"
-        fill="none" stroke="#1a1a2e" stroke-width="1.25" stroke-linejoin="round"/>
-  <path d="M10.29 6.19 L6.19 10.29 M8.24 8.24 L7.56 8.93"
-        fill="none" stroke="#1a1a2e" stroke-width="0.8" opacity="0.9"/>
+  <use href="#outline" fill="none" stroke="#fff" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+  <g stroke="#344052" stroke-width="1.35" stroke-linejoin="round" stroke-linecap="round">
+    <use href="#outline" fill="#8eafd2"/>
+    <path d="m4 4 6.5 2.5-4 4Z" fill="#e4eaf0"/>
+    <path d="m4 4 2.8 1.1-1.7 1.7Z" fill="#344052" stroke="none"/>
+    <path d="m10.5 10.5 10 10" stroke="#d9e8f5" stroke-width="1.6"/>
+    <path d="m21 17 5.5 5.5q1 1-.5 2.5" fill="none" stroke="#344052" stroke-width="1.8"/>
+    <use href="#outline" fill="none"/>
+  </g>
 </svg>
