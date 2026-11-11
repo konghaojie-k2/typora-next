@@ -12,7 +12,7 @@
   const Updater = {
     /**
      * Check for available updates.
-     * @returns {Promise<{available: boolean, version?: string, date?: string, body?: string, downloadAndInstall?: Function}>}
+     * @returns {Promise<{available: boolean, version?: string, date?: string, body?: string, releaseNotesUrl?: string, downloadAndInstall?: Function}>}
      */
     async check() {
       if (!window.__TAURI__) {
@@ -46,8 +46,12 @@
           body: result.body,
           currentVersion: result.currentVersion,
           rawJson: result.rawJson,
+          releaseNotesUrl: getReleaseNotesUrl(result),
           rid: result.rid,
-          async downloadAndInstall(onEvent) {
+          async downloadAndInstall(onEvent, { signal } = {}) {
+            if (signal) {
+              return downloadWithCancellation(this.rid, onEvent, signal);
+            }
             // onEvent 是插件命令的必填 key：不传回调也要给 no-op Channel——
             // 否则 JSON 序列化丢弃 undefined，Rust 报 missing required key
             // onEvent（v0.4.3 即因此无法应用内升级，补牢）
@@ -86,6 +90,63 @@
       }
     }
   };
+
+  // 从资产地址取 release tag，确保 nightly 的更新说明也对应实际下载版本。
+  function getReleaseNotesUrl(update) {
+    const releaseBase = 'https://github.com/konghaojie-k2/typora-next/releases';
+    const platforms = (update.rawJson && update.rawJson.platforms) || {};
+    const urls = [update.rawJson && update.rawJson.url, ...Object.values(platforms).map(platform => platform && platform.url)];
+    for (const url of urls) {
+      if (typeof url !== 'string') continue;
+      const match = url.match(/^https:\/\/github\.com\/konghaojie-k2\/typora-next\/releases\/download\/([^/]+)\//);
+      if (match) return `${releaseBase}/tag/${match[1]}`;
+    }
+    const version = String(update.version || '').replace(/^v/, '');
+    return version ? `${releaseBase}/tag/v${encodeURIComponent(version)}` : releaseBase;
+  }
+
+  async function downloadWithCancellation(rid, onEvent, signal) {
+    const { invoke } = window.__TAURI__.core;
+    const throwIfAborted = () => {
+      if (signal.aborted) throw new DOMException('更新已取消', 'AbortError');
+    };
+    throwIfAborted();
+    const channel = createChannel(event => {
+      if (!signal.aborted && typeof onEvent === 'function') onEvent(event);
+    });
+    if (!channel) throw new Error('下载通道初始化失败：Tauri Channel 不可用');
+
+    const cancelRid = await invoke('create_update_download');
+    let bytesRid;
+    // close 会唤醒 Rust 下载 future，中断网络连接；不关闭可重试的 Update 资源。
+    let closing;
+    const cancel = () => {
+      if (!closing) closing = invoke('plugin:resources|close', { rid: cancelRid }).catch(error => {
+        console.warn('[Updater] Download resource cleanup failed:', error);
+      });
+      return closing;
+    };
+    signal.addEventListener('abort', cancel, { once: true });
+    try {
+      throwIfAborted();
+      bytesRid = await invoke('download_update', { rid, cancelRid, onEvent: channel });
+      throwIfAborted();
+      if (typeof onEvent === 'function') onEvent({ event: 'Finished' });
+      throwIfAborted();
+      await invoke('install_update', { bytesRid });
+    } catch (error) {
+      throwIfAborted();
+      throw error;
+    } finally {
+      signal.removeEventListener('abort', cancel);
+      await cancel();
+      if (bytesRid !== undefined) {
+        await invoke('plugin:resources|close', { rid: bytesRid }).catch(error => {
+          console.warn('[Updater] Update package cleanup failed:', error);
+        });
+      }
+    }
+  }
 
   // Helper: create a Tauri Channel from a callback
   function createChannel(callback) {

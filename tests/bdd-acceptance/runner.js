@@ -404,6 +404,13 @@ async function runAcceptanceTests() {
   totalPassed += updateProgressResult.passed;
   totalFailed += updateProgressResult.failed;
 
+  const releaseNotesResult = await runFeatureFile(
+    path.join(__dirname, '../sprint27/features/release_notes.feature'),
+    updateProgressSteps
+  );
+  totalPassed += releaseNotesResult.passed;
+  totalFailed += releaseNotesResult.failed;
+
   // Sprint 29 PB1: 按领域搜索论文（AnySearch）
   console.log(`\n${YELLOW}▶ Sprint 29: Paper Search (AnySearch)${RESET}`);
   const paperSearchSteps = require('./sprint29_paper_search.steps');

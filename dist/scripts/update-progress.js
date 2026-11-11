@@ -22,7 +22,7 @@
    */
   function createDownloadState(version) {
     return {
-      phase: 'downloading', // downloading | installing | restart | failed
+      phase: 'downloading', // downloading | installing | restart | failed | cancelled
       version: version || '',
       downloadedBytes: 0,
       totalBytes: 0,
@@ -61,15 +61,20 @@
 
   /** downloadAndInstall 完整 resolve → 即将重启 */
   function applySuccess(state) {
-    if (!state) return state;
+    if (!state || state.phase === 'cancelled') return state;
     return { ...state, phase: 'restart' };
   }
 
   /** 下载/安装失败 → 失败终态（卡片可关闭） */
   function applyFailure(state, err) {
-    if (!state) return state;
+    if (!state || state.phase === 'cancelled') return state;
     const error = err && err.message ? String(err.message) : String(err || '未知错误');
     return { ...state, phase: 'failed', error };
+  }
+
+  function applyCancellation(state) {
+    if (!state || state.phase !== 'downloading') return state;
+    return { ...state, phase: 'cancelled', error: '' };
   }
 
   /** 字节 → MB（保留一位小数） */
@@ -97,6 +102,8 @@
         return '更新完成，正在重启…';
       case 'failed':
         return `更新失败：${state.error}`;
+      case 'cancelled':
+        return '更新已取消';
       default:
         return '';
     }
@@ -107,6 +114,7 @@
     applyDownloadEvent,
     applySuccess,
     applyFailure,
+    applyCancellation,
     statusText,
     formatMB
   };

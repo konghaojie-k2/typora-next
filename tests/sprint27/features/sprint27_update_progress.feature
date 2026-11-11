@@ -21,7 +21,8 @@ Feature: 更新下载进度可见性（Sprint 27）
     And the mocked latest version is "0.4.3"
     When the update check runs on startup
     Then the update banner should be visible
-    And the banner should offer 更新 and 稍后 actions
+    And the banner should offer 安装更新 and 取消 actions
+    And the update should link to release notes for version "0.4.3"
     And the banner should mention GitHub 下载来源
 
   Scenario: 点击更新后横幅原地变形为常驻进度卡片
@@ -77,7 +78,7 @@ Feature: 更新下载进度可见性（Sprint 27）
     When the user checks for updates from the About panel
     Then the About status should show 发现新版本
     And the update banner should be visible
-    And the banner should offer 更新 and 稍后 actions
+    And the banner should offer 安装更新 and 取消 actions
     And the banner should mention GitHub 下载来源
 
   # PB27-4: 版本号常驻可见（升级测试可一眼确认当前运行版本）

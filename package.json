@@ -8,6 +8,7 @@
     "test": "tests"
   },
   "scripts": {
+    "check:release": "node scripts/check-release.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

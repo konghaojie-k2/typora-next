@@ -3711,11 +3711,26 @@ body.paper-reader-mode[data-theme="dark"] .toolbar,
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
   line-height: var(--line-height-normal);
+  overflow-wrap: anywhere;
 }
 .update-notif-hint {
   font-size: var(--font-size-xs);
   color: var(--color-text-muted);
   line-height: var(--line-height-normal);
+}
+.update-notif-notes {
+  align-self: flex-start;
+  color: var(--color-accent);
+  font-size: var(--font-size-xs);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.update-notif-notes:hover { text-decoration-thickness: 2px; }
+.update-notif-notes:focus-visible,
+.update-notif-btn:focus-visible,
+.update-notif-close:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
 }
 
 /* Toolbar version chip */
@@ -3740,7 +3755,11 @@ body.paper-reader-mode[data-theme="dark"] .toolbar,
   border: none;
   transition: opacity 0.2s;
 }
-.update-notif-btn:hover { opacity: 0.85; }
+.update-notif-btn:hover:not(:disabled) { opacity: 0.85; }
+.update-notif-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
 .update-notif-primary {
   background: var(--color-accent);
   color: #fff;

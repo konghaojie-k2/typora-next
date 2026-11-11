@@ -62,10 +62,21 @@ T.test('generateFilename: sanitization', () => {
   T.assertEquals(bridge.generateFilename(1, ''), '01-.md');
 });
 
-T.test('checkAgentSDK: unavailable without env entry or local node_modules', () => {
-  delete process.env.TYPORA_PI_SDK_ENTRY;
-  const r = bridge.checkAgentSDK();
-  T.assertEquals(r.available, false, 'worktree has no node_modules and no env entry');
+T.test('checkAgentSDK: unavailable without env entry or local node_modules', async () => {
+  const isolated = tmpdir('bridge-no-sdk-');
+  const originalEntry = process.env.TYPORA_PI_SDK_ENTRY;
+  try {
+    delete process.env.TYPORA_PI_SDK_ENTRY;
+    // SDK resolution is relative to the bridge, so isolate it from developer installs.
+    const entry = path.join(isolated, 'agent-bridge.mjs');
+    fs.copyFileSync(path.resolve(__dirname, '../../../agent-bridge.mjs'), entry);
+    const isolatedBridge = await import(pathToFileURL(entry).href);
+    T.assertEquals(isolatedBridge.checkAgentSDK().available, false, 'isolated bridge has no SDK');
+  } finally {
+    if (originalEntry === undefined) delete process.env.TYPORA_PI_SDK_ENTRY;
+    else process.env.TYPORA_PI_SDK_ENTRY = originalEntry;
+    fs.rmSync(isolated, { recursive: true, force: true });
+  }
 });
 
 // ============================================

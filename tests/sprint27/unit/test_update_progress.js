@@ -155,6 +155,20 @@ TestRunner.test('安装中/重启/失败各阶段文案', () => {
 
 // ---------- formatMB ----------
 
+TestRunner.test('取消下载进入可重试的取消状态，并忽略迟到的成功与失败', () => {
+  const s = UpdateProgress.applyCancellation(UpdateProgress.createDownloadState('0.4.14'));
+  TestRunner.assertEquals(s.phase, 'cancelled');
+  TestRunner.assertEquals(UpdateProgress.statusText(s), '更新已取消');
+  TestRunner.assertEquals(UpdateProgress.applySuccess(s), s);
+  TestRunner.assertEquals(UpdateProgress.applyFailure(s, new Error('late')), s);
+  TestRunner.assertEquals(UpdateProgress.applyDownloadEvent(s, { event: 'Finished' }), s);
+});
+
+TestRunner.test('进入安装阶段后不能取消', () => {
+  const s = UpdateProgress.applyDownloadEvent(UpdateProgress.createDownloadState('0.4.14'), { event: 'Finished' });
+  TestRunner.assertEquals(UpdateProgress.applyCancellation(s), s);
+});
+
 TestRunner.test('formatMB 保留一位小数', () => {
   TestRunner.assertEquals(UpdateProgress.formatMB(0), '0.0');
   TestRunner.assertEquals(UpdateProgress.formatMB(5242880), '5.0');

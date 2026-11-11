@@ -5748,8 +5748,10 @@ window.agentBridge = {
   // Update Check
   // ============================================
   let _updateAvailableInfo = null;
+  let _updateAttempt = null;
 
   async function checkForUpdates(showStatusEl) {
+    if (_updateAttempt) return;
     const statusEl = showStatusEl || elements.updateStatus;
     if (statusEl) {
       statusEl.textContent = '检查中…';
@@ -5758,6 +5760,7 @@ window.agentBridge = {
 
     try {
       const result = await window.Updater.check();
+      if (_updateAttempt) return;
       if (result.available) {
         _updateAvailableInfo = result;
         showUpdateBadge(true);
@@ -5803,6 +5806,8 @@ window.agentBridge = {
   }
 
   async function askUpdateConfirmation(update) {
+    if (_updateAttempt) return;
+    if (window.__updateConfirmResolve) window.__updateConfirmResolve(false);
     // Simple confirm dialog
     const confirmed = await new Promise((resolve) => {
       // Use a simple custom confirm or Tauri dialog if available
@@ -5815,9 +5820,27 @@ window.agentBridge = {
       }
     });
 
-    if (confirmed) {
+    if (confirmed && !_updateAttempt) {
       await performUpdate(update);
     }
+  }
+
+  function wireUpdateReleaseNotes(host, update) {
+    const link = host.querySelector('.update-notif-notes');
+    link.href = update.releaseNotesUrl || 'https://github.com/konghaojie-k2/typora-next/releases';
+    if (window.__TAURI__) {
+      link.addEventListener('click', event => {
+        event.preventDefault();
+        invoke('open_external', { url: link.href }).catch(error => {
+          showError('无法打开更新内容：' + error);
+        });
+      });
+    }
+  }
+
+  function dismissUpdateNotification(host) {
+    host.classList.remove('show');
+    setTimeout(() => host.remove(), 300);
   }
 
   function showUpdateNotification(update) {
@@ -5831,16 +5854,18 @@ window.agentBridge = {
     notif.innerHTML = `
       <div class="update-notif-content">
         <span class="update-notif-icon">📦</span>
-        <span class="update-notif-text">发现新版本 <strong>${update.version}</strong></span>
+        <span class="update-notif-text">发现新版本 <strong>${escapeHtml(update.version)}</strong></span>
+        <a class="update-notif-notes" target="_blank" rel="noopener noreferrer">查看更新内容 ↗</a>
         <span class="update-notif-hint">更新包将从 GitHub 发布页下载，网络较慢时请耐心等待</span>
         <div class="update-notif-actions">
-          <button class="update-notif-btn update-notif-primary" id="updateNotifInstall">更新</button>
-          <button class="update-notif-btn update-notif-skip" id="updateNotifSkip">稍后</button>
+          <button class="update-notif-btn update-notif-primary" id="updateNotifInstall">安装更新</button>
+          <button class="update-notif-btn update-notif-skip" id="updateNotifSkip">取消</button>
         </div>
       </div>
-      <button class="update-notif-close" id="updateNotifClose">&times;</button>
+      <button class="update-notif-close" id="updateNotifClose" aria-label="关闭更新提示">&times;</button>
     `;
     document.body.appendChild(notif);
+    wireUpdateReleaseNotes(notif, update);
 
     // Animate in
     requestAnimationFrame(() => notif.classList.add('show'));
@@ -5848,22 +5873,23 @@ window.agentBridge = {
     // Wire up buttons
     document.getElementById('updateNotifInstall').addEventListener('click', () => {
       // 不移除横幅——performUpdate 会把它原地变形为进度卡片
-      if (window.__updateConfirmResolve) window.__updateConfirmResolve(true);
+      document.getElementById('updateNotifInstall').disabled = true;
+      const resolve = window.__updateConfirmResolve;
+      window.__updateConfirmResolve = null;
+      if (resolve) resolve(true);
     });
-    document.getElementById('updateNotifSkip').addEventListener('click', () => {
-      notif.classList.remove('show');
-      setTimeout(() => notif.remove(), 300);
-      if (window.__updateConfirmResolve) window.__updateConfirmResolve(false);
-    });
-    document.getElementById('updateNotifClose').addEventListener('click', () => {
-      notif.classList.remove('show');
-      setTimeout(() => notif.remove(), 300);
-      if (window.__updateConfirmResolve) window.__updateConfirmResolve(false);
-    });
+    const dismiss = () => {
+      dismissUpdateNotification(notif);
+      const resolve = window.__updateConfirmResolve;
+      window.__updateConfirmResolve = null;
+      if (resolve) resolve(false);
+    };
+    document.getElementById('updateNotifSkip').addEventListener('click', dismiss);
+    document.getElementById('updateNotifClose').addEventListener('click', dismiss);
   }
 
   // 把更新横幅原地变形为进度卡片（常驻可见，不依赖 About 面板）
-  function renderUpdateProgress(banner, state) {
+  function renderUpdateProgress(banner, state, update, actions) {
     let host = banner;
     if (!host) {
       // 兜底：横幅不存在时新建一张进度卡片
@@ -5875,53 +5901,101 @@ window.agentBridge = {
     const UP = window.UpdateProgress;
     const text = UP.statusText(state);
     const failed = state.phase === 'failed';
+    const retryable = failed || state.phase === 'cancelled';
     const showBar = state.phase === 'downloading';
     const indeterminate = showBar && state.totalBytes <= 0;
-    host.innerHTML = `
+    // 同一阶段只更新文字和进度，避免每个数据块重建按钮、丢失键盘焦点。
+    if (host.dataset.updatePhase !== state.phase) {
+      host.dataset.updatePhase = state.phase;
+      host.innerHTML = `
       <div class="update-notif-content">
         <span class="update-notif-icon">${failed ? '⚠️' : '📦'}</span>
-        <span class="update-notif-text">${text}</span>
-        ${showBar ? `<div class="update-progress-track"><div class="update-progress-fill${indeterminate ? ' indeterminate' : ''}"${indeterminate ? '' : ` style="width:${state.percent}%"`}></div></div>` : ''}
+        <span class="update-notif-text" role="status"></span>
+        <a class="update-notif-notes" target="_blank" rel="noopener noreferrer">查看更新内容 ↗</a>
+        ${showBar ? '<div class="update-progress-track" role="progressbar" aria-label="更新下载进度" aria-valuemin="0" aria-valuemax="100"><div class="update-progress-fill"></div></div>' : ''}
+        ${state.phase === 'installing' ? '<span class="update-notif-hint">安装已开始，请等待完成。</span>' : ''}
+        <div class="update-notif-actions">
+          ${retryable ? '<button class="update-notif-btn update-notif-primary" id="updateNotifRetry">重试</button>' : ''}
+          <button class="update-notif-btn update-notif-skip" id="updateNotifCancel"${showBar || retryable ? '' : ' disabled'}>取消</button>
+        </div>
       </div>
-      ${failed ? '<button class="update-notif-close" id="updateNotifClose">&times;</button>' : ''}
+      ${retryable ? '<button class="update-notif-close" id="updateNotifClose" aria-label="关闭更新提示">&times;</button>' : ''}
     `;
-    if (failed) {
-      document.getElementById('updateNotifClose').addEventListener('click', () => {
-        host.classList.remove('show');
-        setTimeout(() => host.remove(), 300);
-      });
+      wireUpdateReleaseNotes(host, update);
+      host.querySelector('#updateNotifCancel').addEventListener('click', actions.cancel);
+      if (retryable) {
+        host.querySelector('#updateNotifRetry').addEventListener('click', actions.retry);
+        host.querySelector('#updateNotifClose').addEventListener('click', () => dismissUpdateNotification(host));
+      }
     }
+    host.querySelector('.update-notif-text').textContent = text;
+    if (showBar) {
+      const track = host.querySelector('.update-progress-track');
+      const fill = host.querySelector('.update-progress-fill');
+      fill.classList.toggle('indeterminate', indeterminate);
+      fill.style.width = indeterminate ? '' : `${state.percent}%`;
+      if (indeterminate) track.removeAttribute('aria-valuenow');
+      else track.setAttribute('aria-valuenow', state.percent);
+    }
+    return host;
   }
 
   async function performUpdate(update) {
-    if (!update) return;
+    if (!update || _updateAttempt) return;
     const UP = window.UpdateProgress;
-    const banner = document.getElementById('updateNotification');
+    let banner = document.getElementById('updateNotification');
     let state = UP.createDownloadState(update.version);
+    const controller = new AbortController();
+    const attempt = { controller };
+    _updateAttempt = attempt;
+    const setStatus = () => {
+      if (elements.updateStatus) {
+        elements.updateStatus.textContent = UP.statusText(state);
+        elements.updateStatus.className = 'about-update-status' + (state.phase === 'failed' ? ' error' : '');
+      }
+    };
+    const actions = {
+      retry: () => performUpdate(update),
+      cancel: () => {
+        if (state.phase === 'failed' || state.phase === 'cancelled') {
+          dismissUpdateNotification(banner);
+          return;
+        }
+        if (state.phase !== 'downloading') return;
+        controller.abort();
+        state = UP.applyCancellation(state);
+        banner = renderUpdateProgress(banner, state, update, actions);
+        setStatus();
+        // 允许立即重试，旧请求的事件/结果由 attempt 身份检查隔离。
+        if (_updateAttempt === attempt) _updateAttempt = null;
+      }
+    };
     try {
-      renderUpdateProgress(banner, state);
+      banner = renderUpdateProgress(banner, state, update, actions);
+      setStatus();
 
       await update.downloadAndInstall((ev) => {
+        if (_updateAttempt !== attempt || controller.signal.aborted) return;
         state = UP.applyDownloadEvent(state, ev);
-        renderUpdateProgress(banner, state);
-      });
+        banner = renderUpdateProgress(banner, state, update, actions);
+        setStatus();
+      }, { signal: controller.signal });
 
+      if (_updateAttempt !== attempt || controller.signal.aborted) return;
       state = UP.applySuccess(state);
-      renderUpdateProgress(banner, state);
-      if (elements.updateStatus) {
-        elements.updateStatus.textContent = '更新已下载，正在重启…';
-      }
+      banner = renderUpdateProgress(banner, state, update, actions);
+      setStatus();
 
       // Restart to apply update
       await window.Updater.restart();
     } catch (err) {
+      if (_updateAttempt !== attempt || controller.signal.aborted) return;
       console.error('[Update] Download/install failed:', err);
       state = UP.applyFailure(state, err);
-      renderUpdateProgress(banner, state);
-      if (elements.updateStatus) {
-        elements.updateStatus.textContent = UP.statusText(state);
-        elements.updateStatus.className = 'about-update-status error';
-      }
+      banner = renderUpdateProgress(banner, state, update, actions);
+      setStatus();
+    } finally {
+      if (_updateAttempt === attempt) _updateAttempt = null;
     }
   }
 

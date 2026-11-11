@@ -105,7 +105,7 @@ function showUpdateBanner(context, update) {
   b.mode = 'prompt';
   b.text = `发现新版本 ${update.version}`;
   b.hint = '更新包将从 GitHub 发布页下载，网络较慢时请耐心等待';
-  b.actions = ['更新', '稍后'];
+  b.actions = ['安装更新', '取消'];
   b.closable = true;
 }
 
@@ -174,10 +174,17 @@ steps.then('the update banner should be visible', function () {
   }
 });
 
-steps.then('the banner should offer 更新 and 稍后 actions', function () {
+steps.then('the banner should offer 安装更新 and 取消 actions', function () {
   const a = this.banner.actions;
-  if (!a.includes('更新') || !a.includes('稍后')) {
+  if (!a.includes('安装更新') || !a.includes('取消')) {
     throw new Error(`横幅按钮缺失：${JSON.stringify(a)}`);
+  }
+});
+
+steps.then('the update should link to release notes for version {string}', function (version) {
+  const expected = `https://github.com/konghaojie-k2/typora-next/releases/tag/v${version}`;
+  if (this.update.releaseNotesUrl !== expected) {
+    throw new Error(`更新说明链接不符：${this.update.releaseNotesUrl}`);
   }
 });
 
@@ -424,6 +431,48 @@ steps.then('the download request should carry an onEvent channel', function () {
   }
   if (typeof this.download.channel.onmessage !== 'function') {
     throw new Error('onEvent Channel 未绑定消息回调');
+  }
+});
+
+steps.given('release notes exist for version {string}', function (version) {
+  this.releaseVersion = version;
+  this.changelog = `# Changelog\n\n## [${version}]\n\n- 更新支持取消与重试。\n\n## [0.4.13]\n\n- 历史更新内容。`;
+});
+
+steps.given('release notes are missing for version {string}', function (version) {
+  this.releaseVersion = version;
+  this.changelog = '# Changelog\n\n## [0.4.13]\n\n- 历史更新内容。';
+});
+
+steps.given('placeholder release notes for version {string}', function (version) {
+  this.releaseVersion = version;
+  this.changelog = `# Changelog\n\n## [${version}]\n\n### Features\n\n- TBD`;
+});
+
+steps.when('release notes are checked for tag {string}', async function (tag) {
+  const { validateRelease } = await import('../../scripts/check-release.mjs');
+  try {
+    this.releaseResult = validateRelease({ version: this.releaseVersion, tag, changelog: this.changelog });
+  } catch (error) {
+    this.releaseError = error;
+  }
+});
+
+steps.then('the release notes check should pass', function () {
+  if (this.releaseError) throw this.releaseError;
+  if (!this.releaseResult) throw new Error('未完成发布检查');
+});
+
+steps.then('only the current version notes should be published', function () {
+  const notes = this.releaseResult.notes;
+  if (!notes.includes('更新支持取消与重试。') || notes.includes('历史更新内容。')) {
+    throw new Error('发布说明未按版本提取');
+  }
+});
+
+steps.then('the release notes check should fail with {string}', function (message) {
+  if (!this.releaseError || !this.releaseError.message.includes(message)) {
+    throw new Error(`缺少预期的发布检查错误：${message}`);
   }
 });
 

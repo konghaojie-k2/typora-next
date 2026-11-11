@@ -39,6 +39,7 @@ pub mod share_course;
 pub mod share_images;
 pub mod skills_bundle;
 pub mod translation_clean;
+mod update_download;
 
 pub use docx_export::{extract_math_blocks, preprocess_math, resolve_wikilink_path, MathBlock};
 
@@ -5366,6 +5367,9 @@ pub fn run() {
             write_file,
             open_slides_window,
             get_platform,
+            update_download::create_update_download,
+            update_download::download_update,
+            update_download::install_update,
             show_in_folder,
             share_document,
             share_course,
