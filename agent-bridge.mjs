@@ -523,7 +523,12 @@ export async function pingProvider(config, fetchImpl) {
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
     const resp = await doFetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctrl.signal });
-    if (resp.ok) return { ok: true };
+    if (resp.ok) {
+      // Finish the response while the timeout is active so fetch can release
+      // its socket before the check process shuts down.
+      await resp.text();
+      return { ok: true };
+    }
     let detail = '';
     try { detail = String(await resp.text()).slice(0, 200); } catch (_) { /* ignore */ }
     const message = `HTTP ${resp.status}: ${detail}`;
@@ -1589,8 +1594,10 @@ async function main() {
           ping
         }));
         log('info', 'Check stage completed', { available: result.available });
-        process.exit(0);
-        break;
+        // Let fetch/libuv finish closing handles and flush the JSON result.
+        // Forcing exit after the ping can abort on Windows (UV_HANDLE_CLOSING).
+        process.exitCode = 0;
+        return;
       }
       case 'plan':
         log('info', 'Starting plan stage', { goal: taskArgs.goal, level: taskArgs.level, hours: taskArgs.hours });

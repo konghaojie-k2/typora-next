@@ -59,6 +59,9 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Test agent bridge check lifecycle
+        run: node tests/sprint1/unit/test_bridge_check.mjs
+
       - name: Restore cached dependencies
         uses: Swatinem/rust-cache@v2
 

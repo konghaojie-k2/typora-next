@@ -520,4 +520,19 @@ T.test('pingProvider: openai 无 /v1 段时补全，anthropic 走 /v1/messages',
   T.assert(seenHeaders['x-api-key'] === 'sk-ant', 'x-api-key 头');
 });
 
+T.test('pingProvider: success waits for response body completion', async () => {
+  let finishBody;
+  let settled = false;
+  const pending = bridge.pingProvider({ api_key: 'k' }, async () => ({
+    ok: true,
+    text: () => new Promise(resolve => { finishBody = resolve; })
+  })).then(result => { settled = true; return result; });
+  await new Promise(resolve => setImmediate(resolve));
+  const waitedForBody = !settled && typeof finishBody === 'function';
+  if (finishBody) finishBody('{}');
+  const result = await pending;
+  T.assert(waitedForBody, 'success must wait for fetch body cleanup');
+  T.assertEquals(result.ok, true);
+});
+
 T.run().then(({ failed }) => { if (failed > 0) process.exit(1); });
