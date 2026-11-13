@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.15] - 2026-11-13
+
+### Fixes
+
+- **Windows 误报未检测到 Pi coding agent**：修复联网检测完成后强制退出触发 `UV_HANDLE_CLOSING` 断言、导致已安装的 Pi 被误判为缺失的问题。检测进程改为读完网络响应后自然退出，并保留鉴权失败和网络超时的错误分类
+
+### Infrastructure
+
+- 新增真实检测子进程回归测试，覆盖 SDK 缺失、无 API Key、连接成功、鉴权失败和响应超时，并纳入 Windows/macOS 构建与发布流程
+
 ## [0.4.14] - 2026-11-11
 
 ### Improvements
