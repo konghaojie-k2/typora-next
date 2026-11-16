@@ -26,6 +26,27 @@ pub fn versioned_url(base_url: &str, path: &str) -> String {
     }
 }
 
+/// 从 Anthropic messages 响应中提取正文文本。
+///
+/// content 是块数组；模型（或中转默认）开启 extended thinking 时首块是
+/// thinking / redacted_thinking，正文在后面的 text 块。固定取
+/// content[0]["text"] 会拿到 None → "响应中没有内容"
+/// （2026-11-16 新 Anthropic provider 大纲生成事故）。
+/// 拼接所有 text 块；块缺 type 字段时按 text 处理（宽松兼容旧端点）。
+pub fn anthropic_text(json: &serde_json::Value) -> Option<String> {
+    let blocks = json["content"].as_array()?;
+    let text = blocks
+        .iter()
+        .filter(|b| b["type"].as_str().map_or(true, |t| t == "text"))
+        .filter_map(|b| b["text"].as_str())
+        .collect::<String>();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
 /// 构建 OpenAI 兼容 chat completion 请求体。
 ///
 /// DeepSeek 思考型模型（如 deepseek-v4-flash）的 reasoning_content 与

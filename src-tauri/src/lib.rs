@@ -2454,8 +2454,13 @@ async fn fix_mermaid(code: String, error: String, app: tauri::AppHandle) -> Resu
             .into_json()
             .map_err(|e| format!("解析响应失败: {}", e))?;
 
+        let anthropic_body = if is_anthropic {
+            llm_body::anthropic_text(&json)
+        } else {
+            None
+        };
         let fixed_code = if is_anthropic {
-            json["content"][0]["text"].as_str()
+            anthropic_body.as_deref()
         } else {
             json["choices"][0]["message"]["content"].as_str()
         }
@@ -2688,8 +2693,13 @@ async fn translate_text(
         .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    let anthropic_body = if is_anthropic {
+        llm_body::anthropic_text(&json)
+    } else {
+        None
+    };
     let content = if is_anthropic {
-        json["content"][0]["text"].as_str()
+        anthropic_body.as_deref()
     } else {
         json["choices"][0]["message"]["content"].as_str()
     }

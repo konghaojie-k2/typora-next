@@ -473,28 +473,36 @@
         });
       }
 
-      // Chapter clicks + retry buttons: delegate on the persistent container
-      // (bound once). Per-element binding at render() time missed every row
-      // that only became .clickable later via updateChapter() — mid-generation
-      // chapter_complete → ready looked clickable but was dead (2026-09-03).
-      if (!this._delegated) {
-        this._delegated = true;
+      // Chapter clicks + retry buttons: delegate on the persistent container.
+      // The delegation flag must live on the CONTAINER, not the instance:
+      // every course entry / generation creates a new ProgressUI on the same
+      // #learningProgressPanel, and an instance-level `_delegated` lets stale
+      // listeners accumulate — each firing with its own stale manager, ghost-
+      // opening the PREVIOUS course's chapter behind the current one
+      // (course-scope guard prompt on chapter click, 2026-11-16).
+      // Dispatch goes through container._activeProgressUI, re-marked on every
+      // render(), so the handler always matches the visible chapter list.
+      if (!this.container._chapterClickDelegated) {
+        this.container._chapterClickDelegated = true;
         this.container.addEventListener('click', (e) => {
+          const ui = this.container._activeProgressUI;
+          if (!ui) return;
           const target = e.target;
           if (!target || typeof target.closest !== 'function') return;
           const retryBtn = target.closest('.learning-retry-btn');
           if (retryBtn) {
             const idx = parseInt(retryBtn.dataset.index, 10);
-            if (this.onRetryClick) this.onRetryClick(idx);
+            if (ui.onRetryClick) ui.onRetryClick(idx);
             return;
           }
           const item = target.closest('.learning-chapter-item');
           if (item && item.classList.contains('clickable')) {
             const idx = parseInt(item.dataset.index, 10);
-            if (this.onChapterClick) this.onChapterClick(idx);
+            if (ui.onChapterClick) ui.onChapterClick(idx);
           }
         });
       }
+      this.container._activeProgressUI = this;
     }
 
     /**

@@ -725,6 +725,7 @@ window.agentBridge = {
         const projectNorm = projectPath.replace(/\//g, '\\').toLowerCase();
         const fileNorm = path.replace(/\//g, '\\').toLowerCase();
         if (!fileNorm.startsWith(projectNorm)) {
+          console.warn('[addTab] course-scope guard triggered. projectPath=', projectPath, '| file=', path);
           const switched = await AppWorkspace.switchTo('normal');
           if (!switched) return;
           mode = 'normal';

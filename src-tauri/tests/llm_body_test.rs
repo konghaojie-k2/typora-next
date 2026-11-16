@@ -9,6 +9,7 @@
 #[path = "../src/llm_body.rs"]
 mod llm_body;
 
+use llm_body::anthropic_text;
 use llm_body::openai_chat_body;
 use llm_body::versioned_url;
 
@@ -103,4 +104,58 @@ fn third_party_proxy_not_injected() {
     // 代理服务（如 aliyun proxy）转发到非 DeepSeek 模型时不应注入
     let body = openai_chat_body("qwen-max", 100, "hi", "https://proxy.example.com/v1");
     assert!(body.get("thinking").is_none());
+}
+
+// ============================================
+// anthropic_text：content 块数组取正文
+// 2026-11-16 事故：新 Anthropic provider 响应首块是 thinking，
+// 旧代码固定取 content[0]["text"] → None → "响应中没有内容"
+// ============================================
+
+#[test]
+fn anthropic_text_first_block_legacy() {
+    // 无 thinking 的经典响应：单个 text 块
+    let json = serde_json::json!({
+        "content": [{"type": "text", "text": "{\"chapters\":[]}"}]
+    });
+    assert_eq!(anthropic_text(&json).as_deref(), Some("{\"chapters\":[]}"));
+}
+
+#[test]
+fn anthropic_text_skips_thinking_block() {
+    // 事故现场：thinking 块在前，正文 text 块在后
+    let json = serde_json::json!({
+        "content": [
+            {"type": "thinking", "thinking": "让我想想……"},
+            {"type": "text", "text": "{\"chapters\":[{\"title\":\"第一章\"}]}"}
+        ]
+    });
+    assert_eq!(
+        anthropic_text(&json).as_deref(),
+        Some("{\"chapters\":[{\"title\":\"第一章\"}]}")
+    );
+}
+
+#[test]
+fn anthropic_text_concatenates_multiple_text_blocks() {
+    let json = serde_json::json!({
+        "content": [
+            {"type": "text", "text": "{\"a\":"},
+            {"type": "text", "text": "1}"}
+        ]
+    });
+    assert_eq!(anthropic_text(&json).as_deref(), Some("{\"a\":1}"));
+}
+
+#[test]
+fn anthropic_text_none_when_no_text_block() {
+    // 只有 thinking 块（如 max_tokens 耗尽于思考）→ None，上层报"响应中没有内容"
+    let json = serde_json::json!({
+        "content": [{"type": "thinking", "thinking": "……"}],
+        "stop_reason": "max_tokens"
+    });
+    assert_eq!(anthropic_text(&json), None);
+    // content 不是数组 → None
+    let json = serde_json::json!({"content": "plain string"});
+    assert_eq!(anthropic_text(&json), None);
 }

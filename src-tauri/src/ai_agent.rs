@@ -675,8 +675,13 @@ pub async fn plan_course_llm(
         .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    let anthropic_body = if is_anthropic {
+        crate::llm_body::anthropic_text(&json)
+    } else {
+        None
+    };
     let raw_content = if is_anthropic {
-        json["content"][0]["text"].as_str()
+        anthropic_body.as_deref()
     } else {
         json["choices"][0]["message"]["content"].as_str()
     }
@@ -766,8 +771,13 @@ fn llm_complete_text(
     let json: Value = response
         .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
+    let anthropic_body = if is_anthropic {
+        crate::llm_body::anthropic_text(&json)
+    } else {
+        None
+    };
     let raw = if is_anthropic {
-        json["content"][0]["text"].as_str()
+        anthropic_body.as_deref()
     } else {
         json["choices"][0]["message"]["content"].as_str()
     }
@@ -1054,8 +1064,13 @@ pub async fn generate_roadmap(
         .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    let anthropic_body = if is_anthropic {
+        crate::llm_body::anthropic_text(&json)
+    } else {
+        None
+    };
     let raw_content = if is_anthropic {
-        json["content"][0]["text"].as_str()
+        anthropic_body.as_deref()
     } else {
         json["choices"][0]["message"]["content"].as_str()
     }
@@ -2593,8 +2608,13 @@ pub async fn explain_selection(
         .into_json()
         .map_err(|e| format!("解析响应失败: {}", e))?;
 
+    let anthropic_body = if is_anthropic {
+        crate::llm_body::anthropic_text(&json)
+    } else {
+        None
+    };
     let raw_content = if is_anthropic {
-        json["content"][0]["text"].as_str()
+        anthropic_body.as_deref()
     } else {
         json["choices"][0]["message"]["content"].as_str()
     }

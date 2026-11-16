@@ -764,7 +764,7 @@
     } catch (err) {
       console.error('[LearningProject] Error:', err);
       stopCountdown();
-      handleError(err.message || '生成大纲失败');
+      handleError((err && err.message) || String(err));
     }
   }
 
