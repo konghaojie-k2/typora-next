@@ -341,6 +341,8 @@
   // ============================================
   let _quizModal = null;
   let _currentQuizQuestions = [];
+  // 恢复历史结果卡时的题目缓存（重启后 _currentQuizQuestions 为空）
+  let _quizExplainQuestionCache = { chapterFile: '', questions: [] };
 
   async function onQuizStart() {
     console.log('[QuizDebug] onQuizStart called, _quizPanel=', !!_quizPanel);
@@ -1136,7 +1138,9 @@
         <div style="margin-top: 14px; display: flex; gap: 8px; flex-wrap: wrap;">
           <button id="quizRetakeBtn" style="padding: 8px 16px; background: white; color: #4f46e5; border: 1px solid #4f46e5; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">再测一次</button>
           <button id="extraReviewBtn" style="padding: 8px 16px; background: #f5f3ff; color: #7c3aed; border: 1px solid #c4b5fd; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; display: none;">📝 附加题回顾</button>
+          <button id="quizExplainBtn" style="padding: 8px 16px; background: #eff6ff; color: #1d4ed8; border: 1px solid #bfdbfe; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer;">📖 解析</button>
         </div>
+        <div id="quizExplainPanel" style="display: none; margin-top: 14px;"></div>
       </div>
     `;
 
@@ -1173,6 +1177,161 @@
 
     // Note: "附加题回顾" button is in the quiz area (injectQuizArea), not in the result card.
     // The quiz-area button visibility is managed by updateExtraReviewButton().
+
+    // Bind per-question explanation panel
+    const explainBtn = document.getElementById('quizExplainBtn');
+    const explainPanel = document.getElementById('quizExplainPanel');
+    if (explainBtn && explainPanel) {
+      explainBtn.addEventListener('click', () => {
+        onQuizExplainClick(submission, explainBtn, explainPanel);
+      });
+    }
+  }
+
+  // ============================================
+  // Per-question explanations (Route B: generate on demand + cache)
+  // 正确答案/你的答案始终本地渲染，AI 失败时仅缺解析正文
+  // ============================================
+
+  async function resolveExplainQuestions(chapterFile) {
+    if (_currentQuizQuestions.length) return _currentQuizQuestions;
+    if (_quizExplainQuestionCache.chapterFile === chapterFile && _quizExplainQuestionCache.questions.length) {
+      return _quizExplainQuestionCache.questions;
+    }
+    const result = await window.__TAURI__.core.invoke('generate_chapter_quiz', {
+      chapterFile,
+      projectPath: _projectPath
+    });
+    const questions = (result && result.standard) || [];
+    _quizExplainQuestionCache = { chapterFile, questions };
+    return questions;
+  }
+
+  function explainBadge(item) {
+    if (item.isCorrect === true) return { text: '正确', color: '#047857', bg: '#d1fae5' };
+    if (item.isCorrect === false) return { text: '错误', color: '#b91c1c', bg: '#fee2e2' };
+    return { text: '待评', color: '#b45309', bg: '#fef3c7' };
+  }
+
+  function explainOptionsHtml(item) {
+    if (!item.options.length) return '';
+    const userLabels = Array.isArray(item.userAnswer)
+      ? item.userAnswer
+      : (item.userAnswer ? [item.userAnswer] : []);
+    const correctLabels = Array.isArray(item.correctLabel)
+      ? item.correctLabel
+      : (item.correctLabel ? [item.correctLabel] : []);
+    return item.options.map(opt => {
+      const isCorrect = correctLabels.includes(opt.label);
+      const chosen = userLabels.includes(opt.label);
+      let color = '#374151', border = '1px solid #e5e7eb', bg = 'white';
+      if (isCorrect) { color = '#047857'; border = '1px solid #a7f3d0'; bg = '#ecfdf5'; }
+      if (chosen && !isCorrect) { color = '#b91c1c'; border = '1px solid #fecaca'; bg = '#fef2f2'; }
+      const mark = isCorrect ? ' ✓' : (chosen ? ' ✗' : '');
+      return `<div style="padding: 6px 10px; margin-bottom: 4px; border-radius: 6px; font-size: 12.5px; line-height: 1.5; color: ${color}; background: ${bg}; border: ${border};">${escapeHtml(opt.label)}) ${escapeHtml(opt.text)}${mark}</div>`;
+    }).join('');
+  }
+
+  function explainItemHtml(item, idx) {
+    const badge = explainBadge(item);
+    const open = window.QuizExplanations.defaultExpanded(item) ? ' open' : '';
+    const qtypeLabel = item.qtype === 'single' ? '单选'
+      : item.qtype === 'multiple' ? '多选'
+        : item.qtype === 'short' ? '开放' : '题目';
+    return `
+      <details${open} style="border: 1px solid #e5e7eb; border-radius: 10px; margin-bottom: 8px; background: white; overflow: hidden;">
+        <summary style="cursor: pointer; padding: 10px 12px; font-size: 13px; font-weight: 600; color: #111827; background: #f9fafb; display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+          <span>第 ${idx + 1} 题 · ${qtypeLabel} · <span style="display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; color: ${badge.color}; background: ${badge.bg};">${badge.text}</span></span>
+          <span style="font-size: 11px; color: #9ca3af;">展开 / 收起</span>
+        </summary>
+        <div style="padding: 10px 12px 12px;">
+          <div style="font-size: 13px; color: #111827; line-height: 1.55; margin-bottom: 8px;">${escapeHtml(item.question || '题目数据缺失')}</div>
+          ${explainOptionsHtml(item)}
+          <div class="quiz-explain-text" data-qid="${escapeHtml(String(item.questionId))}" style="margin-top: 10px; font-size: 13px; color: #4b5563; line-height: 1.6;">
+            <span style="color: #9ca3af;">解析生成中…</span>
+          </div>
+        </div>
+      </details>
+    `;
+  }
+
+  async function renderExplanationTexts(panel, items) {
+    const byId = new Map(items.map(item => [item.questionId, item]));
+    const nodes = Array.from(panel.querySelectorAll('.quiz-explain-text'));
+    await Promise.all(nodes.map(async (node) => {
+      const item = byId.get(node.dataset.qid);
+      if (!item) return;
+      if (!item.explanation) {
+        node.innerHTML = '<span style="color: #9ca3af;">暂无解析，仅显示正确答案</span>';
+        return;
+      }
+      try {
+        const html = await window.__TAURI__.core.invoke('render_markdown', { content: item.explanation });
+        node.innerHTML = html;
+      } catch (e) {
+        node.textContent = item.explanation;
+      }
+    }));
+  }
+
+  async function onQuizExplainClick(submission, btn, panel) {
+    if (panel.style.display !== 'none') {
+      panel.style.display = 'none';
+      btn.textContent = '📖 解析';
+      return;
+    }
+    panel.style.display = 'block';
+    btn.textContent = '📖 收起解析';
+    if (panel.dataset.loaded === '1') return;
+    panel.dataset.loaded = '1';
+
+    const QE = window.QuizExplanations;
+    if (!QE) {
+      panel.innerHTML = '<span style="font-size: 13px; color: #b91c1c;">解析模块未加载</span>';
+      return;
+    }
+
+    const chapterFile = submission.chapterFile || (_quizPanel ? _quizPanel.getChapterFile() : '');
+    let questions = [];
+    try {
+      questions = await resolveExplainQuestions(chapterFile);
+    } catch (err) {
+      console.warn('[QuizExplain] load questions failed:', err);
+      delete panel.dataset.loaded; // 允许下次点击重试
+      panel.innerHTML = '<span style="font-size: 13px; color: #b91c1c;">题目数据加载失败，无法展示解析</span>';
+      return;
+    }
+
+    let items = QE.buildItems(questions, submission.answerRecords);
+    panel.innerHTML = `
+      <div style="font-size: 12px; font-weight: 700; color: #6b7280; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.3px;">逐题解析</div>
+      ${items.map(explainItemHtml).join('')}
+      <div style="font-size: 12px; color: #9ca3af;">解析由 AI 生成，仅供学习参考</div>
+    `;
+
+    if (!items.length) return;
+
+    // 若历史结果卡没有当前题目快照，标签可能已被 shuffle 重映射，
+    // 此处按当前 quiz.json 展示正确答案（文本可靠，标签仅供对照）。
+    try {
+      const result = await window.__TAURI__.core.invoke('generate_quiz_explanations', {
+        chapterFile,
+        projectPath: _projectPath,
+        questions,
+        answers: submission.answerRecords,
+        chapterTitle: _currentChapterTitle || '',
+        force: false
+      });
+      items = QE.mergeExplanations(items, (result && result.explanations) || []);
+      await renderExplanationTexts(panel, items);
+    } catch (err) {
+      console.warn('[QuizExplain] generate failed:', err);
+      delete panel.dataset.loaded; // 允许下次点击重试
+      const nodes = Array.from(panel.querySelectorAll('.quiz-explain-text'));
+      nodes.forEach(node => {
+        node.innerHTML = '<span style="color: #9ca3af;">解析生成失败，已显示正确答案</span>';
+      });
+    }
   }
 
   async function onQuizModalSubmit() {

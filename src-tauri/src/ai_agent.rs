@@ -2366,6 +2366,101 @@ pub async fn generate_chapter_quiz(
     })
 }
 
+/// 小测逐题解析（Route B）：提交后按需生成，缓存到
+/// `.learning/quizzes/{chapter}.explanations.json`。
+///
+/// 不修改 quiz.json schema，存量项目无需重新出题即可用。AI 不可用或
+/// 解析失败 → Err，前端降级为「仅展示正确答案」。
+#[tauri::command]
+pub async fn generate_quiz_explanations(
+    chapter_file: String,
+    project_path: Option<String>,
+    questions: Vec<Value>,
+    answers: Vec<Value>,
+    chapter_title: Option<String>,
+    force: Option<bool>,
+    app_handle: AppHandle,
+) -> Result<Value, String> {
+    // 只解析「题目存在且已作答」的题，防止模型为缺失题目编解析
+    let allowed_ids: Vec<String> = answers
+        .iter()
+        .filter_map(|a| a.get("question_id").and_then(|v| v.as_str()))
+        .filter(|id| {
+            questions
+                .iter()
+                .any(|q| q.get("id").and_then(|v| v.as_str()) == Some(*id))
+        })
+        .map(String::from)
+        .collect();
+    if allowed_ids.is_empty() {
+        return Err("题目数据缺失，无法生成解析".to_string());
+    }
+
+    let cache_path = project_path
+        .as_deref()
+        .filter(|p| !p.trim().is_empty())
+        .map(crate::quiz_explain::resolve_learning_dir)
+        .map(|dir| {
+            dir.join("quizzes")
+                .join(crate::quiz_explain::cache_file_name(&chapter_file))
+        });
+
+    // 缓存命中：仅在覆盖全部待解析题目时复用，避免残缺缓存永久生效
+    if !force.unwrap_or(false) {
+        if let Some(path) = cache_path.as_ref().filter(|p| p.is_file()) {
+            let cached = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+                .map(|doc| {
+                    crate::quiz_explain::parse_explanations(&doc.to_string(), &allowed_ids)
+                });
+            if let Some(entries) = cached {
+                if entries.len() == allowed_ids.len() {
+                    log::info!(
+                        "generate_quiz_explanations: cache hit ({} entries)",
+                        entries.len()
+                    );
+                    return Ok(serde_json::json!({
+                        "explanations": crate::quiz_explain::explanations_json(&entries),
+                        "cached": true
+                    }));
+                }
+            }
+            log::warn!("解析缓存不完整或不可读，重新生成: {:?}", path);
+        }
+    }
+
+    let prompt =
+        crate::quiz_explain::build_prompt(chapter_title.as_deref(), &questions, &answers);
+    let raw = llm_complete_text(&prompt, 4096, &app_handle)?;
+    let entries = crate::quiz_explain::parse_explanations(&raw, &allowed_ids);
+    if entries.is_empty() {
+        return Err("解析生成失败：AI 未返回可用内容".to_string());
+    }
+
+    // 缓存写入失败不阻塞本次返回（下次点击会重新生成）
+    if let Some(path) = cache_path {
+        if let Some(dir) = path.parent() {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                log::warn!("创建解析缓存目录失败: {}", e);
+            }
+        }
+        let generated_at = chrono::Local::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+        let doc = crate::quiz_explain::cache_document(&chapter_file, &entries, &generated_at);
+        if let Err(e) = std::fs::write(
+            &path,
+            serde_json::to_string_pretty(&doc).unwrap_or_default(),
+        ) {
+            log::warn!("写入解析缓存失败: {}", e);
+        }
+    }
+
+    Ok(serde_json::json!({
+        "explanations": crate::quiz_explain::explanations_json(&entries),
+        "cached": false
+    }))
+}
+
 /// Evaluate user answers using Agent SDK
 #[tauri::command]
 pub async fn evaluate_quiz(

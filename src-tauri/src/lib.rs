@@ -32,6 +32,7 @@ pub mod pending_open;
 pub mod persona_prompt;
 pub mod plan_prompt;
 pub mod proxy_config;
+pub mod quiz_explain;
 pub mod quiz_quality;
 pub mod roadmap_prompt;
 pub mod sdk_install;
@@ -5396,6 +5397,7 @@ pub fn run() {
             ai_agent::abort_generation,
             ai_agent::is_agent_running,
             ai_agent::generate_chapter_quiz,
+            ai_agent::generate_quiz_explanations,
             ai_agent::evaluate_quiz,
             ai_agent::explain_selection,
             ai_agent::check_agent_sdk,

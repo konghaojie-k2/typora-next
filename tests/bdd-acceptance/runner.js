@@ -548,6 +548,16 @@ async function runAcceptanceTests() {
   totalPassed += eventScopeResult.passed;
   totalFailed += eventScopeResult.failed;
 
+  // Sprint 33: 小测逐题解析（提交后按需生成 + 缓存）
+  console.log(`\n${YELLOW}▶ Sprint 33: Quiz Explanations${RESET}`);
+  const quizExplainSteps = require('./sprint33_quiz_explanation.steps');
+  const quizExplainResult = await runFeatureFile(
+    path.join(__dirname, '../sprint33/features/sprint33_quiz_explanation.feature'),
+    quizExplainSteps
+  );
+  totalPassed += quizExplainResult.passed;
+  totalFailed += quizExplainResult.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);
