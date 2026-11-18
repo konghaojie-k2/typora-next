@@ -1407,6 +1407,16 @@ window.agentBridge = {
         }
       }
 
+      // 内联 SVG 动态化（L1 hover 高亮 + L2 步进演示）：只处理带 data-part 的图。
+      // 不依赖课程上下文，普通预览同样生效（无 data-part 时零副作用）。
+      if (window.SvgDynamic) {
+        try {
+          window.SvgDynamic.init(elements.markdownBody);
+        } catch (e) {
+          console.warn('svg dynamic init failed:', e);
+        }
+      }
+
       // Enhance learning elements (concept/question/quiz cards)
       console.log('[MAIN] checking LearningModeIntegration:', typeof window.LearningModeIntegration, 'course-mode:', AppWorkspace.isIn('course'));
       if (window.LearningModeIntegration) {

@@ -568,6 +568,16 @@ async function runAcceptanceTests() {
   totalPassed += blockCompanionResult.passed;
   totalFailed += blockCompanionResult.failed;
 
+  // Sprint 35: 内联 SVG 动态化（L1 hover + L2 步进）
+  console.log(`\n${YELLOW}▶ Sprint 35: Dynamic SVG${RESET}`);
+  const svgDynamicSteps = require('./sprint35_svg_dynamic.steps');
+  const svgDynamicResult = await runFeatureFile(
+    path.join(__dirname, '../sprint35/features/sprint35_svg_dynamic.feature'),
+    svgDynamicSteps
+  );
+  totalPassed += svgDynamicResult.passed;
+  totalFailed += svgDynamicResult.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);
