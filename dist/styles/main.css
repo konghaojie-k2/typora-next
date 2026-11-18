@@ -2307,6 +2307,8 @@ body.pdf-exporting .code-block-actions,
 body.pdf-exporting .btn-icon,
 body.pdf-exporting .btn-toggle,
 body.pdf-exporting .download-btn,
+body.pdf-exporting .block-companion-btn,
+body.pdf-exporting .block-companion-menu,
 body.pdf-exporting .refresh-prompt,
 body.pdf-exporting .settings-modal,
 body.pdf-exporting .sidebar-minimap,
@@ -3103,6 +3105,93 @@ pre.mermaid:hover .download-btn {
   background: #fff;
   color: #4a7bc0;
   border-color: rgba(74, 123, 192, 0.3);
+}
+
+/* 图表块级 AI 伴学入口：与下载按钮同套 hover 逻辑，纵向错开避免重叠 */
+.block-companion-btn {
+  position: absolute;
+  top: 28px;
+  right: 4px;
+  z-index: 10;
+  padding: 2px 6px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #6c7086;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, background-color 0.15s ease;
+  backdrop-filter: blur(4px);
+}
+
+.downloadable-wrapper:hover .block-companion-btn,
+pre.mermaid:hover .block-companion-btn {
+  opacity: 1;
+}
+
+.block-companion-btn:hover {
+  background: #fff;
+  color: #4a7bc0;
+  border-color: rgba(74, 123, 192, 0.3);
+}
+
+pre.mermaid .block-companion-btn {
+  top: 36px;
+  right: 8px;
+}
+
+[data-theme="dark"] .block-companion-btn {
+  color: #a6adc8;
+  background: rgba(30, 30, 46, 0.9);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .block-companion-btn:hover {
+  background: #313244;
+}
+
+.block-companion-menu {
+  position: fixed;
+  z-index: 10003;
+  display: none;
+  min-width: 152px;
+  padding: 4px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
+}
+
+.block-companion-menu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font-size: 13px;
+  text-align: left;
+  color: #374151;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.block-companion-menu button:hover {
+  background: #f3f4f6;
+}
+
+[data-theme="dark"] .block-companion-menu {
+  background: #1e1e2e;
+  border-color: #313244;
+}
+
+[data-theme="dark"] .block-companion-menu button {
+  color: #cdd6f4;
+}
+
+[data-theme="dark"] .block-companion-menu button:hover {
+  background: #313244;
 }
 
 pre.mermaid .download-btn {

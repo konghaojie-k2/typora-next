@@ -321,6 +321,8 @@
      * @param {object} [opts.record] - 伴学记录（一条 = 一个起点，见 recordKey）：
      *   {start_key, selected_text, chapter_file, explain?, example?, talk?}
      *   传了即续聊：回放整条线程，各部分写回原文件。打开时不发 LLM 调用。
+     * @param {string} [opts.startKey] - 覆盖起点身份（图表块用 block::… 稳定 key）
+     * @param {boolean} [opts.skipCue] - 不写康奈尔 cue / 正文波浪线（块伴学用）
      */
     constructor(opts) {
       this.projectPath = opts.projectPath;
@@ -330,7 +332,10 @@
       this.initialMode = MODES[opts.initialMode] ? opts.initialMode : 'talk';
 
       // 起点身份：划词 = 概念（跨天追加成同一条）；无划词 = 本次面板（全局起点各一条）
-      this.startKey = recordKey(this.chapterFile, this.selectedText);
+      // 图表块用 startKey 覆盖，避免把整段源码当概念 key
+      this.startKey = opts.startKey || recordKey(this.chapterFile, this.selectedText);
+      // 块伴学没有正文可锚定的文字：跳过 cue 留痕，避免画出找不到的波浪线
+      this.skipCue = !!opts.skipCue;
 
       this.record = opts.record || null;
       this._resumed = !!this.record;
@@ -673,6 +678,7 @@
      * 面板是对话现场，cue 卡片是留痕 + 正文波浪线锚点。
      */
     _syncCue(question, answer) {
+      if (this.skipCue) return;
       if (!this.selectedText) return;
       if (window.LearningModeIntegration && window.LearningModeIntegration.syncCompanionCue) {
         window.LearningModeIntegration.syncCompanionCue({

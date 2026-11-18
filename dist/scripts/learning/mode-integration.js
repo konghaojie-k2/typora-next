@@ -2081,6 +2081,60 @@
   }
 
   /**
+   * 图表块伴学：SVG / 表格 / Mermaid 的块级入口。
+   *
+   * 与划词伴学的差异：
+   * - selectedText 只放短标签（「Mermaid 图 #2」），避免 explain 的 197 字概念截断
+   * - 完整源码走 context.blockSource（截断 1500 字），四种模式都能读到
+   * - startKey 用块级稳定身份（block::章节::类型::序号），跨天续聊同一条记录
+   * - skipCue：正文里没有可锚定的文字，不写康奈尔 cue / 不画波浪线
+   *
+   * @param {{blockType: string, blockIndex: number, label: string, source: string,
+   *          sectionTitle?: string, surroundingText?: string, mode?: string}} payload
+   */
+  async function openAICompanionForBlock(payload) {
+    if (!window.AICompanionModal) {
+      console.warn('AICompanionModal not loaded');
+      return;
+    }
+    const info = payload || {};
+
+    let chapterGoal = '';
+    const md = document.getElementById('markdownBody');
+    if (md) {
+      const callout = md.querySelector('blockquote[data-enhanced]');
+      if (callout) chapterGoal = callout.textContent.trim().substring(0, 200);
+    }
+
+    const BC = window.BlockCompanion;
+    const blockSource = BC
+      ? BC.truncateSource(info.source || '', 1500)
+      : String(info.source || '').substring(0, 1500);
+    const startKey = BC
+      ? BC.buildBlockKey(_currentChapterFile, info.blockType, info.blockIndex || 0)
+      : '';
+
+    const modal = new window.AICompanionModal({
+      projectPath: _projectPath,
+      selectedText: info.label || '',
+      context: {
+        chapterTitle: info.sectionTitle || _currentChapterTitle,
+        chapterGoal,
+        surroundingText: info.surroundingText || '',
+        blockType: info.blockType || '',
+        blockIndex: info.blockIndex || 0,
+        blockSource: blockSource
+      },
+      chapterFile: _currentChapterFile,
+      initialMode: info.mode || 'explain',
+      record: null,
+      startKey,
+      skipCue: true
+    });
+    await modal.open();
+  }
+
+  /**
    * 伴学记录：一条记录 = 一个起点（💡/📋/💬/🖼️ 四种模式归并，新→旧）。
    * 点击续聊：带整条记录进伴学面板，四种模式都能接着聊。
    */
@@ -2227,6 +2281,7 @@
     checkAndShowDailyReview,
     clearCues,
     openAICompanion,
+    openAICompanionForBlock,
     openCompanionHistory,
     syncCompanionCue,
     /** 结束会话后刷新正文留痕（不切章也能立刻看到新记录的波浪线） */

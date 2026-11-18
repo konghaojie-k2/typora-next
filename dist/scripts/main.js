@@ -1392,6 +1392,21 @@ window.agentBridge = {
       initLinkHandling();
       initDownloadButtons();
 
+      // 图表块伴学入口（仅课程工作区）：SVG / 表格 / Mermaid 源码
+      // 不在 DOM 里，按类型序号从当前 tab 的 markdown 回抽。
+      if (window.BlockCompanion && AppWorkspace.isIn('course')) {
+        try {
+          const activeTab = state.tabs[state.activeTab];
+          window.BlockCompanion.init(elements.markdownBody, {
+            enabled: true,
+            markdown: content,
+            chapterFile: activeTab ? activeTab.path : ''
+          });
+        } catch (e) {
+          console.warn('block companion init failed:', e);
+        }
+      }
+
       // Enhance learning elements (concept/question/quiz cards)
       console.log('[MAIN] checking LearningModeIntegration:', typeof window.LearningModeIntegration, 'course-mode:', AppWorkspace.isIn('course'));
       if (window.LearningModeIntegration) {

@@ -558,6 +558,16 @@ async function runAcceptanceTests() {
   totalPassed += quizExplainResult.passed;
   totalFailed += quizExplainResult.failed;
 
+  // Sprint 34: 图表块级 AI 伴学（SVG / 表格 / Mermaid）
+  console.log(`\n${YELLOW}▶ Sprint 34: Block Companion${RESET}`);
+  const blockCompanionSteps = require('./sprint34_block_companion.steps');
+  const blockCompanionResult = await runFeatureFile(
+    path.join(__dirname, '../sprint34/features/sprint34_block_companion.feature'),
+    blockCompanionSteps
+  );
+  totalPassed += blockCompanionResult.passed;
+  totalFailed += blockCompanionResult.failed;
+
   // Summary
   console.log(`\n${CYAN}════════════════════════════════════════════════════════════${RESET}`);
   console.log(`${GREEN}${totalPassed} passed${RESET}, ${RED}${totalFailed} failed${RESET}, ${totalPassed + totalFailed} total`);
